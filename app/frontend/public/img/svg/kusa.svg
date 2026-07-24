@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- flat base so tiled cells join without banding -->
+  <rect width="32" height="32" fill="#8cc862"/>
+  <!-- grass tufts (kept away from edges so tiles join seamlessly) -->
+  <g fill="none" stroke-linecap="round" stroke-width="1.1">
+    <g stroke="#5fa343">
+      <path d="M5.6 9.5C4.9 8.6 4.6 7.6 4.8 6.4"/>
+      <path d="M7 9.5C7 8.3 7.3 7.3 8 6.3"/>
+      <path d="M8.4 9.5C9 8.7 9.3 7.8 9.3 6.8"/>
+    </g>
+    <g stroke="#69b04c">
+      <path d="M20.6 7.5C19.9 6.6 19.6 5.6 19.8 4.4"/>
+      <path d="M22 7.5C22 6.3 22.3 5.3 23 4.3"/>
+      <path d="M23.4 7.5C24 6.7 24.3 5.8 24.3 4.8"/>
+    </g>
+    <g stroke="#69b04c">
+      <path d="M11.6 20.5C10.9 19.6 10.6 18.6 10.8 17.4"/>
+      <path d="M13 20.5C13 19.3 13.3 18.3 14 17.3"/>
+      <path d="M14.4 20.5C15 19.7 15.3 18.8 15.3 17.8"/>
+    </g>
+    <g stroke="#5fa343">
+      <path d="M25.6 22.5C24.9 21.6 24.6 20.6 24.8 19.4"/>
+      <path d="M27 22.5C27 21.3 27.3 20.3 28 19.3"/>
+    </g>
+    <g stroke="#5fa343">
+      <path d="M6.6 27.5C5.9 26.6 5.6 25.6 5.8 24.4"/>
+      <path d="M8 27.5C8 26.3 8.3 25.3 9 24.3"/>
+      <path d="M9.4 27.5C10 26.7 10.3 25.8 10.3 24.8"/>
+    </g>
+    <g stroke="#69b04c">
+      <path d="M18.6 28.5C17.9 27.6 17.6 26.6 17.8 25.4"/>
+      <path d="M20 28.5C20 27.3 20.3 26.3 21 25.3"/>
+    </g>
+  </g>
+  <!-- light specks -->
+  <g fill="#d3edaa" opacity="0.85">
+    <circle cx="15" cy="11.5" r="0.7"/>
+    <circle cx="27.5" cy="13" r="0.6"/>
+    <circle cx="4.5" cy="16.5" r="0.6"/>
+    <circle cx="22.5" cy="27" r="0.7"/>
+    <circle cx="12" cy="4.5" r="0.6"/>
+  </g>
+</svg>

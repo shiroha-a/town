@@ -17,9 +17,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/shiroha-a/town/internal/building"
 	"github.com/shiroha-a/town/internal/casino"
 	"github.com/shiroha-a/town/internal/cleague"
 	"github.com/shiroha-a/town/internal/condition"
+	"github.com/shiroha-a/town/internal/content"
 	"github.com/shiroha-a/town/internal/effects"
 	"github.com/shiroha-a/town/internal/event"
 	"github.com/shiroha-a/town/internal/gametime"
@@ -27,6 +29,7 @@ import (
 	"github.com/shiroha-a/town/internal/jobrule"
 	"github.com/shiroha-a/town/internal/keiba"
 	"github.com/shiroha-a/town/internal/ledger"
+	"github.com/shiroha-a/town/internal/news"
 	"github.com/shiroha-a/town/internal/player"
 	"github.com/shiroha-a/town/internal/rng"
 	"github.com/shiroha-a/town/internal/settings"
@@ -90,7 +93,6 @@ var ErrItemNotFound = errors.New("item not found")
 // zaikoAdjust divides the master stock to derive the shop-front daily stock
 // (旧 zaiko_tyousetuti=2). remaining = max(1, ceil(stock_master / zaikoAdjust)).
 const zaikoAdjust = 2
-
 
 // Service applies actions.
 type Service struct {
@@ -201,12 +203,12 @@ func (s *Service) runAction(ctx context.Context, playerID int64, actionType, ide
 
 // WorkResult summarizes a single work action for the result screen (design 17.5).
 type WorkResult struct {
-	ExpGained  int      // 今回の経験値増減
-	NewLevel   int      // 到達レベル
-	LeveledUp  bool     // レベルが上がったか(昇給発生)
-	ThisSalary int64    // 昇給後の給料(1回あたり)
-	Pay        int64    // 今回支給された給料(支払間隔到達時のみ>0)
-	PayEvery   int      // 支払間隔(N回出勤ごと)
+	ExpGained   int      // 今回の経験値増減
+	NewLevel    int      // 到達レベル
+	LeveledUp   bool     // レベルが上がったか(昇給発生)
+	ThisSalary  int64    // 昇給後の給料(1回あたり)
+	Pay         int64    // 今回支給された給料(支払間隔到達時のみ>0)
+	PayEvery    int      // 支払間隔(N回出勤ごと)
 	Bonus       int64    // レベルアップ時ボーナス
 	WorkBonus   int64    // 消費に見合う労働ボーナス(今回の給料に含まれる)
 	WeightLossG int      // 今回の労働で減った体重(グラム)
@@ -417,7 +419,13 @@ func (s *Service) DoChangeJob(ctx context.Context, playerID int64, jobName, idem
 			 VALUES ($1, 'job', $2, $3, 'job_change')`, playerID, oldJob, jobName); err != nil {
 			return fmt.Errorf("insert history: %w", err)
 		}
-		return nil
+		// 街のニュース(レガシー basic.cgi の news_kiroku("就職", ...))。
+		name, err := news.ActorName(ctx, tx, playerID)
+		if err != nil {
+			return err
+		}
+		return news.RecordFor(ctx, tx, news.KindJob, playerID, name,
+			fmt.Sprintf("%sさんが、%s から %s になりました。", name, oldJob, jobName), nil, true)
 	})
 }
 
@@ -1689,18 +1697,28 @@ const bankStatementLimit = 30
 // BankStatement returns the player's recent savings-account movements, newest
 // first, each labelled from the ledger reason (預け入れ/引き出し/利息/おさい銭…).
 func (s *Service) BankStatement(ctx context.Context, playerID int64) ([]StatementEntry, error) {
+	return s.bankStatementFor(ctx, ledger.SavingsAccount(playerID))
+}
+
+// BankStatementSuper returns the recent passbook lines of the スーパー定期口座.
+func (s *Service) BankStatementSuper(ctx context.Context, playerID int64) ([]StatementEntry, error) {
+	return s.bankStatementFor(ctx, ledger.SuperSavingsAccount(playerID))
+}
+
+// bankStatementFor lists one account's passbook (口座ごとに別の明細)。
+func (s *Service) bankStatementFor(ctx context.Context, account string) ([]StatementEntry, error) {
 	// running=そのentry時点の口座残高(累積和)。全履歴で累積してから最新N件を返す。
 	rows, err := s.pool.Query(ctx,
 		`SELECT created_at, reason, delta, running
 		 FROM (
 		   SELECT e.id, t.created_at, t.reason, e.delta,
-		          SUM(e.delta) OVER (PARTITION BY e.account ORDER BY e.id) AS running
+		          SUM(e.delta) OVER (ORDER BY e.id) AS running
 		   FROM ledger_entry e
 		   JOIN ledger_tx t ON t.id = e.tx_id
-		   WHERE e.account IN ($1, $2)
+		   WHERE e.account = $1
 		 ) x
 		 ORDER BY id DESC
-		 LIMIT $3`, ledger.SavingsAccount(playerID), ledger.SuperSavingsAccount(playerID), bankStatementLimit)
+		 LIMIT $2`, account, bankStatementLimit)
 	if err != nil {
 		return nil, fmt.Errorf("query statement: %w", err)
 	}
@@ -1735,8 +1753,15 @@ func statementLabel(reason string, amount int64) string {
 		return "おさい銭"
 	case reason == "shiire":
 		return "仕入れ"
-	case reason == "house_shop_buy":
+	// 家の店・闇市の代金は売り手の普通口座に入る(買い手側は現金なので通帳には出ない)。
+	case reason == "house_shop_buy" || reason == "shop_buy":
 		return "売上"
+	case reason == "yami_buy":
+		return "売上(闇市)"
+	case reason == "build_house":
+		return "家の建築"
+	case reason == "rebuild_house":
+		return "家の建て替え"
 	case reason == "transfer":
 		if amount < 0 {
 			return "振込(送金)"
@@ -2651,9 +2676,21 @@ func (s *Service) DoEventRoll(ctx context.Context, playerID int64, idempotencyKe
 			}
 		}
 
-		occurred, o := event.Roll(s.rng, state.Money, state.Params["speed"].Value)
+		// 管理画面で追加されたカスタムイベントを組み込みプールに合流させる
+		// (条件付きイベントは条件を満たすプレイヤーにだけ候補になる)。
+		customs, err := s.loadCustomEvents(ctx, tx, playerID, state)
+		if err != nil {
+			return err
+		}
+		occurred, o := event.RollAll(s.rng, state.Money, state.Params["speed"].Value, customs)
 		if !occurred {
 			return nil
+		}
+		// メッセージのプレースホルダー({money}/{name}/{job}/{town})を実値に展開する。
+		if msg, err := s.renderEventMessage(ctx, tx, playerID, o); err != nil {
+			return err
+		} else {
+			o.Message = msg
 		}
 		if err := s.applyEventOutcome(ctx, tx, playerID, state, o); err != nil {
 			return err
@@ -2662,6 +2699,180 @@ func (s *Service) DoEventRoll(ctx context.Context, playerID int64, idempotencyKe
 		return nil
 	})
 	return p, result, err
+}
+
+// loadCustomEvents reads the enabled admin-defined events for the roll pool and
+// filters them by their eligibility conditions (所持金/パラメータ/所持アイテム/職業)。
+func (s *Service) loadCustomEvents(ctx context.Context, tx pgx.Tx, playerID int64, state effects.State) ([]event.Custom, error) {
+	rows, err := tx.Query(ctx,
+		`SELECT name, message, good, money_min, money_max, params, disease_set, weight_g, weight, conditions
+		 FROM content_events WHERE enabled`)
+	if err != nil {
+		return nil, fmt.Errorf("load custom events: %w", err)
+	}
+	defer rows.Close()
+	type candidate struct {
+		c     event.Custom
+		conds []content.EventCond
+	}
+	var cands []candidate
+	needItems := map[int64]bool{}
+	needJob := false
+	for rows.Next() {
+		var cd candidate
+		if err := rows.Scan(&cd.c.Name, &cd.c.Message, &cd.c.Good, &cd.c.MoneyMin, &cd.c.MoneyMax,
+			&cd.c.Params, &cd.c.DiseaseSet, &cd.c.WeightG, &cd.c.Weight, &cd.conds); err != nil {
+			return nil, fmt.Errorf("scan custom event: %w", err)
+		}
+		for _, cond := range cd.conds {
+			if cond.Pred == "has_item" {
+				needItems[cond.ItemID] = true
+			}
+			if cond.Pred == "job_is" {
+				needJob = true
+			}
+		}
+		cands = append(cands, cd)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	// 条件評価に必要な補助データ(所持アイテム/職業)をまとめて読む。
+	owned := map[int64]bool{}
+	if len(needItems) > 0 {
+		ids := make([]int64, 0, len(needItems))
+		for id := range needItems {
+			ids = append(ids, id)
+		}
+		irows, err := tx.Query(ctx,
+			`SELECT item_id FROM player_items WHERE player_id = $1 AND item_id = ANY($2) AND remaining_uses > 0`,
+			playerID, ids)
+		if err != nil {
+			return nil, fmt.Errorf("load owned items: %w", err)
+		}
+		for irows.Next() {
+			var id int64
+			if err := irows.Scan(&id); err != nil {
+				irows.Close()
+				return nil, err
+			}
+			owned[id] = true
+		}
+		irows.Close()
+		if err := irows.Err(); err != nil {
+			return nil, err
+		}
+	}
+	job := ""
+	if needJob {
+		if err := tx.QueryRow(ctx,
+			`SELECT COALESCE(job, '') FROM player_status WHERE player_id = $1`, playerID).Scan(&job); err != nil {
+			return nil, fmt.Errorf("load job: %w", err)
+		}
+	}
+	var out []event.Custom
+	for _, cd := range cands {
+		if eventCondsPass(cd.conds, state, owned, job) {
+			out = append(out, cd.c)
+		}
+	}
+	return out, nil
+}
+
+// renderEventMessage expands message placeholders with live values:
+// {money}=増減額の絶対値(カンマ区切り) {name}=プレイヤー名 {job}=職業 {town}=今いる街名。
+func (s *Service) renderEventMessage(ctx context.Context, tx pgx.Tx, playerID int64, o event.Outcome) (string, error) {
+	msg := o.Message
+	if !strings.Contains(msg, "{") {
+		return msg, nil
+	}
+	if strings.Contains(msg, "{money}") {
+		amount := o.MoneyDelta
+		if amount < 0 {
+			amount = -amount
+		}
+		msg = strings.ReplaceAll(msg, "{money}", yenComma(amount))
+	}
+	if strings.Contains(msg, "{name}") || strings.Contains(msg, "{job}") || strings.Contains(msg, "{town}") {
+		var (
+			name string
+			job  string
+			town int
+		)
+		if err := tx.QueryRow(ctx,
+			`SELECT p.display_name, COALESCE(ps.job, ''), p.current_town
+			 FROM players p LEFT JOIN player_status ps ON ps.player_id = p.id
+			 WHERE p.id = $1`, playerID).Scan(&name, &job, &town); err != nil {
+			return "", fmt.Errorf("load player for message: %w", err)
+		}
+		msg = strings.ReplaceAll(msg, "{name}", name)
+		msg = strings.ReplaceAll(msg, "{job}", job)
+		townName := ""
+		for _, t := range building.Towns() {
+			if t.No == town {
+				townName = t.Name
+				break
+			}
+		}
+		msg = strings.ReplaceAll(msg, "{town}", townName)
+	}
+	return msg, nil
+}
+
+// yenComma formats an amount with ja-JP style thousands separators.
+func yenComma(n int64) string {
+	s := strconv.FormatInt(n, 10)
+	neg := strings.HasPrefix(s, "-")
+	if neg {
+		s = s[1:]
+	}
+	var b strings.Builder
+	for i, r := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			b.WriteByte(',')
+		}
+		b.WriteRune(r)
+	}
+	if neg {
+		return "-" + b.String()
+	}
+	return b.String()
+}
+
+// eventCondsPass reports whether every condition holds for the player.
+func eventCondsPass(conds []content.EventCond, state effects.State, owned map[int64]bool, job string) bool {
+	for _, c := range conds {
+		switch c.Pred {
+		case "money_gte":
+			if state.Money < c.Value {
+				return false
+			}
+		case "money_lte":
+			if state.Money > c.Value {
+				return false
+			}
+		case "param_gte":
+			if int64(state.Params[c.Param].Value) < c.Value {
+				return false
+			}
+		case "param_lte":
+			if int64(state.Params[c.Param].Value) > c.Value {
+				return false
+			}
+		case "has_item":
+			if !owned[c.ItemID] {
+				return false
+			}
+		case "job_is":
+			if job != c.Job {
+				return false
+			}
+		default:
+			return false // 未知の条件は安全側に倒して発生させない
+		}
+	}
+	return true
 }
 
 // applyEventOutcome persists one event's effects: money via the ledger, params
@@ -2717,10 +2928,12 @@ func (s *Service) applyEventOutcome(ctx context.Context, tx pgx.Tx, playerID int
 			return err
 		}
 	}
-	if o.DiseaseDelta != 0 {
+	if o.DiseaseSet != nil {
+		// レガシーは加算ではなく代入($byouki_sisuu = N)。健康の貯金があっても
+		// 即その病状になる(悪い病気が軽くなる方向もレガシーどおり許す)。
 		if _, err := tx.Exec(ctx,
-			`UPDATE player_status SET disease_index = GREATEST(-200, disease_index + $2) WHERE player_id = $1`,
-			playerID, o.DiseaseDelta); err != nil {
+			`UPDATE player_status SET disease_index = $2 WHERE player_id = $1`,
+			playerID, *o.DiseaseSet); err != nil {
 			return fmt.Errorf("event disease: %w", err)
 		}
 	}
@@ -2731,144 +2944,18 @@ func (s *Service) applyEventOutcome(ctx context.Context, tx pgx.Tx, playerID int
 			return fmt.Errorf("event weight: %w", err)
 		}
 	}
-	return nil
-}
 
-const (
-	shopSetupFee             = 500000 // 商店の開設費(簡略化した建築費)
-	offerDailyPairLimit      = 20000  // 同一相手へのさい銭 上限/日
-	offerDailyRecipientLimit = 100000 // 相手が受け取れるさい銭 合計上限/日
-)
-
-// DoOpenShop opens a shop for the player, charging the setup fee. Legacy: 建設会社
-// を簡略化(建物・内装・地価は省略し固定の開設費)。
-func (s *Service) DoOpenShop(ctx context.Context, playerID int64, name, idempotencyKey string) (*player.Player, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		name = "商店"
+	// 役場のイベント履歴に残す。イベントは頻度が高いので既定では本人の履歴だけに
+	// 入れ、高額(TownWideMoneyThreshold以上)のものだけ街のニュースへ昇格させる
+	// (レガシーは「地震」「運用」という大金の動くイベントだけを news_kiroku していた)。
+	name, err := news.ActorName(ctx, tx, playerID)
+	if err != nil {
+		return err
 	}
-	return s.runAction(ctx, playerID, "shop_open", idempotencyKey, func(ctx context.Context, tx pgx.Tx, state effects.State) error {
-		var exists bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM shops WHERE owner_id = $1)`, playerID).Scan(&exists); err != nil {
-			return err
-		}
-		if exists {
-			return &ConditionError{Message: "すでに商店を開いています。"}
-		}
-		if state.Money < shopSetupFee {
-			return &ConditionError{Message: fmt.Sprintf("開設費(%d円)が足りません。", shopSetupFee)}
-		}
-		if err := s.ledger.PostTx(ctx, tx, "shop_open", "", []ledger.Entry{
-			{Account: ledger.PlayerAccount(playerID), Delta: -shopSetupFee},
-			{Account: ledger.SystemAccount("shop_setup"), Delta: shopSetupFee},
-		}); err != nil {
-			return fmt.Errorf("fee: %w", err)
-		}
-		if _, err := tx.Exec(ctx, `INSERT INTO shops (owner_id, name) VALUES ($1, $2)`, playerID, name); err != nil {
-			return fmt.Errorf("open shop: %w", err)
-		}
-		return nil
-	})
-}
-
-// DoBuyFromShop buys qty of a listed item from another player's shop. Payment
-// goes to the owner's savings and the item transfers to the buyer. Legacy:
-// buy_syouhin(個人店)— 売上が家主に入る中核。
-func (s *Service) DoBuyFromShop(ctx context.Context, buyerID, ownerID, itemID int64, qty int, idempotencyKey string) (*player.Player, error) {
-	if qty <= 0 {
-		qty = 1
-	}
-	if buyerID == ownerID {
-		return nil, &ConditionError{Message: "自分の店では買えません。"}
-	}
-	return s.runAction(ctx, buyerID, "shop_buy", idempotencyKey, func(ctx context.Context, tx pgx.Tx, state effects.State) error {
-		var price int64
-		var stock int
-		err := tx.QueryRow(ctx, `SELECT price, stock FROM shop_listings WHERE owner_id = $1 AND item_id = $2`, ownerID, itemID).Scan(&price, &stock)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return &ConditionError{Message: "その商品はありません。"}
-		}
-		if err != nil {
-			return fmt.Errorf("listing: %w", err)
-		}
-		if stock < qty {
-			return &ConditionError{Message: "在庫が足りません。"}
-		}
-		var durability, maxSets int
-		if err := tx.QueryRow(ctx, `SELECT GREATEST(1, durability), max_sets FROM content_items WHERE id = $1`, itemID).Scan(&durability, &maxSets); err != nil {
-			return fmt.Errorf("item: %w", err)
-		}
-		cost := price * int64(qty)
-		if state.Money < cost {
-			return &ConditionError{Message: "お金が足りません。"}
-		}
-		add := durability * qty
-		var current int
-		if err := tx.QueryRow(ctx, `SELECT COALESCE(remaining_uses, 0) FROM player_items WHERE player_id = $1 AND item_id = $2`, buyerID, itemID).Scan(&current); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-		if maxSets > 0 && current+add > maxSets*durability {
-			return &ConditionError{Message: fmt.Sprintf("これ以上は持てません(最大%dセット)。", maxSets)}
-		}
-		// 代金は店主の貯金(普通口座)へ。
-		if err := s.ledger.PostTx(ctx, tx, "shop_buy", "", []ledger.Entry{
-			{Account: ledger.PlayerAccount(buyerID), Delta: -cost},
-			{Account: ledger.SavingsAccount(ownerID), Delta: cost},
-		}); err != nil {
-			return fmt.Errorf("pay: %w", err)
-		}
-		if _, err := tx.Exec(ctx, `UPDATE shop_listings SET stock = stock - $3 WHERE owner_id = $1 AND item_id = $2`, ownerID, itemID, qty); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx,
-			`INSERT INTO player_items (player_id, item_id, quantity, remaining_uses) VALUES ($1, $2, $3, $4)
-			 ON CONFLICT (player_id, item_id) DO UPDATE SET quantity = player_items.quantity + $3,
-			   remaining_uses = player_items.remaining_uses + $4, updated_at = now()`,
-			buyerID, itemID, qty, add); err != nil {
-			return err
-		}
-		return nil
-	})
-}
-
-// DoOffer gives an offering (さい銭) to another player's savings, enforcing the
-// daily per-pair and per-recipient limits. Legacy: saisensuru.
-func (s *Service) DoOffer(ctx context.Context, fromID, toID, amount int64, idempotencyKey string) (*player.Player, error) {
-	if amount <= 0 {
-		return nil, &ConditionError{Message: "金額が不正です。"}
-	}
-	if fromID == toID {
-		return nil, &ConditionError{Message: "自分にさい銭はできません。"}
-	}
-	return s.runAction(ctx, fromID, "offer", idempotencyKey, func(ctx context.Context, tx pgx.Tx, state effects.State) error {
-		if state.Money < amount {
-			return &ConditionError{Message: "お金が足りません。"}
-		}
-		dayStart := gametime.Date(time.Now(), s.loc, s.dayBoundaryHour).Add(time.Duration(s.dayBoundaryHour) * time.Hour)
-		var pairSum, recipSum int64
-		if err := tx.QueryRow(ctx, `SELECT COALESCE(SUM(amount), 0) FROM offering_log WHERE from_id = $1 AND to_id = $2 AND created_at >= $3`, fromID, toID, dayStart).Scan(&pairSum); err != nil {
-			return err
-		}
-		if err := tx.QueryRow(ctx, `SELECT COALESCE(SUM(amount), 0) FROM offering_log WHERE to_id = $1 AND created_at >= $2`, toID, dayStart).Scan(&recipSum); err != nil {
-			return err
-		}
-		if pairSum+amount > offerDailyPairLimit {
-			return &ConditionError{Message: fmt.Sprintf("同じ相手へは1日%d円までです。", offerDailyPairLimit)}
-		}
-		if recipSum+amount > offerDailyRecipientLimit {
-			return &ConditionError{Message: fmt.Sprintf("その相手が受け取れるのは1日%d円までです。", offerDailyRecipientLimit)}
-		}
-		if err := s.ledger.PostTx(ctx, tx, "offer", "", []ledger.Entry{
-			{Account: ledger.PlayerAccount(fromID), Delta: -amount},
-			{Account: ledger.SavingsAccount(toID), Delta: amount},
-		}); err != nil {
-			return fmt.Errorf("offer: %w", err)
-		}
-		if _, err := tx.Exec(ctx, `INSERT INTO offering_log (from_id, to_id, amount) VALUES ($1, $2, $3)`, fromID, toID, amount); err != nil {
-			return err
-		}
-		return nil
-	})
+	good := o.Good
+	townWide := o.MoneyDelta >= news.TownWideMoneyThreshold || o.MoneyDelta <= -news.TownWideMoneyThreshold
+	return news.RecordFor(ctx, tx, news.KindEvent, playerID, name,
+		fmt.Sprintf("%sさん：%s", name, o.Message), &good, townWide)
 }
 
 // cleagueMatchInterval rate-limits battles per player (legacy 疲労クールタイム).
@@ -3096,9 +3183,14 @@ func (s *Service) loadItemUse(ctx context.Context, itemID int64) (effects.Effect
 		fillsSatiety bool
 		durUnit      string
 	)
+	// enabledは購入カタログの掲載可否であり、所持済みアイテムの使用は妨げない
+	// (マスタを無効化しても手持ちが使えなくならないように)。
+	// 食べ物カテゴリはフラグの設定漏れがあっても満腹化する(カテゴリ由来で自動判定)。
 	err := s.pool.QueryRow(ctx,
-		`SELECT effect, use_interval_min, fills_satiety, durability_unit
-		 FROM content_items WHERE id = $1 AND enabled`,
+		`SELECT effect, use_interval_min,
+		        (fills_satiety OR category IN ('食料品', 'ファーストフード')),
+		        durability_unit
+		 FROM content_items WHERE id = $1`,
 		itemID).Scan(&effJSON, &intervalMin, &fillsSatiety, &durUnit)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return effects.Effect{}, 0, false, "", ErrItemNotFound

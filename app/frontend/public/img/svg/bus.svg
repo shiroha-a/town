@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect x="4" y="4" width="24" height="24" rx="6" fill="#ffffff" stroke="#2f9e2f" stroke-width="2.4"/>
+  <rect x="15.1" y="15" width="1.8" height="9.5" fill="#2f9e2f"/>
+  <rect x="11.5" y="24" width="9" height="1.8" rx="0.9" fill="#2f9e2f"/>
+  <circle cx="16" cy="11.5" r="4.6" fill="#ffffff" stroke="#2f9e2f" stroke-width="1.8"/>
+  <!-- バスのピクトグラム(標識の中) -->
+  <g fill="#2f9e2f">
+    <rect x="12.9" y="9.3" width="6.2" height="3.8" rx="0.9"/>
+    <circle cx="14.4" cy="13.6" r="0.75"/>
+    <circle cx="17.6" cy="13.6" r="0.75"/>
+  </g>
+  <rect x="13.6" y="10" width="4.8" height="1.4" rx="0.4" fill="#ffffff"/>
+</svg>

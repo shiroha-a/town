@@ -14,6 +14,7 @@ import (
 	"github.com/shiroha-a/town/internal/condition"
 	"github.com/shiroha-a/town/internal/effects"
 	"github.com/shiroha-a/town/internal/ledger"
+	"github.com/shiroha-a/town/internal/news"
 	"github.com/shiroha-a/town/internal/rng"
 	"github.com/shiroha-a/town/internal/settings"
 )
@@ -30,7 +31,8 @@ type Player struct {
 	SuperSavings int64
 	LoanDaily    int64 // 住宅ローンの日額返済(なければ0)
 	LoanCount    int   // 住宅ローンの残り返済回数(なければ0)
-	CurrentTown   int   // 現在いる街(0=公園..4=謎の街)。街移動で変化
+	CurrentTown   int       // 現在いる街(0=公園..4=謎の街)。街移動で変化
+	CreatedAt     time.Time // 入居日(役場の名鑑/プロフィールで在住日数を出す)
 	Status        Status
 	Params        Params
 	Items         []ItemStack
@@ -65,6 +67,7 @@ type Params struct {
 type ItemStack struct {
 	ItemID          int64
 	Name            string
+	Category        string // 一覧のカテゴリ見出し(未分類は空)
 	Quantity        int
 	RemainingUses   int            // 残量('use'=残り総使用回数, 'day'=残日数)
 	Sets            int            // 表示セット数 = ceil(remaining_uses/durability)
@@ -72,6 +75,7 @@ type ItemStack struct {
 	Money           int64          // 使用時のお金増減
 	Params          map[string]int // 使用時の上昇パラメータ
 	IntervalMin     int            // 使用間隔(分)
+	CalorieG        int            // 摂取カロリー(食べると体重+calorie_g g)
 	NextAvailableAt *time.Time     // クールタイム中の再使用可能時刻(未使用/経過済みはnil)
 }
 
@@ -168,7 +172,9 @@ func (s *Service) Register(ctx context.Context, instanceHost, remoteUserID, disp
 			`INSERT INTO player_roles (player_id, role) VALUES ($1, $2)`, id, role); err != nil {
 			return fmt.Errorf("insert player_roles: %w", err)
 		}
-		return nil
+		// 街のニュース(レガシー game.cgi の news_kiroku("入居", ...))。
+		return news.RecordFor(ctx, tx, news.KindMoveIn, id, displayName,
+			fmt.Sprintf("%sさんが新しい住民になりました。", displayName), nil, true)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("register: %w", err)
@@ -221,13 +227,14 @@ type PublicSummary struct {
 	DisplayName string
 	Job         string
 	JobLevel    int
+	CreatedAt   time.Time // 入居日(役場の「新着順」並び替えに使う)
 }
 
 // ListPublic returns all active players with public summary fields, for the
 // profile/roster screen. Private fields (money, identity) are never included.
 func (s *Service) ListPublic(ctx context.Context) ([]PublicSummary, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT p.id, p.display_name, ps.job, ps.job_level
+		`SELECT p.id, p.display_name, ps.job, ps.job_level, p.created_at
 		 FROM players p JOIN player_status ps ON ps.player_id = p.id
 		 WHERE p.deleted_at IS NULL ORDER BY p.id`)
 	if err != nil {
@@ -237,7 +244,7 @@ func (s *Service) ListPublic(ctx context.Context) ([]PublicSummary, error) {
 	out := []PublicSummary{}
 	for rows.Next() {
 		var ps PublicSummary
-		if err := rows.Scan(&ps.ID, &ps.DisplayName, &ps.Job, &ps.JobLevel); err != nil {
+		if err := rows.Scan(&ps.ID, &ps.DisplayName, &ps.Job, &ps.JobLevel, &ps.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan player summary: %w", err)
 		}
 		out = append(out, ps)
@@ -400,9 +407,9 @@ func (s *Service) HasRole(ctx context.Context, id int64, role string) (bool, err
 func (s *Service) Get(ctx context.Context, id int64) (*Player, error) {
 	p := &Player{ID: id}
 	err := s.pool.QueryRow(ctx,
-		`SELECT instance_host, remote_user_id, display_name, current_town
+		`SELECT instance_host, remote_user_id, display_name, current_town, created_at
 		 FROM players WHERE id = $1 AND deleted_at IS NULL`, id).
-		Scan(&p.InstanceHost, &p.RemoteUserID, &p.DisplayName, &p.CurrentTown)
+		Scan(&p.InstanceHost, &p.RemoteUserID, &p.DisplayName, &p.CurrentTown, &p.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -519,9 +526,9 @@ func (s *Service) Get(ctx context.Context, id int64) (*Player, error) {
 	}
 
 	items, err := s.pool.Query(ctx,
-		`SELECT ci.id, ci.name, pi.quantity, pi.remaining_uses,
+		`SELECT ci.id, ci.name, COALESCE(ci.category, ''), pi.quantity, pi.remaining_uses,
 		        CEIL(pi.remaining_uses::numeric / ci.durability)::int AS sets,
-		        ci.durability_unit, ci.effect, ci.use_interval_min,
+		        ci.durability_unit, ci.effect, ci.use_interval_min, ci.calorie_g,
 		        CASE WHEN pi.last_used_at IS NOT NULL
 		                  AND pi.last_used_at + make_interval(mins => ci.use_interval_min) > now()
 		             THEN pi.last_used_at + make_interval(mins => ci.use_interval_min)
@@ -539,7 +546,7 @@ func (s *Service) Get(ctx context.Context, id int64) (*Player, error) {
 			it      ItemStack
 			effJSON []byte
 		)
-		if err := items.Scan(&it.ItemID, &it.Name, &it.Quantity, &it.RemainingUses, &it.Sets, &it.DurabilityUnit, &effJSON, &it.IntervalMin, &it.NextAvailableAt); err != nil {
+		if err := items.Scan(&it.ItemID, &it.Name, &it.Category, &it.Quantity, &it.RemainingUses, &it.Sets, &it.DurabilityUnit, &effJSON, &it.IntervalMin, &it.CalorieG, &it.NextAvailableAt); err != nil {
 			return nil, fmt.Errorf("scan item: %w", err)
 		}
 		if debugNoCd {
@@ -562,4 +569,41 @@ func (s *Service) Get(ctx context.Context, id int64) (*Player, error) {
 	// 所持アイテムの種類上限(表示用)。バックエンドの購入チェックと同じ設定値。
 	p.ItemKindLimit = cfg.ItemKindLimit
 	return p, nil
+}
+
+// Participant is one currently-active player for the town-top participant list.
+type Participant struct {
+	ID          int64  `json:"id"`
+	DisplayName string `json:"display_name"`
+}
+
+// TouchLastSeen records player activity for the participant list. Throttled to
+// one write per 30 seconds; errors are ignored (表示用の心拍であり本処理を
+// 妨げない)。
+func (s *Service) TouchLastSeen(ctx context.Context, id int64) {
+	_, _ = s.pool.Exec(ctx,
+		`UPDATE players SET last_seen_at = now()
+		 WHERE id = $1 AND (last_seen_at IS NULL OR last_seen_at < now() - interval '30 seconds')`, id)
+}
+
+// Participants lists players active within the last 20 minutes
+// (レガシー$logout_time=1200秒の参加者リスト相当)。
+func (s *Service) Participants(ctx context.Context) ([]Participant, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, display_name FROM players
+		 WHERE deleted_at IS NULL AND last_seen_at > now() - interval '20 minutes'
+		 ORDER BY last_seen_at ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("list participants: %w", err)
+	}
+	defer rows.Close()
+	out := []Participant{}
+	for rows.Next() {
+		var p Participant
+		if err := rows.Scan(&p.ID, &p.DisplayName); err != nil {
+			return nil, fmt.Errorf("scan participant: %w", err)
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
 }

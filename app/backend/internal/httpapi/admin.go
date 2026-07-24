@@ -148,6 +148,103 @@ func (s *Server) adminUpdateTownAssets(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.townmap.GetAssets())
 }
 
+// adminFacilityPresets returns the saved facility presets (施設プリセット).
+func (s *Server) adminFacilityPresets(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	writeJSON(w, http.StatusOK, s.townmap.GetPresets())
+}
+
+// adminUpdateFacilityPresets replaces the facility preset list.
+func (s *Server) adminUpdateFacilityPresets(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	var ps []townmap.FacilityPreset
+	if err := json.NewDecoder(r.Body).Decode(&ps); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if err := s.townmap.SetPresets(r.Context(), ps); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, s.townmap.GetPresets())
+}
+
+// adminListEvents returns every custom random event (disabled included).
+func (s *Server) adminListEvents(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	list, err := s.content.ListAdminEvents(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+// adminCreateEvent adds a custom random event.
+func (s *Server) adminCreateEvent(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	var e content.AdminEvent
+	if err := json.NewDecoder(r.Body).Decode(&e); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	out, err := s.content.CreateAdminEvent(r.Context(), e)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// adminUpdateEvent replaces a custom random event.
+func (s *Server) adminUpdateEvent(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	eid, err := strconv.ParseInt(r.PathValue("eid"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	var e content.AdminEvent
+	if err := json.NewDecoder(r.Body).Decode(&e); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	e.ID = eid
+	out, err := s.content.UpdateAdminEvent(r.Context(), e)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// adminDeleteEvent removes a custom random event.
+func (s *Server) adminDeleteEvent(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	eid, err := strconv.ParseInt(r.PathValue("eid"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	if err := s.content.DeleteAdminEvent(r.Context(), eid); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
+}
+
 func (s *Server) adminGetSettings(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdmin(w, r) {
 		return

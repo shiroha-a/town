@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- road: horizontal straight. Shoulders are transparent so a ground tile
+       (kusa/tuti) can layer underneath. Dashes repeat every 8px for tiling. -->
+  <rect x="0" y="9" width="32" height="14" fill="#b6b6ae"/>
+  <g stroke="#90908a" stroke-width="0.8">
+    <path d="M0 9.8h32"/>
+    <path d="M0 22.2h32"/>
+  </g>
+  <g fill="#ffffff" opacity="0.9">
+    <rect x="0.5" y="15.4" width="3" height="1.2" rx="0.6"/>
+    <rect x="8.5" y="15.4" width="3" height="1.2" rx="0.6"/>
+    <rect x="16.5" y="15.4" width="3" height="1.2" rx="0.6"/>
+    <rect x="24.5" y="15.4" width="3" height="1.2" rx="0.6"/>
+  </g>
+</svg>

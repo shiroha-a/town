@@ -8,6 +8,7 @@ package greeting
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -60,7 +61,7 @@ func New(pool *pgxpool.Pool) *Service {
 // List returns the most recent greetings, newest first.
 func (s *Service) List(ctx context.Context, limit int) ([]Greeting, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, user_id, user_name, category, body, color, COALESCE(janken, ''), to_char(posted_at, 'MM/DD HH24:MI')
+		`SELECT id, user_id, user_name, category, body, color, COALESCE(janken, ''), posted_at
 		 FROM greetings ORDER BY posted_at DESC, id DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list greetings: %w", err)
@@ -68,10 +69,15 @@ func (s *Service) List(ctx context.Context, limit int) ([]Greeting, error) {
 	defer rows.Close()
 	out := []Greeting{}
 	for rows.Next() {
-		var g Greeting
-		if err := rows.Scan(&g.ID, &g.UserID, &g.UserName, &g.Category, &g.Body, &g.Color, &g.Janken, &g.PostedAt); err != nil {
+		var (
+			g      Greeting
+			posted time.Time
+		)
+		if err := rows.Scan(&g.ID, &g.UserID, &g.UserName, &g.Category, &g.Body, &g.Color, &g.Janken, &posted); err != nil {
 			return nil, err
 		}
+		// タイムゾーンはクライアント側で表示時に解決する(RFC3339で返す)。
+		g.PostedAt = posted.Format(time.RFC3339)
 		out = append(out, g)
 	}
 	return out, rows.Err()

@@ -91,6 +91,14 @@ func IsHidden(no int) bool {
 	return false
 }
 
+// TownName returns the display name of the town at no, or "" if unknown.
+func TownName(no int) string {
+	if t, ok := townByNo(no); ok {
+		return t.Name
+	}
+	return ""
+}
+
 // townByNo finds a town by its number.
 func townByNo(no int) (Town, bool) {
 	townsMu.RLock()
@@ -137,6 +145,12 @@ var exteriors = []Exterior{
 	{Key: "bil3", Price: 4400},
 	{Key: "bil4", Price: 4600},
 	{Key: "bil5", Price: 4600},
+	// 高価格帯(SVG化に合わせて追加した新規外観)
+	{Key: "tower", Price: 6000},
+	{Key: "yashiki", Price: 8000},
+	{Key: "youkan", Price: 10000},
+	{Key: "villa", Price: 15000},
+	{Key: "shiro", Price: 20000},
 }
 
 // Exteriors returns a copy of the exterior catalog.

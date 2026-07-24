@@ -34,3 +34,23 @@ func TestRoll(t *testing.T) {
 		t.Errorf("fired = %d, expected ~%d", fired, n/12)
 	}
 }
+
+// TestSickEventSetsIndex verifies the 体調不良 event assigns the disease index
+// directly (レガシー$byouki_sisuu = -8), rather than decrementing it.
+func TestSickEventSetsIndex(t *testing.T) {
+	r := rng.New(1)
+	found := false
+	for _, fn := range events {
+		o := fn(r, 1000, 100)
+		if o.Name != "体調不良" {
+			continue
+		}
+		found = true
+		if o.DiseaseSet == nil || *o.DiseaseSet != -8 {
+			t.Errorf("体調不良 DiseaseSet = %v, want -8", o.DiseaseSet)
+		}
+	}
+	if !found {
+		t.Fatal("体調不良 event not in pool")
+	}
+}

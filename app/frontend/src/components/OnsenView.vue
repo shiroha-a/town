@@ -154,7 +154,7 @@ async function backToTown() {
     <template v-if="phase === 'bathing'">
       <h2 class="onsen-title">入浴中</h2>
       <div class="onsen-scene">
-        <img src="/img/onsen.gif" alt="温泉" class="onsen-img" />
+        <img src="/img/svg/onsen.svg" alt="温泉" class="onsen-img" />
       </div>
       <div class="bathe-result">
         <p class="lead">

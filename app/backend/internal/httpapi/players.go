@@ -42,6 +42,7 @@ type statusResp struct {
 type itemResp struct {
 	ItemID          int64          `json:"item_id"`
 	Name            string         `json:"name"`
+	Category        string         `json:"category"`
 	Quantity        int            `json:"quantity"`
 	RemainingUses   int            `json:"remaining_uses"`
 	Sets            int            `json:"sets"`
@@ -49,6 +50,7 @@ type itemResp struct {
 	Money           int64          `json:"money"`
 	Params          map[string]int `json:"params"`
 	IntervalMin     int            `json:"interval_min"`
+	CalorieG        int            `json:"calorie_g"`
 	NextAvailableAt *time.Time     `json:"next_available_at"`
 }
 
@@ -108,6 +110,7 @@ func toResp(p *player.Player) playerResp {
 		items = append(items, itemResp{
 			ItemID:          it.ItemID,
 			Name:            it.Name,
+			Category:        it.Category,
 			Quantity:        it.Quantity,
 			RemainingUses:   it.RemainingUses,
 			Sets:            it.Sets,
@@ -115,6 +118,7 @@ func toResp(p *player.Player) playerResp {
 			Money:           it.Money,
 			Params:          params,
 			IntervalMin:     it.IntervalMin,
+			CalorieG:        it.CalorieG,
 			NextAvailableAt: it.NextAvailableAt,
 		})
 	}
@@ -191,16 +195,18 @@ func (s *Server) shopItems(w http.ResponseWriter, r *http.Request) {
 }
 
 type publicSummaryResp struct {
-	ID          int64  `json:"id"`
-	DisplayName string `json:"display_name"`
-	Job         string `json:"job"`
-	JobLevel    int    `json:"job_level"`
+	ID          int64     `json:"id"`
+	DisplayName string    `json:"display_name"`
+	Job         string    `json:"job"`
+	JobLevel    int       `json:"job_level"`
+	CreatedAt   time.Time `json:"created_at"` // 入居日
 }
 
 // publicResp is a player's profile without private fields (money/identity/roles).
 type publicResp struct {
 	ID          int64      `json:"id"`
 	DisplayName string     `json:"display_name"`
+	CreatedAt   time.Time  `json:"created_at"`
 	Status      statusResp `json:"status"`
 	Params      paramsResp `json:"params"`
 }
@@ -214,7 +220,7 @@ func (s *Server) listPlayers(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]publicSummaryResp, 0, len(summaries))
 	for _, p := range summaries {
-		out = append(out, publicSummaryResp{ID: p.ID, DisplayName: p.DisplayName, Job: p.Job, JobLevel: p.JobLevel})
+		out = append(out, publicSummaryResp{ID: p.ID, DisplayName: p.DisplayName, Job: p.Job, JobLevel: p.JobLevel, CreatedAt: p.CreatedAt})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -236,7 +242,7 @@ func (s *Server) playerProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	full := toResp(p)
-	writeJSON(w, http.StatusOK, publicResp{ID: p.ID, DisplayName: p.DisplayName, Status: full.Status, Params: full.Params})
+	writeJSON(w, http.StatusOK, publicResp{ID: p.ID, DisplayName: p.DisplayName, CreatedAt: p.CreatedAt, Status: full.Status, Params: full.Params})
 }
 
 func (s *Server) getPlayer(w http.ResponseWriter, r *http.Request) {
@@ -254,5 +260,18 @@ func (s *Server) getPlayer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// 参加者表示用の最終アクセスを刻む(クライアントのポーリングが心拍になる)。
+	s.players.TouchLastSeen(r.Context(), id)
 	writeJSON(w, http.StatusOK, toResp(p))
+}
+
+// participants returns the players active within the last 20 minutes
+// (レガシー$logout_time=1200の参加者リスト)。Public.
+func (s *Server) participants(w http.ResponseWriter, r *http.Request) {
+	list, err := s.players.Participants(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
 }

@@ -14,9 +14,21 @@ import (
 	"github.com/shiroha-a/town/internal/building"
 	"github.com/shiroha-a/town/internal/effects"
 	"github.com/shiroha-a/town/internal/ledger"
+	"github.com/shiroha-a/town/internal/news"
 	"github.com/shiroha-a/town/internal/player"
 	"github.com/shiroha-a/town/internal/townmap"
 )
+
+// recordHouseNews appends a 家 article to the town news (legacy command.pl /
+// original_house.cgi の news_kiroku("家", ...)).
+func recordHouseNews(ctx context.Context, tx pgx.Tx, playerID int64, town int, what string) error {
+	name, err := news.ActorName(ctx, tx, playerID)
+	if err != nil {
+		return err
+	}
+	return news.RecordFor(ctx, tx, news.KindHouse, playerID, name,
+		fmt.Sprintf("%sさんが「%s」%s", name, building.TownName(town), what), nil, true)
+}
 
 // DoBuildHouse builds a house on an empty plot for the player (建設会社 フェーズ2a).
 // The build fee is drawn from the player's bank savings (普通口座). It enforces
@@ -134,7 +146,7 @@ func (s *Service) DoBuildHouse(ctx context.Context, playerID int64, town, row, c
 			playerID, town, row, col, exterior, ir, tuika); err != nil {
 			return fmt.Errorf("insert house: %w", err)
 		}
-		return nil
+		return recordHouseNews(ctx, tx, playerID, town, "に家を建築しました。")
 	})
 }
 
@@ -208,7 +220,7 @@ func (s *Service) DoSellHouse(ctx context.Context, playerID, houseID int64, idem
 				return fmt.Errorf("refund: %w", err)
 			}
 		}
-		return nil
+		return recordHouseNews(ctx, tx, playerID, town, "の家を売却しました。")
 	})
 }
 
@@ -217,14 +229,14 @@ func (s *Service) DoSellHouse(ctx context.Context, playerID, houseID int64, idem
 // re-charged because it was already paid at build time.
 func (s *Service) DoRebuildHouse(ctx context.Context, playerID, houseID int64, exterior string, interiorRank int, idempotencyKey string) (*player.Player, error) {
 	return s.runAction(ctx, playerID, "rebuild_house", idempotencyKey, func(ctx context.Context, tx pgx.Tx, state effects.State) error {
-		var exists bool
-		if err := tx.QueryRow(ctx,
-			`SELECT EXISTS(SELECT 1 FROM player_houses WHERE id = $1 AND owner_id = $2)`,
-			houseID, playerID).Scan(&exists); err != nil {
-			return fmt.Errorf("check house: %w", err)
-		}
-		if !exists {
+		var town int
+		err := tx.QueryRow(ctx,
+			`SELECT town FROM player_houses WHERE id = $1 AND owner_id = $2`, houseID, playerID).Scan(&town)
+		if errors.Is(err, pgx.ErrNoRows) {
 			return &ConditionError{Message: "その家は所有していません。"}
+		}
+		if err != nil {
+			return fmt.Errorf("load house: %w", err)
 		}
 		cost, err := building.RebuildCost(exterior, interiorRank)
 		if err != nil {
@@ -244,7 +256,7 @@ func (s *Service) DoRebuildHouse(ctx context.Context, playerID, houseID int64, e
 			exterior, interiorRank, houseID); err != nil {
 			return fmt.Errorf("update house: %w", err)
 		}
-		return nil
+		return recordHouseNews(ctx, tx, playerID, town, "の家を建て替えました。")
 	})
 }
 

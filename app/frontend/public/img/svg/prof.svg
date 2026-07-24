@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <ellipse cx="16" cy="30" rx="11.5" ry="1.5" fill="#000" opacity="0.12"/>
+  <rect x="5" y="14" width="22" height="15.5" rx="1" fill="#fbf3d8"/>
+  <rect x="8.5" y="19" width="4" height="4" fill="#e0913c"/>
+  <rect x="14" y="19" width="4" height="4" fill="#e0913c"/>
+  <rect x="19.5" y="19" width="4" height="4" fill="#e0913c"/>
+  <rect x="5" y="5" width="22" height="9" rx="1.5" fill="#fbf3d8" stroke="#d8c9a0" stroke-width="0.7"/>
+  <text x="16" y="11.6" text-anchor="middle" font-family="Arial, sans-serif" font-weight="900" font-size="6" fill="#6a5a3a">PROF</text>
+</svg>

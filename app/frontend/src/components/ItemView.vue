@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { api, type Player, type ItemStack } from '../api';
-import { PARAM_COLUMNS } from '../params';
+import { PARAM_COLUMNS, PARAM_COLUMNS_MAIN, PARAM_COLUMNS_POWER } from '../params';
 import Toast from './Toast.vue';
 import { useToast, buildEffectLines } from '../toast';
 
@@ -10,6 +10,17 @@ const emit = defineEmits<{ update: [player: Player]; back: [] }>();
 
 const busy = ref(false);
 const { toast, showToast, closeToast } = useToast();
+
+// カテゴリ別にグループ化(デパートと同じカテゴリ見出し付き表を再現)
+const grouped = computed(() => {
+  const g = new Map<string, ItemStack[]>();
+  for (const it of props.player.items) {
+    const c = it.category || 'その他';
+    if (!g.has(c)) g.set(c, []);
+    g.get(c)!.push(it);
+  }
+  return [...g.entries()];
+});
 
 // サーバ時刻とクライアント時計のずれ(ms)。カウントダウンをサーバ基準に補正し、
 // 端末時計がずれていても残り時間が正しく表示されるようにする。
@@ -104,7 +115,11 @@ async function use(it: ItemStack) {
     <Toast :toast="toast" @close="closeToast" />
     <button class="btn back" @click="emit('back')">街に戻る</button>
     <div class="item-header">
-      <div class="lead">持っているアイテムを使うことができます。</div>
+      <div class="lead">
+        持っているアイテムを使うことができます。<br />
+        ●身体パワー：<span class="pw">{{ player.status.energy }}/{{ player.status.energy_max }}</span><br />
+        ●頭脳パワー：<span class="pw">{{ player.status.nou_energy }}/{{ player.status.nou_energy_max }}</span>
+      </div>
       <div class="title">アイテム使用</div>
     </div>
 
@@ -115,44 +130,55 @@ async function use(it: ItemStack) {
           <thead>
             <tr>
               <th class="l">品名</th>
-              <th>残り</th>
-              <th v-for="c in PARAM_COLUMNS" :key="c.key" class="p">{{ c.label }}</th>
-              <th>間隔</th>
               <th>使用可</th>
               <th></th>
+              <th>残り</th>
+              <th v-for="c in PARAM_COLUMNS_MAIN" :key="c.key" class="p">{{ c.label }}</th>
+              <th>ｶﾛﾘｰ</th>
+              <th v-for="c in PARAM_COLUMNS_POWER" :key="c.key" class="p">{{ c.label }}</th>
+              <th>間隔</th>
             </tr>
           </thead>
-          <tbody>
-            <tr v-for="it in player.items" :key="it.item_id" :data-test="`item-${it.item_id}`">
-              <td class="l">○{{ it.name }}</td>
-              <td>{{ it.remaining_uses }}{{ it.durability_unit === 'day' ? '日' : '回' }}</td>
-              <td v-for="c in PARAM_COLUMNS" :key="c.key" class="p" :class="{ up: (it.params[c.key] ?? 0) > 0 }">
-                {{ it.params[c.key] ?? 0 }}
-              </td>
-              <td class="interval">{{ it.interval_min > 0 ? `${it.interval_min}分` : '-' }}</td>
-              <td
-                class="cooldown"
-                :class="{
-                  ok: !cooldowns[it.item_id].active,
-                  soon: cooldowns[it.item_id].active && cooldowns[it.item_id].soon,
-                  wait: cooldowns[it.item_id].active && !cooldowns[it.item_id].soon,
-                }"
-                :data-test="`cooldown-${it.item_id}`"
-              >
-                {{ cooldowns[it.item_id].label }}
-              </td>
-              <td>
-                <button
-                  class="btn"
-                  :disabled="busy || cooldowns[it.item_id].active"
-                  :data-test="`use-${it.item_id}`"
-                  @click="use(it)"
+          <template v-for="[cat, list] in grouped" :key="cat">
+            <tbody>
+              <tr class="cat-row">
+                <td :colspan="PARAM_COLUMNS.length + 6">●{{ cat }}</td>
+              </tr>
+              <tr v-for="it in list" :key="it.item_id" :data-test="`item-${it.item_id}`">
+                <td class="l">○{{ it.name }}</td>
+                <td
+                  class="cooldown"
+                  :class="{
+                    ok: !cooldowns[it.item_id].active,
+                    soon: cooldowns[it.item_id].active && cooldowns[it.item_id].soon,
+                    wait: cooldowns[it.item_id].active && !cooldowns[it.item_id].soon,
+                  }"
+                  :data-test="`cooldown-${it.item_id}`"
                 >
-                  使う
-                </button>
-              </td>
-            </tr>
-          </tbody>
+                  {{ cooldowns[it.item_id].label }}
+                </td>
+                <td>
+                  <button
+                    class="btn"
+                    :disabled="busy || cooldowns[it.item_id].active"
+                    :data-test="`use-${it.item_id}`"
+                    @click="use(it)"
+                  >
+                    使う
+                  </button>
+                </td>
+                <td>{{ it.remaining_uses }}{{ it.durability_unit === 'day' ? '日' : '回' }}</td>
+                <td v-for="c in PARAM_COLUMNS_MAIN" :key="c.key" class="p" :class="{ up: (it.params[c.key] ?? 0) > 0 }">
+                  {{ it.params[c.key] ?? 0 }}
+                </td>
+                <td>{{ it.calorie_g > 0 ? it.calorie_g : '-' }}</td>
+                <td v-for="c in PARAM_COLUMNS_POWER" :key="c.key" class="p" :class="{ up: (it.params[c.key] ?? 0) > 0 }">
+                  {{ it.params[c.key] ?? 0 }}
+                </td>
+                <td class="interval">{{ it.interval_min > 0 ? `${it.interval_min}分` : '-' }}</td>
+              </tr>
+            </tbody>
+          </template>
         </table>
       </div>
     </div>
@@ -166,7 +192,8 @@ async function use(it: ItemStack) {
 <style scoped>
 .item-page {
   background-color: #ffcc66;
-  background-image: url(/img/command_bak.gif);
+  /* 旧command_bak.gifのCSS再現: 6px周期の1pxライン */
+  background-image: repeating-linear-gradient(180deg, transparent 0 2px, #ffcc33 2px 3px, transparent 3px 6px);
   padding: 6px;
   min-height: 80vh;
 }
@@ -183,6 +210,11 @@ async function use(it: ItemStack) {
   background: #fff;
   padding: 8px 12px;
   color: #333;
+  line-height: 1.6;
+}
+.item-header .pw {
+  color: #cc3300;
+  font-weight: bold;
 }
 .item-header .title {
   flex: 0 0 140px;
@@ -231,6 +263,13 @@ async function use(it: ItemStack) {
   color: #060;
   font-weight: bold;
   background: #eaffea;
+}
+.item-table tr.cat-row td {
+  background: #ffedcc;
+  color: #995500;
+  font-weight: bold;
+  text-align: left;
+  border-top: 2px solid #cc9933;
 }
 .item-table td.cooldown {
   font-weight: bold;

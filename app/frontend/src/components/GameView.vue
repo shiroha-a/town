@@ -60,7 +60,7 @@ const currentProps = computed(() => games.find((g) => g.key === selected.value)?
   <div class="casino-page">
     <button class="btn back" @click="emit('back')">街に戻る</button>
     <div class="casino-header">
-      <div class="title">ＣＡＳＩＮＯ</div>
+      <div class="title">ゲームセンター</div>
       <div class="money">所持金：{{ yen(player.money) }}円</div>
     </div>
 

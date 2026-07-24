@@ -79,15 +79,16 @@ async function use(item: ShopItem) {
         <thead>
           <tr>
             <th class="l">名前</th>
+            <th></th>
             <th>値段</th>
             <th v-for="c in PARAM_COLUMNS" :key="c.key" class="p">{{ c.label }}</th>
             <th>間</th>
-            <th></th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="item in menu" :key="item.id" :data-test="`menu-${item.id}`">
             <td class="l">{{ item.name }}</td>
+            <td class="use"><button class="btn" :disabled="busy" @click="use(item)">{{ useLabel }}</button></td>
             <td class="price">{{ yen(item.price) }}円</td>
             <td
               v-for="c in PARAM_COLUMNS"
@@ -98,7 +99,6 @@ async function use(item: ShopItem) {
               {{ item.params[c.key] ?? 0 }}
             </td>
             <td class="interval">{{ intervalLabel(item.interval_min) }}</td>
-            <td class="use"><button class="btn" :disabled="busy" @click="use(item)">{{ useLabel }}</button></td>
           </tr>
         </tbody>
       </table>

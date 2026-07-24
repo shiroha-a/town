@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- deeper offshore water: darker flat base than umi.svg -->
+  <rect width="32" height="32" fill="#3798bd"/>
+  <!-- fainter foam than the shallow sea, same slow drift -->
+  <g fill="none" stroke-linecap="round">
+    <g stroke="#e6f7fb" stroke-width="1.4" opacity="0.55">
+      <g>
+        <path d="M9.5 13.5c1.6-2.1 4-2.1 5.6 0"/>
+        <path d="M15.1 13.5c1.3-1.7 3.2-1.7 4.5 0"/>
+        <animateTransform attributeName="transform" type="translate"
+          values="0 0; 1.5 -0.4; 0 0; -1.5 0.4; 0 0" dur="6s" repeatCount="indefinite"/>
+      </g>
+    </g>
+    <g stroke="#8fd4e6" stroke-width="1.1">
+      <g opacity="0.5">
+        <path d="M20 23.5c1.3-1.6 3.2-1.6 4.5 0"/>
+        <animateTransform attributeName="transform" type="translate"
+          values="0 0; -1.2 0.3; 0 0; 1.2 -0.3; 0 0" dur="7.2s" begin="-2.4s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0.5;0.2;0.5" dur="7.2s" begin="-2.4s" repeatCount="indefinite"/>
+      </g>
+      <g opacity="0.5">
+        <path d="M7 24.5c1.1-1.4 2.8-1.4 3.9 0"/>
+        <animateTransform attributeName="transform" type="translate"
+          values="0 0; 1.1 0.3; 0 0; -1.1 -0.3; 0 0" dur="7.8s" begin="-5s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0.5;0.22;0.5" dur="7.8s" begin="-5s" repeatCount="indefinite"/>
+      </g>
+      <g opacity="0.5">
+        <path d="M20.5 6.5c1.1-1.4 2.8-1.4 3.9 0"/>
+        <animateTransform attributeName="transform" type="translate"
+          values="0 0; -1.1 -0.3; 0 0; 1.1 0.3; 0 0" dur="6.6s" begin="-1.6s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0.5;0.25;0.5" dur="6.6s" begin="-1.6s" repeatCount="indefinite"/>
+      </g>
+    </g>
+    <!-- deep-water undertone ripples -->
+    <g stroke="#2b83a6" stroke-width="1.2" opacity="0.5">
+      <path d="M11 19.5c1.2-1.5 3-1.5 4.2 0"/>
+      <path d="M23 16.5c1-1.3 2.6-1.3 3.6 0"/>
+    </g>
+  </g>
+</svg>

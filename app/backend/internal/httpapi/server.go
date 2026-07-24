@@ -12,9 +12,10 @@ import (
 	"github.com/shiroha-a/town/internal/greeting"
 	"github.com/shiroha-a/town/internal/keiba"
 	"github.com/shiroha-a/town/internal/mail"
+	"github.com/shiroha-a/town/internal/news"
 	"github.com/shiroha-a/town/internal/player"
+	"github.com/shiroha-a/town/internal/ranking"
 	"github.com/shiroha-a/town/internal/settings"
-	"github.com/shiroha-a/town/internal/shop"
 	"github.com/shiroha-a/town/internal/stock"
 	"github.com/shiroha-a/town/internal/townmap"
 )
@@ -31,19 +32,26 @@ type Server struct {
 	mail       *mail.Service
 	greeting   *greeting.Service
 	attendance *attendance.Service
-	shop       *shop.Service
 	cleague    *cleague.Service
+	news       *news.Service
+	ranking    *ranking.Service
+	greetHub   *greetHub // あいさつSSE配信のプロセス内ハブ
 }
 
 // NewServer builds the HTTP handler for the REST API.
-func NewServer(players *player.Service, actions *action.Service, contentSvc *content.Service, st *settings.Store, tmap *townmap.Store, stockSvc *stock.Service, keibaSvc *keiba.Service, mailSvc *mail.Service, greetingSvc *greeting.Service, attendanceSvc *attendance.Service, shopSvc *shop.Service, cleagueSvc *cleague.Service) http.Handler {
-	s := &Server{players: players, actions: actions, content: contentSvc, settings: st, townmap: tmap, stock: stockSvc, keiba: keibaSvc, mail: mailSvc, greeting: greetingSvc, attendance: attendanceSvc, shop: shopSvc, cleague: cleagueSvc}
+func NewServer(players *player.Service, actions *action.Service, contentSvc *content.Service, st *settings.Store, tmap *townmap.Store, stockSvc *stock.Service, keibaSvc *keiba.Service, mailSvc *mail.Service, greetingSvc *greeting.Service, attendanceSvc *attendance.Service, cleagueSvc *cleague.Service, newsSvc *news.Service, rankingSvc *ranking.Service) http.Handler {
+	s := &Server{players: players, actions: actions, content: contentSvc, settings: st, townmap: tmap, stock: stockSvc, keiba: keibaSvc, mail: mailSvc, greeting: greetingSvc, attendance: attendanceSvc, cleague: cleagueSvc, news: newsSvc, ranking: rankingSvc, greetHub: newGreetHub()}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", s.health)
 	mux.HandleFunc("POST /api/v1/players", s.registerPlayer)
 	mux.HandleFunc("GET /api/v1/players", s.listPlayers)
 	mux.HandleFunc("GET /api/v1/players/{id}", s.getPlayer)
+	mux.HandleFunc("GET /api/v1/participants", s.participants)
 	mux.HandleFunc("GET /api/v1/players/{id}/profile", s.playerProfile)
+	mux.HandleFunc("GET /api/v1/news", s.townNews)
+	mux.HandleFunc("GET /api/v1/players/{id}/news", s.playerNews)
+	mux.HandleFunc("GET /api/v1/ranking", s.townRanking)
+	mux.HandleFunc("GET /api/v1/ranking/keys", s.rankingKeys)
 	mux.HandleFunc("GET /api/v1/townmap", s.townMap)
 	mux.HandleFunc("GET /api/v1/townassets", s.townAssets)
 	mux.HandleFunc("GET /api/v1/towns", s.towns)
@@ -62,19 +70,12 @@ func NewServer(players *player.Service, actions *action.Service, contentSvc *con
 	mux.HandleFunc("DELETE /api/v1/players/{id}/mail/{msgId}", s.mailDelete)
 	mux.HandleFunc("PUT /api/v1/players/{id}/mail/{msgId}/save", s.mailSave)
 	mux.HandleFunc("GET /api/v1/greetings", s.greetings)
+	mux.HandleFunc("GET /api/v1/greetings/stream", s.greetingsStream)
 	mux.HandleFunc("POST /api/v1/players/{id}/greetings", s.postGreeting)
 	mux.HandleFunc("DELETE /api/v1/admin/greetings/{gid}", s.deleteGreeting)
 	mux.HandleFunc("GET /api/v1/attendance", s.attendanceBoard)
 	mux.HandleFunc("POST /api/v1/players/{id}/attendance/checkin", s.attendanceCheckin)
 	mux.HandleFunc("POST /api/v1/players/{id}/events/roll", s.eventRoll)
-	mux.HandleFunc("GET /api/v1/shops", s.listShops)
-	mux.HandleFunc("GET /api/v1/shops/{ownerId}", s.getShop)
-	mux.HandleFunc("POST /api/v1/players/{id}/shop/open", s.shopOpen)
-	mux.HandleFunc("POST /api/v1/players/{id}/shop/stock", s.shopStock)
-	mux.HandleFunc("POST /api/v1/players/{id}/shop/unstock", s.shopUnstock)
-	mux.HandleFunc("POST /api/v1/players/{id}/shop/price", s.shopPrice)
-	mux.HandleFunc("POST /api/v1/players/{id}/shop/buy", s.shopBuy)
-	mux.HandleFunc("POST /api/v1/players/{id}/shop/offer", s.shopOffer)
 	mux.HandleFunc("GET /api/v1/cleague", s.cleagueRanking)
 	mux.HandleFunc("GET /api/v1/players/{id}/character", s.getCharacter)
 	mux.HandleFunc("POST /api/v1/players/{id}/character", s.setCharacterName)
@@ -168,6 +169,12 @@ func NewServer(players *player.Service, actions *action.Service, contentSvc *con
 	mux.HandleFunc("POST /api/v1/admin/assets", s.adminUploadAsset)
 	mux.HandleFunc("DELETE /api/v1/admin/assets/{name}", s.adminDeleteAsset)
 	mux.HandleFunc("PUT /api/v1/admin/townassets", s.adminUpdateTownAssets)
+	mux.HandleFunc("GET /api/v1/admin/townmap/presets", s.adminFacilityPresets)
+	mux.HandleFunc("PUT /api/v1/admin/townmap/presets", s.adminUpdateFacilityPresets)
+	mux.HandleFunc("GET /api/v1/admin/events", s.adminListEvents)
+	mux.HandleFunc("POST /api/v1/admin/events", s.adminCreateEvent)
+	mux.HandleFunc("PUT /api/v1/admin/events/{eid}", s.adminUpdateEvent)
+	mux.HandleFunc("DELETE /api/v1/admin/events/{eid}", s.adminDeleteEvent)
 	mux.HandleFunc("GET /api/v1/admin/players", s.adminListPlayers)
 	mux.HandleFunc("PUT /api/v1/admin/players/{id}", s.adminUpdatePlayer)
 	mux.HandleFunc("DELETE /api/v1/admin/players/{id}", s.adminDeletePlayer)

@@ -131,7 +131,7 @@ function retry() {
             <tbody>
               <tr v-for="(h, i) in lineup" :key="i" :data-test="`horse-${i}`">
                 <td>{{ i + 1 }}</td>
-                <td class="l"><img :src="`/img/uma/${h.img}.gif`" class="uma-ico" :alt="h.name" />{{ h.name }}</td>
+                <td class="l"><img :src="`/img/svg/uma/${h.img}.svg`" class="uma-ico" :alt="h.name" />{{ h.name }}</td>
                 <td class="odds">{{ h.odds }}倍</td>
                 <td>
                   <select v-model.number="tickets[i]">
@@ -154,7 +154,7 @@ function retry() {
               <span class="lane-no">{{ i + 1 }}</span>
               <div class="lane-track">
                 <img
-                  :src="`/img/uma/${h.img}.gif`"
+                  :src="`/img/svg/uma/${h.img}.svg`"
                   class="uma-run"
                   :style="{ left: (positions[i] ?? 0) + '%' }"
                   :alt="h.name"

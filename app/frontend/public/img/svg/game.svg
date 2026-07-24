@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- game center: purple sign + arcade screen with colored pixels -->
+  <ellipse cx="16" cy="30" rx="11.5" ry="1.5" fill="#000" opacity="0.12"/>
+  <rect x="5" y="13" width="22" height="16.5" rx="1" fill="#f0eef8"/>
+  <rect x="8" y="16" width="16" height="6.5" rx="0.8" fill="#22262e"/>
+  <g>
+    <rect x="9.5" y="17.4" width="2.2" height="2.2" rx="0.4" fill="#e8574a"/>
+    <rect x="12.6" y="19" width="2.2" height="2.2" rx="0.4" fill="#4aa8e8"/>
+    <rect x="15.7" y="17.4" width="2.2" height="2.2" rx="0.4" fill="#f5c33c"/>
+    <rect x="18.8" y="19" width="2.2" height="2.2" rx="0.4" fill="#5fe08a"/>
+    <rect x="21" y="17.4" width="1.4" height="1.4" rx="0.3" fill="#e88fd0"/>
+  </g>
+  <rect x="13.5" y="24.5" width="5" height="5" fill="#d5cfe8"/>
+  <rect x="5" y="5" width="22" height="8" rx="1.5" fill="#8a4fc9"/>
+  <text x="16" y="11" text-anchor="middle" font-family="Arial, sans-serif" font-weight="900" font-size="6" fill="#ffffff">GAME</text>
+</svg>

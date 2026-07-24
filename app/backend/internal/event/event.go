@@ -20,10 +20,11 @@ type Outcome struct {
 	Good       bool           `json:"good"`
 	MoneyDelta int64          `json:"money_delta"`
 	Params     map[string]int `json:"params"`
-	// DiseaseDelta は disease_index への加算(負=病気が悪化)。0で変化なし。
-	DiseaseDelta int    `json:"disease_delta"`
-	WeightG      int    `json:"weight_g"`
-	Special      string `json:"special"` // "charity" | "confiscate" | ""
+	// DiseaseSet は disease_index への直接代入(レガシー$byouki_sisuu = N)。
+	// 健康の貯金(プラス指数)に関係なく即その病状になる。nilで変化なし。
+	DiseaseSet *int   `json:"disease_set"`
+	WeightG    int    `json:"weight_g"`
+	Special    string `json:"special"` // "charity" | "confiscate" | ""
 }
 
 func good(name, msg string, o Outcome) Outcome { o.Name, o.Message, o.Good = name, msg, true; return o }
@@ -93,9 +94,10 @@ var events = []func(r *rng.Rand, money int64, speed int) Outcome{
 	func(_ *rng.Rand, _ int64, _ int) Outcome {
 		return good("優しい気持ち", "優しい気持ちになりLOVE度が5アップしました。", Outcome{Params: param("love", 5)})
 	},
-	// 15 風邪ぎみ(病気指数-8)
+	// 15 風邪ぎみ(病気指数=-8の直接代入。レガシー$byouki_sisuu = -8)
 	func(_ *rng.Rand, _ int64, _ int) Outcome {
-		return bad("体調不良", "裸で寝ていて体調を崩しました(風邪ぎみ)。", Outcome{DiseaseDelta: -8})
+		idx := -8
+		return bad("体調不良", "裸で寝ていて体調を崩しました(風邪ぎみ)。", Outcome{DiseaseSet: &idx})
 	},
 	// 16 スリ(持ち金半減)
 	func(_ *rng.Rand, money int64, _ int) Outcome {
@@ -206,5 +208,60 @@ func Roll(r *rng.Rand, money int64, speed int) (bool, Outcome) {
 	if r.IntN(12) != 0 {
 		return false, Outcome{}
 	}
+	return true, events[r.IntN(len(events))](r, money, speed)
+}
+
+// Custom is an admin-defined event (content_events)。発生すると金額は
+// [MoneyMin, MoneyMax]の一様乱数、パラメータ/病気/体重は固定値が適用される。
+type Custom struct {
+	Name       string
+	Message    string
+	Good       bool
+	MoneyMin   int64
+	MoneyMax   int64
+	Params     map[string]int
+	DiseaseSet *int
+	WeightG    int
+	Weight     int // 抽選の重み(組み込みイベントは各1)
+}
+
+// RollAll rolls the 1/12 occurrence and then picks from the built-in pool and
+// the enabled custom events, weighted (built-ins weigh 1 each).
+func RollAll(r *rng.Rand, money int64, speed int, customs []Custom) (bool, Outcome) {
+	if r.IntN(12) != 0 {
+		return false, Outcome{}
+	}
+	total := len(events)
+	for _, c := range customs {
+		total += max(1, c.Weight)
+	}
+	n := r.IntN(total)
+	if n < len(events) {
+		return true, events[n](r, money, speed)
+	}
+	n -= len(events)
+	for _, c := range customs {
+		w := max(1, c.Weight)
+		if n < w {
+			delta := c.MoneyMin
+			if c.MoneyMax > c.MoneyMin {
+				delta += int64(r.IntN(int(c.MoneyMax-c.MoneyMin) + 1))
+			}
+			o := Outcome{
+				Name:       c.Name,
+				Message:    c.Message,
+				Good:       c.Good,
+				MoneyDelta: delta,
+				DiseaseSet: c.DiseaseSet,
+				WeightG:    c.WeightG,
+			}
+			if len(c.Params) > 0 {
+				o.Params = c.Params
+			}
+			return true, o
+		}
+		n -= w
+	}
+	// customsが並行更新で空になった場合の保険。
 	return true, events[r.IntN(len(events))](r, money, speed)
 }

@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- water matches umi.svg's flat base so the island sits naturally among sea tiles -->
+  <rect width="32" height="32" fill="#5fc8de"/>
+  <!-- surf ring / sand / grass -->
+  <rect x="3" y="3" width="26" height="26" rx="11" fill="#ffffff" opacity="0.9"/>
+  <rect x="4.2" y="4.2" width="23.6" height="23.6" rx="10" fill="#eedc9e"/>
+  <rect x="6.4" y="6.4" width="19.2" height="19.2" rx="8" fill="#8cc862"/>
+  <!-- grass tufts -->
+  <g fill="none" stroke-linecap="round" stroke-width="1.1">
+    <g stroke="#5fa343">
+      <path d="M11.6 14.5C10.9 13.6 10.6 12.6 10.8 11.4"/>
+      <path d="M13 14.5C13 13.3 13.3 12.3 14 11.3"/>
+      <path d="M14.4 14.5C15 13.7 15.3 12.8 15.3 11.8"/>
+    </g>
+    <g stroke="#69b04c">
+      <path d="M19.6 21.5C18.9 20.6 18.6 19.6 18.8 18.4"/>
+      <path d="M21 21.5C21 20.3 21.3 19.3 22 18.3"/>
+    </g>
+  </g>
+  <g fill="#d3edaa" opacity="0.85">
+    <circle cx="20" cy="11.5" r="0.7"/>
+    <circle cx="12" cy="21" r="0.6"/>
+  </g>
+</svg>

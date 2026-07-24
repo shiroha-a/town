@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- road sign: one road forking to two destinations.
+       Branches are one vertical arrow rotated ±40° so heads align exactly. -->
+  <rect x="4" y="4" width="24" height="24" rx="3.5" fill="#3a6bc9"/>
+  <path d="M16 25.5V16" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+  <g transform="rotate(-40 16 16)">
+    <path d="M16 16v-5.5" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+    <path d="M16 6.8 13.7 10.9h4.6Z" fill="#ffffff"/>
+  </g>
+  <g transform="rotate(40 16 16)">
+    <path d="M16 16v-5.5" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+    <path d="M16 6.8 13.7 10.9h4.6Z" fill="#ffffff"/>
+  </g>
+</svg>

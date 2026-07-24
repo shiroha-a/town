@@ -70,7 +70,15 @@ func (s *Server) bankStatement(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	entries, err := s.actions.BankStatement(r.Context(), id)
+	// account=super でスーパー定期口座の明細(既定は普通口座)。
+	var (
+		entries []action.StatementEntry
+	)
+	if r.URL.Query().Get("account") == "super" {
+		entries, err = s.actions.BankStatementSuper(r.Context(), id)
+	} else {
+		entries, err = s.actions.BankStatement(r.Context(), id)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

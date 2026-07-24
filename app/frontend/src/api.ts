@@ -4,6 +4,7 @@
 export interface ItemStack {
   item_id: number;
   name: string;
+  category: string;
   quantity: number;
   remaining_uses: number;
   sets: number;
@@ -11,6 +12,7 @@ export interface ItemStack {
   money: number;
   params: Record<string, number>;
   interval_min: number;
+  calorie_g: number; // 摂取カロリー(食べると体重+calorie_g g)
   // クールタイム中の再使用可能時刻(ISO8601)。使用可能ならnull。
   next_available_at: string | null;
 }
@@ -101,6 +103,7 @@ export interface ShopItem {
   durability: number;
   durability_unit: string; // 'use'(回) or 'day'(日)
   power_multiplier: number; // 温泉の回復速度倍率(0=温泉ではない)
+  calorie_g: number; // 摂取カロリー(食べると体重+calorie_g g)
   stock: number; // 本日の店頭在庫(-1=無制限)
 }
 
@@ -148,13 +151,44 @@ export interface PublicSummary {
   display_name: string;
   job: string;
   job_level: number;
+  created_at: string; // 入居日
 }
 // 公開プロフィール(お金/身元などの非公開項目は含まない)。
 export interface PublicProfile {
   id: number;
   display_name: string;
+  created_at: string;
   status: Player['status'];
   params: Params;
+}
+
+// 役場: 街のニュース/住民の出来事の1件。
+export interface NewsEntry {
+  id: number;
+  kind: string; // 入居/就職/家/イベント/当選
+  actor_id: number | null;
+  actor_name: string;
+  message: string;
+  good: boolean | null; // イベントの良悪。null=中立
+  at: string;
+}
+// 役場: ランキング種別。
+export interface RankingKey {
+  key: string;
+  label: string;
+  unit: string;
+}
+export interface RankingEntry {
+  rank: number;
+  id: number;
+  display_name: string;
+  job: string;
+  job_level: number;
+  value: number;
+}
+export interface RankingResult extends RankingKey {
+  entries: RankingEntry[];
+  self: RankingEntry | null; // 圏外のときだけ入る自分の行
 }
 
 // 仕事1回の結果サマリ(給料・昇給・ボーナス・経験値)。
@@ -172,7 +206,7 @@ export interface WorkResult {
 }
 export type WorkResponse = Player & { work_result: WorkResult };
 
-// 普通口座の入出金明細1行。
+// 口座の入出金明細1行(普通/スーパー定期は別々に取得する)。
 export interface StatementEntry {
   at: string;
   label: string;
@@ -405,6 +439,41 @@ export interface TownAsset {
   row: number;
 }
 
+// 施設プリセット(管理画面): 画像・表示名・遷移先を保存したテンプレート。
+// D&Dでマップに配置すると施設になる。
+export interface FacilityPreset {
+  key: string;
+  img: string;
+  alt: string;
+  dest: number;
+}
+
+// カスタムイベントの発生条件(すべて満たすプレイヤーにだけ発生)。
+export interface EventCond {
+  pred: string; // money_gte/money_lte/param_gte/param_lte/has_item/job_is
+  param?: string;
+  value?: number;
+  item_id?: number;
+  job?: string;
+}
+
+// カスタムイベント(管理画面): 組み込みのランダムイベントプールに合流する。
+// 金額は[money_min, money_max]の一様乱数、disease_setは病気指数の直接代入。
+export interface AdminEvent {
+  id: number;
+  name: string;
+  message: string;
+  good: boolean;
+  money_min: number;
+  money_max: number;
+  params: Record<string, number>;
+  disease_set: number | null;
+  weight_g: number;
+  weight: number;
+  enabled: boolean;
+  conditions: EventCond[];
+}
+
 // 街移動の結果。徒歩/自転車の能力上昇、乗り物、事故、迷子などを含む。
 export interface MoveResult {
   arrived_town: number;
@@ -432,9 +501,9 @@ export type BuyResp = Player & { buy_result: BuyResult };
 export const WARP_FEE = 100000;
 
 // 背景アセット画像のURLを解決する。'u:'接頭辞はアップロード画像(DB配信)、
-// それ以外は組み込みのpublic/img/*.gif。
+// それ以外は組み込みのpublic/img/svg/*.svg(GIFからSVG化済み)。
 export function assetUrl(img: string): string {
-  return img.startsWith('u:') ? `/api/v1/assets/${encodeURIComponent(img.slice(2))}` : `/img/${img}.gif`;
+  return img.startsWith('u:') ? `/api/v1/assets/${encodeURIComponent(img.slice(2))}` : `/img/svg/${img}.svg`;
 }
 
 export interface StockPrice {
@@ -565,28 +634,6 @@ export interface EventOutcome {
 export interface EventRollResp {
   player: Player;
   event: EventOutcome | null;
-}
-
-export interface ShopSummary {
-  owner_id: number;
-  owner_name: string;
-  name: string;
-  listings: number;
-}
-export interface ShopListing {
-  item_id: number;
-  item_name: string;
-  category: string;
-  price: number;
-  stock: number;
-  money: number;
-  params: Record<string, number>;
-}
-export interface ShopDetail {
-  owner_id: number;
-  owner_name: string;
-  name: string;
-  listings: ShopListing[];
 }
 
 export interface Character {
@@ -897,6 +944,11 @@ export const api = {
   getPlayer: (id: number) => request<Player>('GET', `/players/${id}`),
   listPlayers: () => request<PublicSummary[]>('GET', '/players'),
   playerProfile: (id: number) => request<PublicProfile>('GET', `/players/${id}/profile`),
+  // 役場: 街のニュース(街全体)と住民ごとの出来事。
+  townNews: (limit = 100) => request<NewsEntry[]>('GET', `/news?limit=${limit}`),
+  playerNews: (id: number, limit = 50) => request<NewsEntry[]>('GET', `/players/${id}/news?limit=${limit}`),
+  rankingKeys: () => request<RankingKey[]>('GET', '/ranking/keys'),
+  ranking: (key: string, self: number) => request<RankingResult>('GET', `/ranking?key=${key}&self=${self}`),
   townMap: () => request<TownFacility[]>('GET', '/townmap'),
   townAssets: () => request<TownAsset[]>('GET', '/townassets'),
   towns: () => request<Town[]>('GET', '/towns'),
@@ -962,29 +1014,6 @@ export const api = {
       opponent_id: opponentId,
       idempotency_key: newIdempotencyKey(),
     }),
-  listShops: () => request<ShopSummary[]>('GET', '/shops'),
-  getShop: (ownerId: number) => request<ShopDetail>('GET', `/shops/${ownerId}`),
-  shopOpen: (id: number, name: string) =>
-    request<Player>('POST', `/players/${id}/shop/open`, { name, idempotency_key: newIdempotencyKey() }),
-  shopStock: (id: number, itemId: number, quantity: number, price: number) =>
-    request<{ ok: boolean }>('POST', `/players/${id}/shop/stock`, { item_id: itemId, quantity, price }),
-  shopUnstock: (id: number, itemId: number, quantity: number) =>
-    request<{ ok: boolean }>('POST', `/players/${id}/shop/unstock`, { item_id: itemId, quantity }),
-  shopPrice: (id: number, itemId: number, price: number) =>
-    request<{ ok: boolean }>('POST', `/players/${id}/shop/price`, { item_id: itemId, price }),
-  shopBuy: (id: number, ownerId: number, itemId: number, quantity: number) =>
-    request<Player>('POST', `/players/${id}/shop/buy`, {
-      owner_id: ownerId,
-      item_id: itemId,
-      quantity,
-      idempotency_key: newIdempotencyKey(),
-    }),
-  shopOffer: (id: number, ownerId: number, amount: number) =>
-    request<Player>('POST', `/players/${id}/shop/offer`, {
-      owner_id: ownerId,
-      amount,
-      idempotency_key: newIdempotencyKey(),
-    }),
   attendanceBoard: () => request<AttendanceBoard>('GET', '/attendance'),
   attendanceCheckin: (id: number) =>
     request<{ recorded: boolean }>('POST', `/players/${id}/attendance/checkin`),
@@ -1045,7 +1074,11 @@ export const api = {
       amount,
       idempotency_key: newIdempotencyKey(),
     }),
-  bankStatement: (id: number) => request<StatementEntry[]>('GET', `/players/${id}/bank/statement`),
+  bankStatement: (id: number, account: 'normal' | 'super' = 'normal') =>
+    request<StatementEntry[]>(
+      'GET',
+      `/players/${id}/bank/statement${account === 'super' ? '?account=super' : ''}`,
+    ),
   transfer: (id: number, toName: string, amount: number) =>
     request<Player>('POST', `/players/${id}/bank/transfer`, {
       to_name: toName,
@@ -1306,6 +1339,7 @@ export const api = {
       input,
       idempotency_key: newIdempotencyKey(),
     }),
+  participants: () => request<{ id: number; display_name: string }[]>('GET', '/participants'),
   houseShopStock: (id: number, houseId: number) =>
     request<ShopStockView>('GET', `/players/${id}/building/shop/stock?house_id=${houseId}`),
   setHouseShopPrice: (id: number, houseId: number, itemId: number, sellPrice: number) =>
@@ -1366,6 +1400,20 @@ export const api = {
     request<TownFacility[]>('PUT', '/admin/townmap', facilities, adminHeaders(actingId)),
   adminUpdateTownAssets: (actingId: number, assets: TownAsset[]) =>
     request<TownAsset[]>('PUT', '/admin/townassets', assets, adminHeaders(actingId)),
+  // 施設プリセット(画像・表示名・遷移先の保存済みテンプレート)。
+  adminFacilityPresets: (actingId: number) =>
+    request<FacilityPreset[]>('GET', '/admin/townmap/presets', undefined, adminHeaders(actingId)),
+  adminUpdateFacilityPresets: (actingId: number, presets: FacilityPreset[]) =>
+    request<FacilityPreset[]>('PUT', '/admin/townmap/presets', presets, adminHeaders(actingId)),
+  // カスタムイベント(ランダムイベントの追加/編集/削除)。
+  adminListEvents: (actingId: number) =>
+    request<AdminEvent[]>('GET', '/admin/events', undefined, adminHeaders(actingId)),
+  adminCreateEvent: (actingId: number, e: Omit<AdminEvent, 'id'>) =>
+    request<AdminEvent>('POST', '/admin/events', e, adminHeaders(actingId)),
+  adminUpdateEvent: (actingId: number, e: AdminEvent) =>
+    request<AdminEvent>('PUT', `/admin/events/${e.id}`, e, adminHeaders(actingId)),
+  adminDeleteEvent: (actingId: number, id: number) =>
+    request<{ deleted: boolean }>('DELETE', `/admin/events/${id}`, undefined, adminHeaders(actingId)),
   // 家が建っているマス(施設エディタでロックするため)。
   adminHouseCells: (actingId: number) =>
     request<PlotCell[]>('GET', '/admin/townmap/houses', undefined, adminHeaders(actingId)),

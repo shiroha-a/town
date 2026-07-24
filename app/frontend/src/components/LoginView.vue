@@ -52,7 +52,7 @@ async function enterExisting() {
 
 <template>
   <div class="login-panel">
-    <h2>新規登録</h2>
+    <h2>街に入る（新規登録・再開）</h2>
     <table class="grid">
       <tbody>
         <tr>
@@ -70,12 +70,16 @@ async function enterExisting() {
       </tbody>
     </table>
     <div class="actions" style="margin-top: 8px">
-      <button class="btn" :disabled="busy" data-test="register" @click="register">登録して街へ</button>
+      <button class="btn" :disabled="busy" data-test="register" @click="register">街へ入る</button>
     </div>
+    <p class="muted">
+      初回はそのまま新規登録されます。登録済みの方は、登録時と同じインスタンスとユーザーIDを入れると
+      同じプレイヤーで再開できます（表示名は初回登録時のみ反映されます）。
+    </p>
   </div>
 
   <div class="login-panel">
-    <h2>既存プレイヤーで再開(開発用)</h2>
+    <h2>プレイヤーIDで再開(開発用)</h2>
     <div class="actions">
       <input type="number" v-model.number="playerId" placeholder="プレイヤーID" data-test="player-id" />
       <button class="btn" :disabled="busy" @click="enterExisting">再開</button>

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- mountain: twin peaks with snow caps, transparent bg for layering -->
+  <ellipse cx="16" cy="29.4" rx="11" ry="1.8" fill="#1b3a12" opacity="0.14"/>
+  <!-- rear small peak -->
+  <path d="M9 13 20 28.6H1Z" fill="#8f9aa8"/>
+  <path d="M9 13 11.9 18.5c-.7.7-1.4.7-2 0-.7.7-1.4.7-2.1 0-.6.7-1.3.7-1.9 0Z" fill="#ffffff" opacity="0.92"/>
+  <!-- main peak -->
+  <path d="M19.5 4.5 31 28.6H8Z" fill="#7d8a99"/>
+  <!-- right-side facet for depth -->
+  <path d="M19.5 4.5 31 28.6H19.5Z" fill="#6c7887" opacity="0.85"/>
+  <path d="M19.5 4.5 23.7 12.4c-.9 1-1.8 1-2.7.1-.9.9-1.8.9-2.7 0-.9.9-1.8.9-2.7-.1Z" fill="#ffffff" opacity="0.95"/>
+</svg>

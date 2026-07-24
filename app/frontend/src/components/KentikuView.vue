@@ -123,11 +123,11 @@ function cellClass(row: number, col: number) {
 }
 function cellImg(row: number, col: number): string | null {
   const f = facilityAt(row, col);
-  if (f) return `/img/${f.img}.gif`;
+  if (f) return `/img/svg/${f.img}.svg`;
   const h = houseAt(row, col);
-  if (h) return `/img/${h.exterior}.gif`;
+  if (h) return `/img/svg/${h.exterior}.svg`;
   // 空地は街マップと同じ空き地アイコンで示す。
-  if (plotAt(row, col)) return '/img/akiti.gif';
+  if (plotAt(row, col)) return '/img/svg/akiti.svg';
   return null;
 }
 // セルの背景アセット(選択中の街)。施設・家・空き地アイコンの下に敷く。
@@ -324,7 +324,7 @@ async function build() {
         <ul v-else class="mh-list">
           <li v-for="h in state.my_houses" :key="h.id" class="mh-item">
             <div class="mh-row">
-              <img :src="`/img/${h.exterior}.gif`" :alt="h.exterior" />
+              <img :src="`/img/svg/${h.exterior}.svg`" :alt="h.exterior" />
               <span class="mh-loc">{{ townName(h.town) }}／{{ rowLabel(h.row) }}{{ h.col }}</span>
               <span class="mh-ext">{{ h.exterior }}・内装{{ ['A','B','C','D'][h.interior_rank] ?? '?' }}ランク</span>
             </div>

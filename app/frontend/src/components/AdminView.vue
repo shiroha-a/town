@@ -15,9 +15,11 @@ import {
   type GameSettings,
   type TownFacility,
   type TownAsset,
+  type FacilityPreset,
   type PlotCell,
   type Town,
 } from '../api';
+import { PARAM_FULL } from '../params';
 
 const props = defineProps<{ player: Player }>();
 const emit = defineEmits<{ back: [] }>();
@@ -25,7 +27,7 @@ const emit = defineEmits<{ back: [] }>();
 const isAdmin = computed(() => props.player.roles.includes('admin'));
 
 // 各セクションの開閉。既定は折りたたみ(false)。
-const open = reactive({ item: false, job: false, user: false, settings: false, towns: false, map: false });
+const open = reactive({ item: false, job: false, user: false, settings: false, towns: false, map: false, events: false });
 
 // 効果/条件で対象にできるパラメータ。
 const PARAM_OPTIONS = [
@@ -112,6 +114,8 @@ async function refresh() {
     assets.value = await api.townAssets();
     houseCells.value = await api.adminHouseCells(props.player.id);
     uploadedAssets.value = await api.adminListAssets(props.player.id);
+    facPresets.value = await api.adminFacilityPresets(props.player.id);
+    adminEvents.value = await api.adminListEvents(props.player.id);
     townList.value = await api.towns();
     syncTownDraft();
     selectedIdx.value = null;
@@ -143,6 +147,7 @@ const KEY_PRESETS: { key: string; label: string }[] = [
   { key: 'kabu', label: '株取引場(準備中)' },
   { key: 'keiba', label: '競馬場(準備中)' },
   { key: 'kentiku', label: '建設会社' },
+  { key: 'casino', label: 'ゲームセンター' },
   { key: 'prof', label: 'プロフィール(準備中)' },
   { key: 'mail', label: 'メール(準備中)' },
   { key: 'doukyo', label: 'キャラ作成(準備中)' },
@@ -155,7 +160,7 @@ const KEY_PRESETS: { key: string; label: string }[] = [
 const MOVE_KEYS = ['walk', 'bus'];
 // 施設用に用意されているgif(public/img)。
 const IMG_PRESETS = [
-  'depart', 'bank', 'syokudou', 'gym', 'onsen', 'hospital', 'work', 'yakuba', 'kabu', 'keiba', 'kentiku', 'prof', 'mail', 'mati_link', 'bus', 'akiti',
+  'depart', 'bank', 'syokudou', 'gym', 'onsen', 'hospital', 'work', 'yakuba', 'kabu', 'keiba', 'kentiku', 'game', 'prof', 'mail', 'mati_link', 'bus', 'akiti',
 ];
 
 // 施設レイヤーで編集中の街(0..4)。施設はマルチ街化済み。
@@ -176,6 +181,11 @@ const selectedFacility = computed(() =>
 function clickCell(col: number, rowIdx: number) {
   // 家が建っているマスは編集不可(選択も移動先にもできない)。
   if (houseCellAt(col, rowIdx)) return;
+  // 一括配置モード: 選択中のプリセットをクリックしたマスへ連続配置する。
+  if (bulkPlace.value && bulkPresetIdx.value !== null) {
+    placePresetAt(bulkPresetIdx.value, col, rowIdx);
+    return;
+  }
   const idx = mapFacilityAt(col, rowIdx, facilityTown.value);
   if (idx >= 0) {
     // 施設セル: 選択(同じものを再クリックで選択解除)。
@@ -189,26 +199,145 @@ function clickCell(col: number, rowIdx: number) {
   }
 }
 
-// ドラッグ&ドロップで施設を配置する。占有セルへドロップした場合は位置を入れ替える。
-const dragging = ref<number | null>(null);
-function onDragStart(idx: number) {
-  if (idx < 0) return;
-  dragging.value = idx;
-  selectedIdx.value = idx;
+// 一括配置モード: オンにするとプリセットをクリックで選択し、
+// セルをクリックするたびに同じプリセットを連続配置できる。
+const bulkPlace = ref(false);
+const bulkPresetIdx = ref<number | null>(null);
+function clickPresetChip(i: number) {
+  if (!bulkPlace.value) return;
+  bulkPresetIdx.value = bulkPresetIdx.value === i ? null : i;
 }
-function onDragEnd() {
-  dragging.value = null;
+// プリセットを指定セルへ配置する(占有セルは属性を上書き)。D&Dと一括配置で共用。
+function placePresetAt(i: number, col: number, rowIdx: number): number {
+  const p = allFacPresets.value[i];
+  if (!p || houseCellAt(col, rowIdx)) return -1;
+  const targetIdx = mapFacilityAt(col, rowIdx, facilityTown.value);
+  if (targetIdx >= 0) {
+    const f = townmap.value[targetIdx];
+    f.key = p.key;
+    f.img = p.img;
+    f.alt = p.alt;
+    f.dest = p.dest;
+    f.ready = true;
+    return targetIdx;
+  }
+  townmap.value.push({
+    key: p.key,
+    img: p.img,
+    alt: p.alt,
+    town: facilityTown.value,
+    col,
+    row: rowIdx,
+    dest: p.dest,
+    ready: true,
+  });
+  return townmap.value.length - 1;
 }
-function onDrop(col: number, rowIdx: number) {
-  if (dragging.value === null) return;
-  // 家が建っているマスへは移動できない(空き地を外すと不整合)。
-  if (houseCellAt(col, rowIdx)) {
-    dragging.value = null;
+
+// 標準施設の組み込みプリセット(townmap.Defaultと同じ内容+移動施設/空き地)。
+// 常にパレットに並び、削除はできない。徒歩/バスは行き先の街ごとに1チップずつ
+// 展開する(destの設定なしでそのまま配置できる)。
+const STD_FAC_BASE: FacilityPreset[] = [
+  { key: 'kabu', img: 'kabu', alt: '株取引場', dest: 0 },
+  { key: 'depart', img: 'depart', alt: '中央デパート', dest: 0 },
+  { key: 'bank', img: 'bank', alt: '銀行', dest: 0 },
+  { key: 'syokudou', img: 'syokudou', alt: 'セントラル食堂', dest: 0 },
+  { key: 'gym', img: 'gym', alt: 'ジム', dest: 0 },
+  { key: 'keiba', img: 'keiba', alt: '競馬場', dest: 0 },
+  { key: 'jobchange', img: 'work', alt: '職業安定所', dest: 0 },
+  { key: 'onsen', img: 'onsen', alt: '温泉', dest: 0 },
+  { key: 'hospital', img: 'hospital', alt: '中央病院', dest: 0 },
+  { key: 'school', img: 'school', alt: '学校', dest: 0 },
+  { key: 'kyushitu', img: 'school', alt: '教室', dest: 0 },
+  { key: 'kentiku', img: 'kentiku', alt: '建設会社', dest: 0 },
+  { key: 'casino', img: 'game', alt: 'ゲームセンター', dest: 0 },
+  { key: 'hanbai', img: 'hanbai', alt: '自動販売機', dest: 0 },
+  { key: 'yakuba', img: 'yakuba', alt: '役場（住民名鑑）', dest: 0 },
+  { key: 'prof', img: 'prof', alt: 'プロフィール', dest: 0 },
+  { key: 'akichi', img: 'akiti', alt: '空き地', dest: 0 },
+];
+const stdFacPresets = computed<FacilityPreset[]>(() => [
+  ...STD_FAC_BASE,
+  ...plotTowns.value.flatMap((t) => [
+    { key: 'walk', img: 'mati_link', alt: `徒歩→${t.name}`, dest: t.no },
+    { key: 'bus', img: 'bus', alt: `バス→${t.name}`, dest: t.no },
+  ]),
+]);
+
+// 施設プリセット(画像・表示名・遷移先を保存したテンプレート)。パレットから
+// D&Dで配置できる。プリセット自体の追加/削除は即サーバへ保存する。
+const facPresets = ref<FacilityPreset[]>([]);
+// パレット全体 = 標準(削除不可) + カスタム(保存済み)。D&Dはこの通し番号を使う。
+const allFacPresets = computed(() => [...stdFacPresets.value, ...facPresets.value]);
+const presetDraft = ref<FacilityPreset>({ key: 'depart', img: 'depart', alt: '', dest: 0 });
+const presetFormOpen = ref(false);
+async function savePreset() {
+  if (!presetDraft.value.alt.trim()) {
+    message.value = 'プリセットの表示名を入力してください。';
+    kind.value = 'error';
     return;
   }
-  const src = townmap.value[dragging.value];
+  busy.value = true;
+  try {
+    facPresets.value = await api.adminUpdateFacilityPresets(props.player.id, [
+      ...facPresets.value,
+      { ...presetDraft.value, alt: presetDraft.value.alt.trim() },
+    ]);
+    presetFormOpen.value = false;
+    presetDraft.value = { key: 'depart', img: 'depart', alt: '', dest: 0 };
+    message.value = '施設プリセットを保存しました。';
+    kind.value = 'ok';
+  } catch (e) {
+    fail(e);
+  } finally {
+    busy.value = false;
+  }
+}
+async function deletePreset(i: number) {
+  if (!confirm(`プリセット「${facPresets.value[i]?.alt}」を削除しますか?`)) return;
+  busy.value = true;
+  try {
+    const next = facPresets.value.filter((_, j) => j !== i);
+    facPresets.value = await api.adminUpdateFacilityPresets(props.player.id, next);
+    message.value = '施設プリセットを削除しました。';
+    kind.value = 'ok';
+  } catch (e) {
+    fail(e);
+  } finally {
+    busy.value = false;
+  }
+}
+
+// ドラッグ&ドロップで施設を配置する。タイル移動は占有セルで位置を入れ替え、
+// プリセットは空セルへ新規配置(占有セルは属性を上書き)する。
+type FacDrag = { kind: 'tile'; idx: number } | { kind: 'preset'; i: number };
+const facDrag = ref<FacDrag | null>(null);
+const dragging = computed(() => (facDrag.value?.kind === 'tile' ? facDrag.value.idx : null));
+function onDragStart(idx: number) {
+  if (idx < 0) return;
+  facDrag.value = { kind: 'tile', idx };
+  selectedIdx.value = idx;
+}
+function onPresetDragStart(i: number) {
+  facDrag.value = { kind: 'preset', i };
+}
+function onDragEnd() {
+  facDrag.value = null;
+}
+function onDrop(col: number, rowIdx: number) {
+  const d = facDrag.value;
+  facDrag.value = null;
+  if (!d) return;
+  // 家が建っているマスへは配置できない(空き地を外すと不整合)。
+  if (houseCellAt(col, rowIdx)) return;
   const targetIdx = mapFacilityAt(col, rowIdx, facilityTown.value);
-  if (targetIdx >= 0 && targetIdx !== dragging.value) {
+  if (d.kind === 'preset') {
+    const placed = placePresetAt(d.i, col, rowIdx);
+    if (placed >= 0) selectedIdx.value = placed;
+    return;
+  }
+  const src = townmap.value[d.idx];
+  if (targetIdx >= 0 && targetIdx !== d.idx) {
     // 移動先に別の施設があれば位置を入れ替える。
     const tgt = townmap.value[targetIdx];
     tgt.col = src.col;
@@ -216,7 +345,6 @@ function onDrop(col: number, rowIdx: number) {
   }
   src.col = col;
   src.row = rowIdx;
-  dragging.value = null;
 }
 
 function firstFreeCell(): { col: number; row: number } | null {
@@ -270,8 +398,13 @@ async function saveTownMap() {
 const assets = ref<TownAsset[]>([]);
 // 編集中のレイヤー('facility'=施設(空き地含む) / 'asset'=背景)。
 const mapLayer = ref<'facility' | 'asset'>('facility');
-// 背景アセットのパレット(組み込みのlegacy地形素材)。
-const BG_PRESETS = ['kusa', 'sima', 'umi', 'tree1', 'tree2', 'tree3', 'tree4'];
+// 背景アセットのパレット(組み込みのSVG地形素材)。
+const BG_PRESETS = [
+  'kusa', 'tuti', 'sima', 'umi', 'oki',
+  'michi_yoko', 'michi_tate', 'michi_kado1', 'michi_kado2', 'michi_kado3', 'michi_kado4',
+  'michi_t1', 'michi_t2', 'michi_t3', 'michi_t4', 'michi_juji',
+  'tree1', 'tree2', 'tree3', 'tree4', 'yama',
+];
 // アップロードされた画像名(背景に追加できる)。'u:'接頭辞でimg値に使う。
 const uploadedAssets = ref<string[]>([]);
 // パレット = 組み込み + アップロード('u:'接頭辞)。
@@ -281,23 +414,42 @@ const assetBrush = ref<string>(BG_PRESETS[0]);
 // 背景レイヤーで編集中の街(0..4)。背景も街ごとに配置できる。
 const assetTown = ref(0);
 
-const assetIdxAt = (col: number, rowIdx: number) =>
-  assets.value.findIndex((a) => a.town === assetTown.value && a.col === col && a.row === rowIdx);
-function assetImgAt(col: number, rowIdx: number): string {
-  const i = assetIdxAt(col, rowIdx);
-  return i >= 0 ? assets.value[i].img : '';
+// 1マスに重ねられる背景レイヤー数の上限(サーバーのMaxAssetLayersと合わせる)。
+const MAX_BG_LAYERS = 3;
+// 消しゴム筆(最上層を1枚ずつ剥がす)。パレットの特殊スウォッチ。
+const BG_ERASER = '__eraser__';
+
+// 指定マスのアセットindex一覧(配列順=重ね順、末尾が最上層)。
+function assetIdxsAt(col: number, rowIdx: number): number[] {
+  const out: number[] = [];
+  assets.value.forEach((a, i) => {
+    if (a.town === assetTown.value && a.col === col && a.row === rowIdx) out.push(i);
+  });
+  return out;
+}
+function assetImgsAt(col: number, rowIdx: number): string[] {
+  return assetIdxsAt(col, rowIdx).map((i) => assets.value[i].img);
 }
 // 指定した街の背景アセット画像(施設レイヤーで背景を薄く参照表示するのに使う)。
-function assetImgForTown(col: number, rowIdx: number, town: number): string {
-  const a = assets.value.find((x) => x.town === town && x.col === col && x.row === rowIdx);
-  return a ? a.img : '';
+function assetImgsForTown(col: number, rowIdx: number, town: number): string[] {
+  return assets.value.filter((x) => x.town === town && x.col === col && x.row === rowIdx).map((x) => x.img);
 }
-// マスをクリックで背景を配置。選択中の筆と同じなら除去(トグル)、違えば差し替え。
+// マスをクリックで背景を配置(常に連続配置)。最上層と同じ筆なら除去、
+// 消しゴムなら最上層を剥がし、それ以外は最上層に積む(上限あり)。
 function paintAsset(col: number, rowIdx: number) {
-  const i = assetIdxAt(col, rowIdx);
-  if (i >= 0) {
-    if (assets.value[i].img === assetBrush.value) assets.value.splice(i, 1);
-    else assets.value[i].img = assetBrush.value;
+  const idxs = assetIdxsAt(col, rowIdx);
+  const topIdx = idxs.length ? idxs[idxs.length - 1] : -1;
+  if (assetBrush.value === BG_ERASER) {
+    if (topIdx >= 0) assets.value.splice(topIdx, 1);
+    return;
+  }
+  if (topIdx >= 0 && assets.value[topIdx].img === assetBrush.value) {
+    assets.value.splice(topIdx, 1);
+    return;
+  }
+  if (idxs.length >= MAX_BG_LAYERS) {
+    message.value = `1マスに置ける背景は${MAX_BG_LAYERS}層までです。`;
+    kind.value = 'error';
     return;
   }
   assets.value.push({ img: assetBrush.value, town: assetTown.value, col, row: rowIdx });
@@ -387,23 +539,114 @@ function onBgDrop(col: number, rowIdx: number) {
   const d = bgDrag.value;
   bgDrag.value = null;
   if (!d) return;
+  const tgtCount = assetIdxsAt(col, rowIdx).length;
   if (d.kind === 'palette') {
-    // パレットからドロップ: そのマスに配置(既存があれば差し替え)。
-    const i = assetIdxAt(col, rowIdx);
-    if (i >= 0) assets.value[i].img = d.img;
-    else assets.value.push({ img: d.img, town: assetTown.value, col, row: rowIdx });
+    // パレットからドロップ: そのマスの最上層に積む。
+    if (d.img === BG_ERASER) return;
+    if (tgtCount >= MAX_BG_LAYERS) {
+      message.value = `1マスに置ける背景は${MAX_BG_LAYERS}層までです。`;
+      kind.value = 'error';
+      return;
+    }
+    assets.value.push({ img: d.img, town: assetTown.value, col, row: rowIdx });
     return;
   }
-  // 置いたタイルの移動。移動先に別タイルがあれば位置を入れ替える(施設レイヤーと同じ)。
-  const srcIdx = assetIdxAt(d.col, d.row);
-  if (srcIdx < 0) return;
-  const tgtIdx = assetIdxAt(col, rowIdx);
-  if (tgtIdx >= 0 && tgtIdx !== srcIdx) {
-    assets.value[tgtIdx].col = d.col;
-    assets.value[tgtIdx].row = d.row;
+  // 置いたタイルの移動: 移動元の最上層を剥がし、移動先の最上層に積む。
+  if (d.col === col && d.row === rowIdx) return;
+  const srcIdxs = assetIdxsAt(d.col, d.row);
+  if (!srcIdxs.length) return;
+  if (tgtCount >= MAX_BG_LAYERS) {
+    message.value = `1マスに置ける背景は${MAX_BG_LAYERS}層までです。`;
+    kind.value = 'error';
+    return;
   }
-  assets.value[srcIdx].col = col;
-  assets.value[srcIdx].row = rowIdx;
+  const [moved] = assets.value.splice(srcIdxs[srcIdxs.length - 1], 1);
+  moved.col = col;
+  moved.row = rowIdx;
+  assets.value.push(moved);
+}
+
+// カスタムイベント管理(ランダムイベントの追加/編集/削除)。
+const adminEvents = ref<import('../api').AdminEvent[]>([]);
+const EV_PARAM_OPTIONS = [
+  'kokugo', 'suugaku', 'rika', 'syakai', 'eigo', 'ongaku', 'bijutsu', 'looks',
+  'tairyoku', 'kenkou', 'speed', 'power', 'wanryoku', 'kyakuryoku', 'love', 'omoshirosa',
+  'energy', 'nou_energy', 'satiety',
+];
+const EV_DISEASES: { label: string; value: number | null }[] = [
+  { label: 'なし', value: null },
+  { label: '風邪ぎみ(-8)', value: -8 },
+  { label: '風邪(-15)', value: -15 },
+  { label: '下痢(-18)', value: -18 },
+  { label: '肺炎(-30)', value: -30 },
+  { label: '結核(-50)', value: -50 },
+  { label: '脳腫瘍(-80)', value: -80 },
+  { label: '癌(-120)', value: -120 },
+];
+// 発生条件の編集行。predごとに使うフィールドが変わる。
+const EV_COND_PREDS: { value: string; label: string }[] = [
+  { value: 'money_gte', label: '所持金が◯円以上' },
+  { value: 'money_lte', label: '所持金が◯円以下' },
+  { value: 'param_gte', label: 'パラメータが◯以上' },
+  { value: 'param_lte', label: 'パラメータが◯以下' },
+  { value: 'has_item', label: 'アイテムを所持' },
+  { value: 'job_is', label: '職業が' },
+];
+function emptyEvent(): import('../api').AdminEvent {
+  return {
+    id: 0, name: '', message: '', good: true, money_min: 0, money_max: 0,
+    params: {}, disease_set: null, weight_g: 0, weight: 1, enabled: true, conditions: [],
+  };
+}
+const evForm = ref(emptyEvent());
+const evParamRows = ref<{ key: string; value: number }[]>([]);
+const evCondRows = ref<import('../api').EventCond[]>([]);
+function evEdit(e: import('../api').AdminEvent) {
+  evForm.value = { ...e, params: { ...e.params } };
+  evParamRows.value = Object.entries(e.params).map(([key, value]) => ({ key, value }));
+  evCondRows.value = (e.conditions ?? []).map((c) => ({ ...c }));
+}
+function evReset() {
+  evForm.value = emptyEvent();
+  evParamRows.value = [];
+  evCondRows.value = [];
+}
+async function evSave() {
+  busy.value = true;
+  message.value = '';
+  try {
+    const params: Record<string, number> = {};
+    for (const r of evParamRows.value) {
+      if (r.key && r.value) params[r.key] = r.value;
+    }
+    const payload = { ...evForm.value, params, conditions: evCondRows.value };
+    if (payload.id > 0) await api.adminUpdateEvent(props.player.id, payload);
+    else await api.adminCreateEvent(props.player.id, payload);
+    adminEvents.value = await api.adminListEvents(props.player.id);
+    evReset();
+    message.value = 'イベントを保存しました。';
+    kind.value = 'ok';
+  } catch (e) {
+    fail(e);
+  } finally {
+    busy.value = false;
+  }
+}
+async function evDelete() {
+  if (evForm.value.id <= 0) return;
+  if (!confirm(`イベント「${evForm.value.name}」を削除しますか?`)) return;
+  busy.value = true;
+  try {
+    await api.adminDeleteEvent(props.player.id, evForm.value.id);
+    adminEvents.value = await api.adminListEvents(props.player.id);
+    evReset();
+    message.value = 'イベントを削除しました。';
+    kind.value = 'ok';
+  } catch (e) {
+    fail(e);
+  } finally {
+    busy.value = false;
+  }
 }
 
 // 街の一覧(管理画面で設定可能。名前・地価)。マップ編集の街セレクタや街エディタで使う。
@@ -742,6 +985,30 @@ async function deleteEdit() {
       <div v-if="message" :class="['message', kind]" data-test="message">{{ message }}</div>
 
       <div class="admin-sections">
+        <!-- ユーザー -->
+        <section class="fold">
+          <button class="fold-head" @click="open.user = !open.user">
+            <span class="caret">{{ open.user ? '▼' : '▶' }}</span> ユーザー（{{ players.length }}）
+          </button>
+          <div v-if="open.user" class="fold-body">
+            <section class="panel">
+              <h3>ユーザー一覧<span class="hint"> ※行をクリックで確認/編集</span></h3>
+              <div class="table-scroll">
+                <table class="list-table">
+                  <thead><tr><th>ID</th><th class="l">名前</th><th>職業</th><th>Lv</th><th>所持金</th><th>権限</th></tr></thead>
+                  <tbody>
+                    <tr v-for="u in players" :key="u.id" class="clickable" @click="openEditPlayer(u.id)">
+                      <td>{{ u.id }}</td><td class="l">{{ u.display_name }}</td><td>{{ u.job }}</td>
+                      <td>{{ u.job_level }}</td><td class="r">{{ u.money.toLocaleString('ja-JP') }}円</td>
+                      <td>{{ u.roles.includes('admin') ? '管理者' : '' }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        </section>
+
         <!-- アイテム -->
         <section class="fold">
           <button class="fold-head" @click="open.item = !open.item">
@@ -762,7 +1029,7 @@ async function deleteEdit() {
                     <option value="add_money">お金</option>
                   </select>
                   <select v-if="op.op === 'add_param'" v-model="op.param">
-                    <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">{{ p }}</option>
+                    <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">{{ PARAM_FULL[p] ?? p }}</option>
                   </select>
                   <input type="number" v-model.number="op.amount" />
                   <button class="btn mini" @click="item.effect.splice(i, 1)">×</button>
@@ -821,7 +1088,7 @@ async function deleteEdit() {
                 <div class="ops-head">就くための必要条件(以上)</div>
                 <div v-for="(req, i) in job.requirements" :key="i" class="op-row">
                   <select v-model="req.param">
-                    <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">{{ p }}</option>
+                    <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">{{ PARAM_FULL[p] ?? p }}</option>
                   </select>
                   <span class="ge">≧</span>
                   <input type="number" v-model.number="req.value" />
@@ -837,7 +1104,7 @@ async function deleteEdit() {
                     <option value="add_money">お金</option>
                   </select>
                   <select v-if="op.op === 'add_param'" v-model="op.param">
-                    <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">{{ p }}</option>
+                    <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">{{ PARAM_FULL[p] ?? p }}</option>
                   </select>
                   <input type="number" v-model.number="op.amount" />
                   <button class="btn mini" @click="job.effect.splice(i, 1)">×</button>
@@ -866,23 +1133,94 @@ async function deleteEdit() {
           </div>
         </section>
 
-        <!-- ユーザー -->
+        <!-- カスタムイベント -->
         <section class="fold">
-          <button class="fold-head" @click="open.user = !open.user">
-            <span class="caret">{{ open.user ? '▼' : '▶' }}</span> ユーザー（{{ players.length }}）
+          <button class="fold-head" @click="open.events = !open.events">
+            <span class="caret">{{ open.events ? '▼' : '▶' }}</span> イベント（{{ adminEvents.length }}）
           </button>
-          <div v-if="open.user" class="fold-body">
+          <div v-if="open.events" class="fold-body">
             <section class="panel">
-              <h3>ユーザー一覧<span class="hint"> ※行をクリックで確認/編集</span></h3>
+              <h3>
+                {{ evForm.id > 0 ? `イベント編集 #${evForm.id}` : 'イベント作成' }}
+                <span class="hint"> ※組み込みイベントと同じ抽選(発生率1/12)に合流します</span>
+              </h3>
+              <label>名前<input v-model="evForm.name" placeholder="例: 落とし穴" /></label>
+              <label>メッセージ<input v-model="evForm.message" class="wide" placeholder="例: 落とし穴に落ちて{money}円落としました。" /></label>
+              <span class="hint">※プレースホルダー: {money}=実際の増減額 {name}=プレイヤー名 {job}=職業 {town}=今いる街</span>
+              <label class="chk"><input type="checkbox" v-model="evForm.good" /> 良いイベント（トーストの色）</label>
+              <label>お金(最小)<input type="number" v-model.number="evForm.money_min" /></label>
+              <label>お金(最大)<input type="number" v-model.number="evForm.money_max" /></label>
+              <span class="hint">※増減額は最小〜最大の一様乱数。マイナスで支払い。固定額は同値に</span>
+              <div class="ops">
+                <div class="ops-head">パラメータ増減</div>
+                <div v-for="(r, i) in evParamRows" :key="i" class="op-row">
+                  <select v-model="r.key">
+                    <option v-for="p in EV_PARAM_OPTIONS" :key="p" :value="p">{{ PARAM_FULL[p] ?? p }}</option>
+                  </select>
+                  <input type="number" v-model.number="r.value" />
+                  <button class="btn mini" @click="evParamRows.splice(i, 1)">×</button>
+                </div>
+                <button class="btn mini" @click="evParamRows.push({ key: 'kokugo', value: 1 })">＋パラメータを追加</button>
+              </div>
+              <div class="ops">
+                <div class="ops-head">発生条件（すべて満たすプレイヤーにだけ発生。空=全員）</div>
+                <div v-for="(c, i) in evCondRows" :key="i" class="op-row">
+                  <select v-model="c.pred">
+                    <option v-for="p in EV_COND_PREDS" :key="p.value" :value="p.value">{{ p.label }}</option>
+                  </select>
+                  <select v-if="c.pred === 'param_gte' || c.pred === 'param_lte'" v-model="c.param">
+                    <option v-for="p in EV_PARAM_OPTIONS" :key="p" :value="p">{{ PARAM_FULL[p] ?? p }}</option>
+                  </select>
+                  <input
+                    v-if="c.pred !== 'has_item' && c.pred !== 'job_is'"
+                    type="number"
+                    v-model.number="c.value"
+                    placeholder="値"
+                  />
+                  <select v-if="c.pred === 'has_item'" v-model.number="c.item_id">
+                    <option v-for="it in items" :key="it.id" :value="it.id">{{ it.name }}</option>
+                  </select>
+                  <select v-if="c.pred === 'job_is'" v-model="c.job">
+                    <option v-for="j in jobs" :key="j.id" :value="j.name">{{ j.name }}</option>
+                  </select>
+                  <button class="btn mini" @click="evCondRows.splice(i, 1)">×</button>
+                </div>
+                <button class="btn mini" @click="evCondRows.push({ pred: 'money_gte', param: 'kokugo', value: 0 })">
+                  ＋条件を追加
+                </button>
+              </div>
+              <label>病気にする
+                <select v-model="evForm.disease_set">
+                  <option v-for="d in EV_DISEASES" :key="String(d.value)" :value="d.value">{{ d.label }}</option>
+                </select>
+              </label>
+              <label>体重増減(g)<input type="number" v-model.number="evForm.weight_g" /></label>
+              <label>抽選の重み<input type="number" v-model.number="evForm.weight" min="1" max="100" /></label>
+              <span class="hint">※組み込みイベントは各1。2にすると2倍出やすい</span>
+              <label class="chk"><input type="checkbox" v-model="evForm.enabled" /> 有効</label>
+              <div class="actions">
+                <button class="btn primary" :disabled="busy || !evForm.name || !evForm.message" @click="evSave">
+                  {{ evForm.id > 0 ? '更新' : '作成' }}
+                </button>
+                <button v-if="evForm.id > 0" class="btn danger" :disabled="busy" @click="evDelete">削除</button>
+                <button v-if="evForm.id > 0" class="btn" @click="evReset">新規作成に戻る</button>
+              </div>
+            </section>
+            <section class="panel">
+              <h3>既存イベント（{{ adminEvents.length }}）<span class="hint"> ※行をクリックで編集</span></h3>
               <div class="table-scroll">
                 <table class="list-table">
-                  <thead><tr><th>ID</th><th class="l">名前</th><th>職業</th><th>Lv</th><th>所持金</th><th>権限</th></tr></thead>
+                  <thead><tr><th>ID</th><th class="l">名前</th><th class="l">メッセージ</th><th>お金</th><th>重み</th><th>有効</th></tr></thead>
                   <tbody>
-                    <tr v-for="u in players" :key="u.id" class="clickable" @click="openEditPlayer(u.id)">
-                      <td>{{ u.id }}</td><td class="l">{{ u.display_name }}</td><td>{{ u.job }}</td>
-                      <td>{{ u.job_level }}</td><td class="r">{{ u.money.toLocaleString('ja-JP') }}円</td>
-                      <td>{{ u.roles.includes('admin') ? '管理者' : '' }}</td>
+                    <tr v-for="e in adminEvents" :key="e.id" class="clickable" @click="evEdit(e)">
+                      <td>{{ e.id }}</td>
+                      <td class="l">{{ e.name }}</td>
+                      <td class="l">{{ e.message }}</td>
+                      <td class="r">{{ e.money_min === e.money_max ? e.money_min : `${e.money_min}〜${e.money_max}` }}</td>
+                      <td class="r">{{ e.weight }}</td>
+                      <td :class="{ off: !e.enabled }">{{ e.enabled ? '○' : '×' }}</td>
                     </tr>
+                    <tr v-if="!adminEvents.length"><td colspan="6" class="muted">まだカスタムイベントがありません。</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -975,9 +1313,61 @@ async function deleteEdit() {
             <section v-if="mapLayer === 'facility'" class="panel">
               <h3>
                 マップ編集<span class="hint">
-                  ※街を選び、施設をドラッグ&ドロップで移動(占有セルへは入れ替え)。クリックで選択→空きセルクリックでも移動可</span
+                  ※街を選び、施設をドラッグ&ドロップで移動(占有セルへは入れ替え)。クリックで選択→空きセルクリックでも移動可。プリセットはドラッグで配置</span
                 >
               </h3>
+
+              <!-- 施設プリセットパレット: 標準施設(削除不可)+保存済みテンプレートをD&Dで配置する -->
+              <div class="fac-palette">
+                <span class="pal-label">プリセット:</span>
+                <span
+                  v-for="(p, i) in allFacPresets"
+                  :key="i"
+                  class="fac-chip"
+                  :class="{ std: i < stdFacPresets.length, bulksel: bulkPlace && bulkPresetIdx === i }"
+                  draggable="true"
+                  :title="`${p.alt}（${p.key}${MOVE_KEYS.includes(p.key) ? '→' + (plotTowns.find((t) => t.no === p.dest)?.name ?? p.dest) : ''}）`"
+                  @click="clickPresetChip(i)"
+                  @dragstart="onPresetDragStart(i)"
+                  @dragend="onDragEnd"
+                >
+                  <img :src="`/img/svg/${p.img}.svg`" width="20" height="20" alt="" draggable="false" />
+                  {{ p.alt }}
+                  <button
+                    v-if="i >= stdFacPresets.length"
+                    class="chip-del"
+                    title="プリセットを削除"
+                    @click.stop="deletePreset(i - stdFacPresets.length)"
+                  >×</button>
+                </span>
+                <button class="btn mini" @click="presetFormOpen = !presetFormOpen">
+                  {{ presetFormOpen ? 'キャンセル' : '＋プリセット追加' }}
+                </button>
+              </div>
+              <label class="chk bulk-toggle">
+                <input type="checkbox" v-model="bulkPlace" />
+                一括配置モード（プリセットをクリックで選択し、セルをクリックで連続配置）
+              </label>
+              <div v-if="presetFormOpen" class="preset-form">
+                <label>表示名<input v-model="presetDraft.alt" maxlength="40" placeholder="例: 中央デパート" /></label>
+                <label>遷移先
+                  <select v-model="presetDraft.key">
+                    <option v-for="k in KEY_PRESETS" :key="k.key" :value="k.key">{{ k.label }}</option>
+                  </select>
+                </label>
+                <label v-if="MOVE_KEYS.includes(presetDraft.key)">行き先の街
+                  <select v-model.number="presetDraft.dest">
+                    <option v-for="t in plotTowns" :key="t.no" :value="t.no">{{ t.name }}</option>
+                  </select>
+                </label>
+                <label>画像
+                  <select v-model="presetDraft.img">
+                    <option v-for="im in IMG_PRESETS" :key="im" :value="im">{{ im }}</option>
+                  </select>
+                </label>
+                <img :src="`/img/svg/${presetDraft.img}.svg`" width="24" height="24" alt="" />
+                <button class="btn primary mini" :disabled="busy" @click="savePreset">保存</button>
+              </div>
               <div class="plot-towns">
                 <button
                   v-for="t in plotTowns"
@@ -1030,16 +1420,17 @@ async function deleteEdit() {
                         @drop="onDrop(c, ri)"
                       >
                         <img
-                          v-if="assetImgForTown(c, ri, facilityTown)"
+                          v-for="(im, li) in assetImgsForTown(c, ri, facilityTown)"
+                          :key="'br' + li"
                           class="bg-ref"
-                          :src="assetUrl(assetImgForTown(c, ri, facilityTown))"
+                          :src="assetUrl(im)"
                           alt=""
                           draggable="false"
                         />
                         <img
                           v-if="mapFacilityAt(c, ri, facilityTown) >= 0"
                           class="fac-icon"
-                          :src="`/img/${townmap[mapFacilityAt(c, ri, facilityTown)].img}.gif`"
+                          :src="`/img/svg/${townmap[mapFacilityAt(c, ri, facilityTown)].img}.svg`"
                           width="24"
                           height="24"
                           :alt="townmap[mapFacilityAt(c, ri, facilityTown)].alt"
@@ -1075,7 +1466,7 @@ async function deleteEdit() {
                     <label class="chk"><input type="checkbox" v-model="selectedFacility.ready" /> 有効（オフで準備中=クリック不可）</label>
                     <div class="sel-prev">
                       位置: {{ mapRows[selectedFacility.row] }}{{ selectedFacility.col }}
-                      <img :src="`/img/${selectedFacility.img}.gif`" width="28" height="28" alt="" />
+                      <img :src="`/img/svg/${selectedFacility.img}.svg`" width="28" height="28" alt="" />
                     </div>
                     <button class="btn danger mini" @click="deleteFacility">この施設を削除</button>
                   </div>
@@ -1096,7 +1487,7 @@ async function deleteEdit() {
             <section v-else-if="mapLayer === 'asset'" class="panel">
               <h3>
                 背景アセット配置<span class="hint">
-                  ※街を選び、パレットで素材を選んでマスをクリックで配置。同じ素材を再クリックで除去。施設は右下に薄く参照表示（編集不可）</span
+                  ※街を選び、パレットで素材を選んでマスをクリックで連続配置（常に一括配置）。1マスに最大{{ MAX_BG_LAYERS }}層まで重ね置き可（後から置いたものが上）。最上層と同じ素材を再クリック、または消しゴムで最上層を除去。施設は右下に薄く参照表示（編集不可）</span
                 >
               </h3>
               <div class="plot-towns">
@@ -1111,6 +1502,15 @@ async function deleteEdit() {
                 </button>
               </div>
               <div class="bg-palette">
+                <div class="bg-swatch-wrap">
+                  <button
+                    :class="['bg-swatch', 'eraser', { active: assetBrush === BG_ERASER }]"
+                    title="消しゴム（クリックで最上層を除去）"
+                    @click="assetBrush = BG_ERASER"
+                  >
+                    消
+                  </button>
+                </div>
                 <div v-for="a in bgPalette" :key="a" class="bg-swatch-wrap">
                   <button
                     :class="['bg-swatch', { active: assetBrush === a }]"
@@ -1148,27 +1548,29 @@ async function deleteEdit() {
                       :key="'a' + r + '-' + c"
                       class="cell bgcell"
                       :class="{
-                        occ: assetIdxAt(c, ri) >= 0,
+                        occ: assetImgsAt(c, ri).length > 0,
                         dragsrc: bgDrag?.kind === 'tile' && bgDrag.col === c && bgDrag.row === ri,
                       }"
-                      :title="`${r}${c}${assetImgAt(c, ri) ? ' : ' + assetImgAt(c, ri) : ''}`"
+                      :title="`${r}${c}${assetImgsAt(c, ri).length ? ' : ' + assetImgsAt(c, ri).join(' / ') : ''}`"
                       @click="paintAsset(c, ri)"
                       @dragover.prevent
                       @drop="onBgDrop(c, ri)"
                     >
                       <img
-                        v-if="assetImgAt(c, ri)"
+                        v-for="(im, li) in assetImgsAt(c, ri)"
+                        :key="'t' + li"
                         class="bg-tile"
-                        :src="assetUrl(assetImgAt(c, ri))"
-                        :alt="assetImgAt(c, ri)"
-                        draggable="true"
-                        @dragstart="onBgTileDragStart(c, ri)"
+                        :src="assetUrl(im)"
+                        :alt="im"
+                        :draggable="li === assetImgsAt(c, ri).length - 1"
+                        @dragstart="li === assetImgsAt(c, ri).length - 1 ? onBgTileDragStart(c, ri) : undefined"
                         @dragend="onBgDragEnd"
                       />
+                      <span v-if="assetImgsAt(c, ri).length > 1" class="layer-badge">{{ assetImgsAt(c, ri).length }}</span>
                       <img
                         v-if="mapFacilityAt(c, ri, assetTown) >= 0"
                         class="fac-ref"
-                        :src="`/img/${townmap[mapFacilityAt(c, ri, assetTown)].img}.gif`"
+                        :src="`/img/svg/${townmap[mapFacilityAt(c, ri, assetTown)].img}.svg`"
                         alt=""
                         draggable="false"
                       />
@@ -1204,7 +1606,7 @@ async function deleteEdit() {
               <option value="add_money">お金</option>
             </select>
             <select v-if="op.op === 'add_param'" v-model="op.param">
-              <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">{{ p }}</option>
+              <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">{{ PARAM_FULL[p] ?? p }}</option>
             </select>
             <input type="number" v-model.number="op.amount" />
             <button class="btn mini" @click="editing.effect.splice(i, 1)">×</button>
@@ -1239,7 +1641,7 @@ async function deleteEdit() {
           <div class="ops-head">就くための必要条件(以上)</div>
           <div v-for="(req, i) in editingJob.requirements" :key="i" class="op-row">
             <select v-model="req.param">
-              <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">{{ p }}</option>
+              <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">{{ PARAM_FULL[p] ?? p }}</option>
             </select>
             <span class="ge">≧</span>
             <input type="number" v-model.number="req.value" />
@@ -1255,7 +1657,7 @@ async function deleteEdit() {
               <option value="add_money">お金</option>
             </select>
             <select v-if="op.op === 'add_param'" v-model="op.param">
-              <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">{{ p }}</option>
+              <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">{{ PARAM_FULL[p] ?? p }}</option>
             </select>
             <input type="number" v-model.number="op.amount" />
             <button class="btn mini" @click="editingJob.effect.splice(i, 1)">×</button>
@@ -1562,6 +1964,77 @@ async function deleteEdit() {
   color: #fff;
   font-weight: bold;
 }
+/* 施設プリセットパレット(D&Dで配置) */
+.fac-palette {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 6px 0;
+  font-size: 12px;
+}
+.fac-palette .pal-label {
+  color: #556;
+  font-weight: bold;
+}
+.fac-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #fff;
+  border: 1px solid #9ab;
+  border-radius: 5px;
+  padding: 2px 4px 2px 6px;
+  cursor: grab;
+}
+/* 一括配置モードで選択中のプリセット。 */
+.fac-chip.bulksel {
+  outline: 2px solid #e67e22;
+  background: #fff3e0;
+}
+.bulk-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  margin: 4px 0 8px;
+  font-size: 12px;
+  color: #555;
+  cursor: pointer;
+  font-size: 12px;
+}
+.fac-chip:active {
+  cursor: grabbing;
+}
+/* 標準施設(組み込み・削除不可)は淡色で区別 */
+.fac-chip.std {
+  background: #f2f6fa;
+  border-color: #b8c4d0;
+}
+.chip-del {
+  border: 0;
+  background: none;
+  color: #c66;
+  cursor: pointer;
+  font-weight: bold;
+  padding: 0 2px;
+}
+.preset-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  background: #f4f7f0;
+  border: 1px solid #ccd;
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+.preset-form label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
 .map-grid .cell.movable {
   background: #e3f0ff;
 }
@@ -1637,6 +2110,28 @@ async function deleteEdit() {
 }
 .bg-swatch.active {
   border-color: #ff6600;
+}
+/* 消しゴムスウォッチ(最上層を除去する特殊筆)。 */
+.bg-swatch.eraser {
+  width: 32px;
+  height: 32px;
+  line-height: 1;
+  font-size: 12px;
+  color: #a33;
+  font-weight: bold;
+}
+/* 2層以上重なっているマスの層数バッジ。 */
+.map-grid .cell.bgcell .layer-badge {
+  position: absolute;
+  left: 1px;
+  top: 1px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 9px;
+  line-height: 1;
+  padding: 1px 3px;
+  border-radius: 3px;
+  pointer-events: none;
 }
 .bg-swatch img {
   display: block;

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <ellipse cx="16" cy="30" rx="11.5" ry="1.5" fill="#000" opacity="0.12"/>
+  <rect x="5" y="14" width="22" height="15.5" rx="1" fill="#f0a63c"/>
+  <rect x="13.5" y="18.5" width="5" height="4.5" rx="0.8" fill="#fff4dc"/>
+  <rect x="13.5" y="25" width="5" height="4.5" fill="#d88f28"/>
+  <rect x="5" y="5" width="22" height="9" rx="1.5" fill="#ffffff" stroke="#d8d8d8" stroke-width="0.6"/>
+  <text x="16" y="11.6" text-anchor="middle" font-family="Arial, sans-serif" font-weight="900" font-size="6" fill="#7a4a2a">RACE</text>
+</svg>

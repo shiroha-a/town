@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- modern flat-roof villa with a wide glass front -->
+  <ellipse cx="16" cy="30" rx="12.5" ry="1.6" fill="#000" opacity="0.12"/>
+  <rect x="8" y="6" width="19" height="9" rx="0.8" fill="#ffffff" stroke="#e0e0da" stroke-width="0.7"/>
+  <rect x="10" y="8" width="8" height="5" fill="#a8dcec"/>
+  <path d="M14 8v5" stroke="#ffffff" stroke-width="0.8"/>
+  <rect x="20" y="8" width="4.5" height="5" fill="#eceae2"/>
+  <rect x="4.5" y="15" width="23" height="13.5" rx="0.8" fill="#f4f4ee" stroke="#e0e0da" stroke-width="0.7"/>
+  <rect x="7" y="17" width="13" height="9.5" fill="#a8dcec"/>
+  <g stroke="#ffffff" stroke-width="0.9">
+    <path d="M11.3 17v9.5M15.6 17v9.5"/>
+  </g>
+  <rect x="21.8" y="19" width="3.6" height="9.5" fill="#c9b8a0"/>
+  <circle cx="27.2" cy="26.5" r="2.3" fill="#5f9e68"/>
+  <rect x="26.8" y="27.5" width="0.9" height="2" fill="#7a5c3c"/>
+</svg>

@@ -116,10 +116,21 @@ func TestValidateAssets(t *testing.T) {
 		{"row below range", []Asset{{Img: "kusa", Col: 1, Row: -1}}, true},
 		{"row above range", []Asset{{Img: "kusa", Col: 1, Row: Rows}}, true},
 		{
-			"duplicate cell",
+			"stacked layers within cap ok",
 			[]Asset{
 				{Img: "kusa", Col: 3, Row: 2},
-				{Img: "umi", Col: 3, Row: 2},
+				{Img: "tree1", Col: 3, Row: 2},
+				{Img: "tree2", Col: 3, Row: 2},
+			},
+			false,
+		},
+		{
+			"stacked layers exceed cap",
+			[]Asset{
+				{Img: "kusa", Col: 3, Row: 2},
+				{Img: "tree1", Col: 3, Row: 2},
+				{Img: "tree2", Col: 3, Row: 2},
+				{Img: "tree3", Col: 3, Row: 2},
 			},
 			true,
 		},

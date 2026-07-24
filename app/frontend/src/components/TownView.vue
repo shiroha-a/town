@@ -4,6 +4,9 @@ import { api, WARP_FEE, assetUrl, type Player, type Params, type TownFacility, t
 import { satietyLabel } from '../params';
 import CommandIcon from './CommandIcon.vue';
 import PowerBar from './PowerBar.vue';
+import GreetingModal from './GreetingModal.vue';
+// v-touch-label: title属性のラベルをモバイルの長押しで表示する
+import { vTouchLabel } from '../touchlabel';
 
 const props = defineProps<{ player: Player }>();
 const emit = defineEmits<{
@@ -59,9 +62,10 @@ const houseAt = (col: number, row: number) =>
   houses.value.find((h) => h.town === displayTown.value && h.col === col && h.row === row);
 
 // 背景アセット(装飾レイヤー)。施設の下にセル単位で敷く。表示中の街のものを描画する。
+// 1マスに複数レイヤーを重ねられる(配列順=重ね順、後のものが上)。
 const assets = ref<TownAsset[]>([]);
-const assetAt = (col: number, row: number) =>
-  assets.value.find((a) => a.town === displayTown.value && a.col === col && a.row === row);
+const assetsAt = (col: number, row: number) =>
+  assets.value.filter((a) => a.town === displayTown.value && a.col === col && a.row === row);
 
 const cols = Array.from({ length: 16 }, (_, i) => i + 1);
 const rows = 'ABCDEFGHIJKL'.split('');
@@ -97,7 +101,7 @@ onMounted(async () => {
   }
   refreshUnread();
   try {
-    greetings.value = await api.greetings(6);
+    greetings.value = await api.greetings(30);
   } catch {
     greetings.value = [];
   }
@@ -127,8 +131,14 @@ function rollEvent() {
     .catch(() => {});
 }
 
-// 街トップのチャット窓に表示する最新のあいさつ。
+// 街トップのチャット窓に表示する最新のあいさつ。管理人・宣伝は別枠に
+// 区切って表示するため、広めに取得してフロント側で振り分ける。
 const greetings = ref<import('../api').Greeting[]>([]);
+const adminGreets = computed(() => greetings.value.filter((g) => g.category === '管理人').slice(0, 2));
+const adGreets = computed(() => greetings.value.filter((g) => g.category === '宣伝').slice(0, 5));
+const normalGreets = computed(
+  () => greetings.value.filter((g) => g.category !== '管理人' && g.category !== '宣伝').slice(0, 15),
+);
 
 // 新着メール通知。街トップ表示時とポーリングで未読数を取得する。
 const unreadMail = ref(0);
@@ -141,6 +151,17 @@ async function refreshUnread() {
 }
 // 親のポーリング(player更新)に合わせて未読も更新する。
 watch(() => props.player, refreshUnread);
+
+// 現在の総参加者(20分以内に活動したプレイヤー)。ポーリングに合わせて更新する。
+const participants = ref<{ id: number; display_name: string }[]>([]);
+async function refreshParticipants() {
+  try {
+    participants.value = await api.participants();
+  } catch {
+    participants.value = [];
+  }
+}
+watch(() => props.player, refreshParticipants, { immediate: true });
 
 // 株価ティッカー(街トップの帯)。全銘柄の現在株価と前回比の騰落方向を表示する。
 const stockPrices = ref<{ symbol: string; price: number }[]>([]);
@@ -322,6 +343,7 @@ const commands = computed(() => {
     { key: 'mail', img: 'mail', alt: 'メール' },
     { key: 'doukyo', img: 'doukyo', alt: 'キャラ作成' },
     { key: 'aisatu', img: 'aisatu', alt: 'あいさつ' },
+    { key: 'ashiato', img: 'ashiato', alt: '足あと帳' },
   );
   // 家を持っていれば「家の設定」(my_house_settei相当の専用画面)を出す。
   if (hasOwnHouse.value) {
@@ -332,7 +354,7 @@ const commands = computed(() => {
 });
 // 画面上部のトースト(iOS通知バナー風。上からスライドインし数秒で自動的に消える)。
 // 仕事結果やランダムイベントの発生を通知する。
-type ToastVariant = 'work' | 'event-good' | 'event-bad' | 'error';
+type ToastVariant = 'work' | 'event-good' | 'event-bad' | 'error' | 'item';
 interface Toast {
   variant: ToastVariant;
   title: string;
@@ -399,8 +421,51 @@ function clickCommand(key: string) {
     emit('reload');
     rollEvent(); // 更新ボタンでもイベントを抽選する
   } else if (key === 'off') emit('logout');
+  else if (key === 'aisatu') aisatuOpen.value = true; // ページ遷移せずモーダルで投稿
   else emit('navigate', key);
 }
+
+// あいさつのSNS風投稿モーダル(コマンドバーの「あいさつ」から開く)。
+const aisatuOpen = ref(false);
+// 投稿後: 結果(報酬/ジャンケン/罰金)をトーストで見せ、チャット窓を更新する
+// (SSEが生きていれば二重更新になるだけで無害。切断時のフォールバック)。
+async function onAisatuPosted(lines: string[], good: boolean) {
+  showToast({
+    variant: good ? 'item' : 'event-bad',
+    title: '投稿しました',
+    lines,
+    icon: 'aisatu',
+  });
+  try {
+    greetings.value = await api.greetings(30);
+  } catch {
+    // チャット窓の更新失敗は無視(次回リロードで追いつく)
+  }
+}
+// 投稿時刻の表示(RFC3339をブラウザのローカルタイムゾーンでMM/DD HH:MMに)。
+function fmtChatTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+// チャット窓のリアルタイム購読(SSE)。誰かが投稿するとサーバが最新6件をpushする。
+// EventSourceは切断時に自動再接続する。
+let greetES: EventSource | undefined;
+onMounted(() => {
+  greetES = new EventSource('/api/v1/greetings/stream?limit=30');
+  greetES.onmessage = (e) => {
+    try {
+      greetings.value = JSON.parse(e.data);
+    } catch {
+      // 壊れたフレームは無視(次のpushで回復)
+    }
+  };
+});
+onUnmounted(() => {
+  greetES?.close();
+});
 
 // サーバ時刻基準の1秒クロック。就労クールタイムのカウントダウンをリアルタイム表示する。
 const skewMs = ref(0);
@@ -549,9 +614,7 @@ const paramBar = (v: number) => Math.max(3, Math.round((v / paramMax.value) * 10
   </div>
 
   <div class="participant">
-    現在の総参加者(1人)：★
-    <img :src="`/img/img062.gif`" width="12" height="12" style="vertical-align: middle" alt="" />
-    <span class="name">{{ player.display_name }}</span>★
+    現在の総参加者({{ participants.length }}人)：★<template v-for="p in participants" :key="p.id"><img src="/img/svg/tree2.svg" width="12" height="12" style="vertical-align: middle" alt="" /><span class="name" :class="{ me: p.id === player.id }">{{ p.display_name }}</span>★</template>
   </div>
 
   <button v-if="unreadMail > 0" class="mail-notice" @click="nav('mail')">
@@ -569,36 +632,40 @@ const paramBar = (v: number) => Math.max(3, Math.round((v / paramMax.value) * 10
             <div class="th">{{ r }}</div>
             <div v-for="c in cols" :key="r + '-' + c" class="tcell">
               <img
-                v-if="assetAt(c, ri)"
+                v-for="(a, ai) in assetsAt(c, ri)"
+                :key="'bg' + ai"
                 class="cell-bg"
-                :src="assetUrl(assetAt(c, ri)!.img)"
+                :src="assetUrl(a.img)"
                 alt=""
               />
               <!-- 空き地(家が建っていないakichiマス)。クリックでそのマスに建築。 -->
               <button
                 v-if="akichiAt(c, ri) && !houseAt(c, ri) && !facilityAt(c, ri)"
+                v-touch-label
                 class="facility akichi-btn"
                 :title="`${r}${c}（空き地）クリックで建築`"
                 @click="clickAkichi(c, ri)"
               >
-                <img class="akichi-img" src="/img/akiti.gif" alt="空き地" />
+                <img class="akichi-img" src="/img/svg/akiti.svg" alt="空き地" />
               </button>
               <!-- 家。クリックでその家のコンテンツ(訪問パネル)を開く。 -->
               <button
                 v-else-if="houseAt(c, ri)"
+                v-touch-label
                 class="facility house-cell"
                 :title="houseTitle(houseAt(c, ri)!)"
                 @click="clickHouse(houseAt(c, ri)!)"
               >
-                <img :src="`/img/${houseAt(c, ri)!.exterior}.gif`" :alt="`${houseAt(c, ri)!.owner_name}さんの家`" />
+                <img :src="`/img/svg/${houseAt(c, ri)!.exterior}.svg`" :alt="`${houseAt(c, ri)!.owner_name}さんの家`" />
               </button>
               <button
                 v-if="facilityAt(c, ri)"
+                v-touch-label
                 class="facility"
                 :title="facilityAt(c, ri)!.alt"
                 @click="clickFacility(facilityAt(c, ri)!)"
               >
-                <img :src="`/img/${facilityAt(c, ri)!.img}.gif`" :alt="facilityAt(c, ri)!.alt" />
+                <img :src="`/img/svg/${facilityAt(c, ri)!.img}.svg`" :alt="facilityAt(c, ri)!.alt" />
               </button>
             </div>
           </template>
@@ -616,17 +683,29 @@ const paramBar = (v: number) => Math.max(3, Math.round((v / paramMax.value) * 10
         </template>
         <template v-else>株価情報を取得中…</template>
       </div>
-      <button class="chat-head" @click="nav('aisatu')">●チャット(あいさつ)</button>
+      <div class="chat-head">●チャット(あいさつ)</div>
       <div v-if="greetings.length" class="chat-feed">
-        <div v-for="g in greetings" :key="g.id" class="chat-line">
+        <!-- 管理人からのお知らせ(最新2件) -->
+        <div v-if="adminGreets.length" class="chat-sec admin-sec">
+          <div v-for="g in adminGreets" :key="g.id" class="chat-line">
+            <span class="cbadge admin">管理人</span>
+            <span class="ct">{{ fmtChatTime(g.posted_at) }}</span>
+            <span class="cn">{{ g.user_name }}</span>：<span :style="{ color: g.color }">{{ g.body }}</span>
+          </div>
+        </div>
+        <!-- 宣伝(有料枠、最新2件) -->
+        <div v-if="adGreets.length" class="chat-sec ad-sec">
+          <div v-for="g in adGreets" :key="g.id" class="chat-line">
+            <span class="cbadge ad">宣伝</span>
+            <span class="ct">{{ fmtChatTime(g.posted_at) }}</span>
+            <span class="cn">{{ g.user_name }}</span>：<span :style="{ color: g.color }">{{ g.body }}</span>
+          </div>
+        </div>
+        <!-- 通常のあいさつ(最新6件) -->
+        <div v-for="g in normalGreets" :key="g.id" class="chat-line">
+          <span class="ct">{{ fmtChatTime(g.posted_at) }}</span>
           <span class="cn">{{ g.user_name }}</span>：<span :style="{ color: g.color }">{{ g.body }}</span>
         </div>
-      </div>
-      <div class="left-links">
-        <button class="link-btn" @click="nav('shopping')">商店街</button>
-        <button class="link-btn" @click="nav('ashiato')">足あと帳</button>
-        <button class="link-btn" @click="nav('yakuba')">役場(住民名鑑)</button>
-        <button class="link-btn" @click="nav('casino')">カジノ</button>
       </div>
     </div>
 
@@ -641,12 +720,18 @@ const paramBar = (v: number) => Math.max(3, Math.round((v / paramMax.value) * 10
           </div>
 
           <div class="command-icons">
-            <button v-if="isAdmin" class="admin-link" title="管理者画面" @click="nav('admin')">
-              ⚙ 管理者
+            <button v-if="isAdmin" v-touch-label class="admin-link" title="管理者画面" @click="nav('admin')">
+              <svg class="gear" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+                <path
+                  fill="currentColor"
+                  d="M19.14 12.94a7.07 7.07 0 0 0 .05-.94 7.07 7.07 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.61-.22l-2.39.96a7.3 7.3 0 0 0-1.62-.94l-.36-2.54A.5.5 0 0 0 13.9 2h-3.8a.5.5 0 0 0-.49.42l-.36 2.54a7.3 7.3 0 0 0-1.62.94l-2.39-.96a.5.5 0 0 0-.61.22L2.71 8.48a.5.5 0 0 0 .12.64l2.03 1.58a7.07 7.07 0 0 0 0 1.88l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .61.22l2.39-.96a7.3 7.3 0 0 0 1.62.94l.36 2.54a.5.5 0 0 0 .49.42h3.8a.5.5 0 0 0 .49-.42l.36-2.54a7.3 7.3 0 0 0 1.62-.94l2.39.96a.5.5 0 0 0 .61-.22l1.92-3.32a.5.5 0 0 0-.12-.64ZM12 15.5A3.5 3.5 0 1 1 15.5 12 3.5 3.5 0 0 1 12 15.5Z"
+                />
+              </svg>
             </button>
             <button
               v-for="cmd in commands"
               :key="cmd.key"
+              v-touch-label
               :title="cmd.key === 'work' && workCooldown ? `まだ働けません（${workCooldown}）` : cmd.alt"
               :disabled="cmd.key === 'work' && !!workCooldown"
               :class="{ 'on-cooldown': cmd.key === 'work' && !!workCooldown }"
@@ -739,4 +824,13 @@ const paramBar = (v: number) => Math.max(3, Math.round((v / paramMax.value) * 10
     [HOME]<br />
     - TOWN リライト版 (Vue) -
   </div>
+
+  <!-- あいさつ投稿モーダル(SNS風) -->
+  <GreetingModal
+    v-if="aisatuOpen"
+    :player="player"
+    @close="aisatuOpen = false"
+    @update="emit('reload')"
+    @posted="onAisatuPosted"
+  />
 </template>

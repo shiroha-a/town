@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <ellipse cx="16" cy="29.6" rx="9" ry="1.4" fill="#000" opacity="0.1"/>
+  <rect x="11.2" y="18" width="1.6" height="11" fill="#adadad"/>
+  <rect x="19.2" y="18" width="1.6" height="11" fill="#adadad"/>
+  <rect x="6.5" y="8" width="19" height="10.5" rx="1" fill="#ffffff" stroke="#9a9a9a" stroke-width="1"/>
+  <text x="16" y="15.6" text-anchor="middle" font-family="Arial, sans-serif" font-weight="900" font-size="6" fill="#8a8a8a" letter-spacing="0.5">SALE</text>
+</svg>

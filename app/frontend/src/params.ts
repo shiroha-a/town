@@ -23,6 +23,29 @@ export const PARAM_LABEL: Record<string, string> = {
   omoshirosa: '面',
 };
 
+// パラメータの正式名称(管理画面の編集フォームなど、省略しない表示で使う)。
+export const PARAM_FULL: Record<string, string> = {
+  energy: '身体パワー',
+  nou_energy: '頭脳パワー',
+  satiety: '満腹度',
+  kokugo: '国語',
+  suugaku: '数学',
+  rika: '理科',
+  syakai: '社会',
+  eigo: '英語',
+  ongaku: '音楽',
+  bijutsu: '美術',
+  looks: 'ルックス',
+  tairyoku: '体力',
+  kenkou: '健康',
+  speed: 'スピード',
+  power: 'パワー',
+  wanryoku: '腕力',
+  kyakuryoku: '脚力',
+  love: 'LOVE',
+  omoshirosa: '面白さ',
+};
+
 // デパート等の横並び表で使う列順(パワー2種 + 詳細16種)。
 export const PARAM_ORDER: string[] = [
   'energy',
@@ -67,6 +90,11 @@ export const PARAM_COLUMNS: { key: string; label: string }[] = [
   { key: 'energy', label: '身' },
   { key: 'nou_energy', label: '頭' },
 ];
+
+// カロリー列を面白さ(面)の右に挿す画面向けの分割ビュー。
+const calCut = PARAM_COLUMNS.findIndex((c) => c.key === 'omoshirosa') + 1;
+export const PARAM_COLUMNS_MAIN = PARAM_COLUMNS.slice(0, calCut);
+export const PARAM_COLUMNS_POWER = PARAM_COLUMNS.slice(calCut);
 
 const label = (k: string) => PARAM_LABEL[k] ?? k;
 

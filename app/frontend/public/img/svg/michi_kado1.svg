@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- road corner: opens right + down (rounded outer corner at top-left) -->
+  <path d="M32 9H17Q9 9 9 17V32H23V23H32Z" fill="#b6b6ae"/>
+  <path d="M32 9.8H17.4Q9.8 9.8 9.8 17.4V32" fill="none" stroke="#90908a" stroke-width="0.8"/>
+  <path d="M32 22.2H22.2V32" fill="none" stroke="#90908a" stroke-width="0.8"/>
+</svg>

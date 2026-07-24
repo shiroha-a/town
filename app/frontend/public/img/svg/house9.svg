@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <ellipse cx="16" cy="30" rx="11" ry="1.5" fill="#000" opacity="0.12"/>
+  <!-- rooftop room with its own cap -->
+  <rect x="12.5" y="5.2" width="7" height="4.2" fill="#faf4d8"/>
+  <rect x="14.2" y="6.2" width="3.6" height="2.6" rx="0.5" fill="#bfe6f0" stroke="#8fb8c4" stroke-width="0.5"/>
+  <rect x="11" y="2.9" width="10" height="2.6" rx="1" fill="#2e6b6b"/>
+  <!-- 2F eave / wall -->
+  <rect x="5" y="9.4" width="22" height="3.6" rx="1" fill="#2e6b6b"/>
+  <rect x="6" y="13" width="20" height="6" fill="#faf4d8"/>
+  <rect x="13.8" y="14.3" width="4.4" height="3.4" rx="0.6" fill="#bfe6f0" stroke="#8fb8c4" stroke-width="0.5"/>
+  <!-- 1F eave / wall -->
+  <rect x="5" y="19" width="22" height="3.4" rx="1" fill="#2e6b6b"/>
+  <rect x="6" y="22.4" width="20" height="7.1" fill="#faf4d8"/>
+  <rect x="13" y="24" width="6" height="5" rx="0.7" fill="#bfe6f0" stroke="#8fb8c4" stroke-width="0.6"/>
+</svg>

@@ -304,7 +304,7 @@ async function doSell() {
       </div>
 
       <div class="house-summary panel-white">
-        <img :src="`/img/${house.exterior}.gif`" :alt="house.exterior" />
+        <img :src="`/img/svg/${house.exterior}.svg`" :alt="house.exterior" />
         <div>
           <div class="hs-loc">{{ townName(house.town) }}／{{ rowLabel(house.row) }}{{ house.col }}</div>
           <div v-if="house.tuika !== 0" class="hs-sub">外装 {{ house.exterior }}・種別 {{ TUIKA_NAMES[house.tuika] ?? '?' }}</div>

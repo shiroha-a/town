@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- road: vertical straight -->
+  <rect x="9" y="0" width="14" height="32" fill="#b6b6ae"/>
+  <g stroke="#90908a" stroke-width="0.8">
+    <path d="M9.8 0v32"/>
+    <path d="M22.2 0v32"/>
+  </g>
+  <g fill="#ffffff" opacity="0.9">
+    <rect x="15.4" y="0.5" width="1.2" height="3" rx="0.6"/>
+    <rect x="15.4" y="8.5" width="1.2" height="3" rx="0.6"/>
+    <rect x="15.4" y="16.5" width="1.2" height="3" rx="0.6"/>
+    <rect x="15.4" y="24.5" width="1.2" height="3" rx="0.6"/>
+  </g>
+</svg>

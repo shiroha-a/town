@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <ellipse cx="16" cy="30" rx="11.5" ry="1.5" fill="#000" opacity="0.12"/>
+  <rect x="5" y="11" width="22" height="18.5" rx="1" fill="#fdfdfd" stroke="#e0e0e0" stroke-width="0.6"/>
+  <!-- 屋上の十字看板(屋根に重ねて接地させる) -->
+  <rect x="11.5" y="3.5" width="9" height="9.5" rx="1.5" fill="#ffffff" stroke="#e0e0e0" stroke-width="0.6"/>
+  <g fill="#e0392b">
+    <rect x="14.7" y="5" width="2.6" height="6.5" rx="0.6"/>
+    <rect x="12.75" y="6.95" width="6.5" height="2.6" rx="0.6"/>
+  </g>
+  <rect x="8" y="16.5" width="4" height="4" fill="#cfe0ee"/>
+  <rect x="14" y="16.5" width="4" height="4" fill="#cfe0ee"/>
+  <rect x="20" y="16.5" width="4" height="4" fill="#cfe0ee"/>
+  <rect x="13.5" y="23.5" width="5" height="6" fill="#e8eef4"/>
+</svg>

@@ -75,13 +75,24 @@ type Store struct {
 	mu         sync.RWMutex
 	facilities []Facility
 	assets     []Asset
+	presets    []FacilityPreset
+}
+
+// FacilityPreset is a reusable facility template (画像・表示名・遷移先) the
+// admin saves once and then places onto the map by drag & drop.
+type FacilityPreset struct {
+	Key  string `json:"key"`  // ビュー遷移先 or 移動施設(walk/bus)。空不可
+	Img  string `json:"img"`  // gif名(拡張子なし)。空不可
+	Alt  string `json:"alt"`  // 表示名
+	Dest int    `json:"dest"` // 移動施設の行き先の街(非移動施設は無視)
 }
 
 // NewStore loads the map from the DB, seeding it from defaults if absent.
 func NewStore(ctx context.Context, pool *pgxpool.Pool, defaults []Facility) (*Store, error) {
-	s := &Store{pool: pool, facilities: defaults, assets: []Asset{}}
-	var facData, assetData []byte
-	err := pool.QueryRow(ctx, `SELECT facilities, assets FROM town_map WHERE id = 1`).Scan(&facData, &assetData)
+	s := &Store{pool: pool, facilities: defaults, assets: []Asset{}, presets: []FacilityPreset{}}
+	var facData, assetData, presetData []byte
+	err := pool.QueryRow(ctx, `SELECT facilities, assets, facility_presets FROM town_map WHERE id = 1`).
+		Scan(&facData, &assetData, &presetData)
 	if errors.Is(err, pgx.ErrNoRows) {
 		b, _ := json.Marshal(defaults)
 		if _, e := pool.Exec(ctx,
@@ -106,7 +117,53 @@ func NewStore(ctx context.Context, pool *pgxpool.Pool, defaults []Facility) (*St
 		}
 		s.assets = as
 	}
+	if len(presetData) > 0 {
+		var ps []FacilityPreset
+		if err := json.Unmarshal(presetData, &ps); err != nil {
+			return nil, fmt.Errorf("parse facility presets: %w", err)
+		}
+		s.presets = ps
+	}
 	return s, nil
+}
+
+// GetPresets returns a copy of the saved facility presets.
+func (s *Store) GetPresets() []FacilityPreset {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]FacilityPreset, len(s.presets))
+	copy(out, s.presets)
+	return out
+}
+
+// SetPresets validates and persists the facility preset list.
+func (s *Store) SetPresets(ctx context.Context, ps []FacilityPreset) error {
+	for i, p := range ps {
+		if p.Key == "" {
+			return fmt.Errorf("preset %d: key is required", i)
+		}
+		if p.Img == "" {
+			return fmt.Errorf("preset %d: img is required", i)
+		}
+		if len([]rune(p.Alt)) > 40 {
+			return fmt.Errorf("preset %d: alt too long (max 40)", i)
+		}
+		if p.Dest < 0 || p.Dest >= MaxTowns {
+			return fmt.Errorf("preset %d: dest %d out of range 0..%d", i, p.Dest, MaxTowns-1)
+		}
+	}
+	b, err := json.Marshal(ps)
+	if err != nil {
+		return fmt.Errorf("encode facility presets: %w", err)
+	}
+	if _, err := s.pool.Exec(ctx,
+		`UPDATE town_map SET facility_presets = $1, updated_at = now() WHERE id = 1`, b); err != nil {
+		return fmt.Errorf("save facility presets: %w", err)
+	}
+	s.mu.Lock()
+	s.presets = ps
+	s.mu.Unlock()
+	return nil
 }
 
 // Get returns a copy of the current facilities.
@@ -178,10 +235,14 @@ func (s *Store) Set(ctx context.Context, fs []Facility) error {
 	return nil
 }
 
-// ValidateAssets checks grid bounds, required img, and one-asset-per-cell
+// MaxAssetLayers is how many background assets may stack on one cell.
+// Array order is the z-order: later entries draw on top (e.g. tree over grass).
+const MaxAssetLayers = 3
+
+// ValidateAssets checks grid bounds, required img, and the per-cell layer cap
 // within each town.
 func ValidateAssets(as []Asset) error {
-	seen := make(map[[3]int]bool, len(as))
+	count := make(map[[3]int]int, len(as))
 	for i, a := range as {
 		if a.Img == "" {
 			return fmt.Errorf("asset %d: img is required", i)
@@ -196,10 +257,10 @@ func ValidateAssets(as []Asset) error {
 			return fmt.Errorf("asset %d: row %d out of range 0..%d", i, a.Row, Rows-1)
 		}
 		cell := [3]int{a.Town, a.Col, a.Row}
-		if seen[cell] {
-			return fmt.Errorf("asset %d: town %d cell (%d,%d) already occupied", i, a.Town, a.Col, a.Row)
+		count[cell]++
+		if count[cell] > MaxAssetLayers {
+			return fmt.Errorf("asset %d: town %d cell (%d,%d) exceeds %d layers", i, a.Town, a.Col, a.Row, MaxAssetLayers)
 		}
-		seen[cell] = true
 	}
 	return nil
 }

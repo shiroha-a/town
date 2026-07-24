@@ -2,12 +2,14 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/shiroha-a/town/internal/casino"
 	"github.com/shiroha-a/town/internal/ledger"
+	"github.com/shiroha-a/town/internal/news"
 	"github.com/shiroha-a/town/internal/rng"
 )
 
@@ -91,6 +93,18 @@ func DrawLoto6(ctx context.Context, tx pgx.Tx, led *ledger.Repo, r *rng.Rand, to
 				{Account: ledger.SavingsAccount(pid), Delta: amt},
 			}); err != nil {
 				return drawn, err
+			}
+			// 高額当選は街のニュースにする(レガシーには無いが、抽選が
+			// 深夜のバッチで進むため役場で結果が分かるようにする)。
+			if amt >= news.TownWideMoneyThreshold {
+				name, err := news.ActorName(ctx, tx, pid)
+				if err != nil {
+					return drawn, err
+				}
+				if err := news.RecordFor(ctx, tx, news.KindPrize, pid, name,
+					fmt.Sprintf("%sさんがロト6で%d円当選しました。", name, amt), nil, true); err != nil {
+					return drawn, err
+				}
 			}
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM loto6_tickets WHERE game_date=$1`, date); err != nil {

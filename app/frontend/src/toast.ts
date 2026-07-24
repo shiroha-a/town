@@ -1,5 +1,5 @@
 import { ref, onUnmounted } from 'vue';
-import { PARAM_ORDER, PARAM_LABEL } from './params';
+import { PARAM_ORDER, PARAM_FULL } from './params';
 import type { Player } from './api';
 
 // 画面上部トースト(iOS通知バナー風)の1件分のデータ。variantで色/アイコンの見た目を切り替える。
@@ -45,11 +45,14 @@ export function buildEffectLines(before: Player, after: Player): string[] {
   if (nDiff !== 0) lines.push(`頭脳パワー ${nDiff > 0 ? '+' : ''}${nDiff}`);
   const sDiff = after.status.satiety - before.status.satiety;
   if (sDiff !== 0) lines.push(`満腹度 ${sDiff > 0 ? '+' : ''}${sDiff}`);
+  // 体重はg保持なのでkg小数1位で表示する(カロリーのある飲食で増える)。
+  const wDiff = after.status.weight_g - before.status.weight_g;
+  if (wDiff !== 0) lines.push(`体重 ${wDiff > 0 ? '+' : ''}${(wDiff / 1000).toFixed(1)}kg`);
   const bp = before.params as unknown as Record<string, number>;
   const ap = after.params as unknown as Record<string, number>;
   for (const key of PARAM_ORDER) {
     const diff = (ap[key] ?? 0) - (bp[key] ?? 0);
-    if (diff !== 0) lines.push(`${PARAM_LABEL[key] ?? key} ${diff > 0 ? '+' : ''}${diff}`);
+    if (diff !== 0) lines.push(`${PARAM_FULL[key] ?? key} ${diff > 0 ? '+' : ''}${diff}`);
   }
   return lines.length ? lines : ['変化なし'];
 }

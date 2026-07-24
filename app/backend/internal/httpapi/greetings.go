@@ -64,6 +64,8 @@ func (s *Server) postGreeting(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	// SSE購読者(街トップのチャット窓)へ新着を配信する。
+	s.greetHub.notify()
 	writeJSON(w, http.StatusOK, map[string]any{"player": toResp(p), "result": result})
 }
 
@@ -81,5 +83,6 @@ func (s *Server) deleteGreeting(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.greetHub.notify()
 	writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
 }

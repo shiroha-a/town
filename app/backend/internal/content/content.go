@@ -272,6 +272,7 @@ type ShopItem struct {
 	Durability      int            `json:"durability"`       // 1セットあたりの耐久(使用可能回数/日数)
 	DurabilityUnit  string         `json:"durability_unit"`  // 'use'(回) or 'day'(日)
 	PowerMultiplier int            `json:"power_multiplier"` // 温泉の回復速度倍率(0=温泉ではない)
+	CalorieG        int            `json:"calorie_g"`        // 摂取カロリー(食べると体重+calorie_g g)
 	Stock           int            `json:"stock"`            // 本日の店頭在庫(-1=無制限)
 }
 
@@ -294,7 +295,7 @@ func (s *Service) listItems(ctx context.Context, facility string) ([]ShopItem, e
 		adjust = 2
 	}
 	query := `SELECT ci.id, ci.name, COALESCE(ci.category, ''), ci.price, ci.effect,
-	                 ci.use_interval_min, ci.durability, ci.durability_unit, ci.power_multiplier,
+	                 ci.use_interval_min, ci.durability, ci.durability_unit, ci.power_multiplier, ci.calorie_g,
 	                 CASE WHEN ci.stock_master IS NULL THEN -1
 	                      ELSE COALESCE(sds.remaining, GREATEST(1, CEIL(ci.stock_master::numeric / $3)::int))
 	                 END AS stock
@@ -320,7 +321,7 @@ func (s *Service) listItems(ctx context.Context, facility string) ([]ShopItem, e
 			it      ShopItem
 			effJSON []byte
 		)
-		if err := rows.Scan(&it.ID, &it.Name, &it.Category, &it.Price, &effJSON, &it.IntervalMin, &it.Durability, &it.DurabilityUnit, &it.PowerMultiplier, &it.Stock); err != nil {
+		if err := rows.Scan(&it.ID, &it.Name, &it.Category, &it.Price, &effJSON, &it.IntervalMin, &it.Durability, &it.DurabilityUnit, &it.PowerMultiplier, &it.CalorieG, &it.Stock); err != nil {
 			return nil, fmt.Errorf("scan item: %w", err)
 		}
 		it.Money, it.Params = effectSummary(effJSON)

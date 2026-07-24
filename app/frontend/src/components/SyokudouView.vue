@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { api, type Player, type ShopItem } from '../api';
-import { PARAM_COLUMNS, satietyLabel } from '../params';
+import { PARAM_COLUMNS_MAIN, PARAM_COLUMNS_POWER, satietyLabel } from '../params';
 import Toast from './Toast.vue';
 import { useToast, buildEffectLines } from '../toast';
 
@@ -72,19 +72,17 @@ async function eat(food: ShopItem) {
         <thead>
           <tr>
             <th class="l">メニュー</th>
-            <th>値段</th>
-            <th v-for="c in PARAM_COLUMNS" :key="c.key" class="p">{{ c.label }}</th>
             <th>在庫</th>
             <th></th>
+            <th>値段</th>
+            <th v-for="c in PARAM_COLUMNS_MAIN" :key="c.key" class="p">{{ c.label }}</th>
+            <th>ｶﾛﾘｰ</th>
+            <th v-for="c in PARAM_COLUMNS_POWER" :key="c.key" class="p">{{ c.label }}</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="food in menu" :key="food.id" :data-test="`food-${food.id}`">
             <td class="l">{{ food.name }}</td>
-            <td class="price">{{ yen(food.price) }}円</td>
-            <td v-for="c in PARAM_COLUMNS" :key="c.key" class="p" :class="{ up: (food.params[c.key] ?? 0) > 0 }">
-              {{ food.params[c.key] ?? 0 }}
-            </td>
             <td class="stock" :class="{ soldout: food.stock === 0 }">
               {{ food.stock < 0 ? '-' : food.stock === 0 ? '売切' : food.stock }}
             </td>
@@ -92,6 +90,14 @@ async function eat(food: ShopItem) {
               <button class="btn" :disabled="busy || food.stock === 0" @click="eat(food)">
                 {{ food.stock === 0 ? '売切' : '食べる' }}
               </button>
+            </td>
+            <td class="price">{{ yen(food.price) }}円</td>
+            <td v-for="c in PARAM_COLUMNS_MAIN" :key="c.key" class="p" :class="{ up: (food.params[c.key] ?? 0) > 0 }">
+              {{ food.params[c.key] ?? 0 }}
+            </td>
+            <td class="cal">{{ food.calorie_g > 0 ? food.calorie_g : '-' }}</td>
+            <td v-for="c in PARAM_COLUMNS_POWER" :key="c.key" class="p" :class="{ up: (food.params[c.key] ?? 0) > 0 }">
+              {{ food.params[c.key] ?? 0 }}
             </td>
           </tr>
         </tbody>

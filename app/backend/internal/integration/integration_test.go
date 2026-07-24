@@ -30,10 +30,11 @@ import (
 	"github.com/shiroha-a/town/internal/keiba"
 	"github.com/shiroha-a/town/internal/ledger"
 	"github.com/shiroha-a/town/internal/mail"
+	"github.com/shiroha-a/town/internal/news"
 	"github.com/shiroha-a/town/internal/player"
+	"github.com/shiroha-a/town/internal/ranking"
 	"github.com/shiroha-a/town/internal/rng"
 	"github.com/shiroha-a/town/internal/settings"
-	"github.com/shiroha-a/town/internal/shop"
 	"github.com/shiroha-a/town/internal/stock"
 	"github.com/shiroha-a/town/internal/townmap"
 	"github.com/shiroha-a/town/internal/worker"
@@ -145,7 +146,7 @@ func setup(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 		pool.Close()
 		t.Fatalf("townmap set: %v", err)
 	}
-	srv := httptest.NewServer(httpapi.NewServer(svc, actions, contentSvc, st, tmap, stock.New(pool), keiba.New(pool, rng.New(7)), mail.New(pool, time.UTC, 5), greeting.New(pool), attendance.New(pool, time.UTC, 5), shop.New(pool), cleague.New(pool)))
+	srv := httptest.NewServer(httpapi.NewServer(svc, actions, contentSvc, st, tmap, stock.New(pool), keiba.New(pool, rng.New(7)), mail.New(pool, time.UTC, 5), greeting.New(pool), attendance.New(pool, time.UTC, 5), cleague.New(pool), news.New(pool), ranking.New(pool)))
 	t.Cleanup(func() {
 		srv.Close()
 		pool.Close()
@@ -2266,7 +2267,7 @@ func TestEvent(t *testing.T) {
 	// 慈善イベントの受け皿として別プレイヤーも用意。
 	register(t, srv.URL, "misskey.example", "bob")
 
-	roll := func(key string) (int, bool) {
+	roll := func(key string) (int, bool, string) {
 		b, _ := json.Marshal(map[string]any{"idempotency_key": key})
 		resp, err := http.Post(srv.URL+"/api/v1/players/"+strconv.FormatInt(alice.ID, 10)+"/events/roll", "application/json", bytes.NewReader(b))
 		if err != nil {
@@ -2279,21 +2280,36 @@ func TestEvent(t *testing.T) {
 			} `json:"event"`
 		}
 		json.NewDecoder(resp.Body).Decode(&r)
-		return resp.StatusCode, r.Event != nil
+		name := ""
+		if r.Event != nil {
+			name = r.Event.Name
+		}
+		return resp.StatusCode, r.Event != nil, name
 	}
 
 	events := 0
 	for i := 0; i < 180; i++ {
-		// レート制限を解除して毎回抽選させる。
+		// レート制限を解除して毎回抽選させる。健康の貯金を積んでおき、
+		// 体調不良イベントが「代入」で即風邪ぎみにすることを検証する。
 		if _, err := pool.Exec(ctx, `DELETE FROM player_facility_cooldowns WHERE player_id=$1 AND facility='event_roll'`, alice.ID); err != nil {
 			t.Fatal(err)
 		}
-		code, fired := roll(fmt.Sprintf("ev-%d", i))
+		if _, err := pool.Exec(ctx, `UPDATE player_status SET disease_index=50 WHERE player_id=$1`, alice.ID); err != nil {
+			t.Fatal(err)
+		}
+		code, fired, name := roll(fmt.Sprintf("ev-%d", i))
 		if code != http.StatusOK {
 			t.Fatalf("roll status = %d", code)
 		}
 		if fired {
 			events++
+		}
+		if name == "体調不良" {
+			var idx int
+			pool.QueryRow(ctx, `SELECT disease_index FROM player_status WHERE player_id=$1`, alice.ID).Scan(&idx)
+			if idx != -8 {
+				t.Errorf("体調不良後のdisease_index = %d, want -8 (代入されていない)", idx)
+			}
 		}
 	}
 	if events == 0 {
@@ -2309,8 +2325,137 @@ func TestEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 	roll("rate-1")
-	if _, fired := roll("rate-2"); fired {
+	if _, fired, _ := roll("rate-2"); fired {
 		t.Errorf("second roll within interval fired an event (rate limit not applied)")
+	}
+}
+
+// TestCustomEvent verifies an admin-defined event joins the roll pool and its
+// outcome (money/params) is applied.
+func TestCustomEvent(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	alice := register(t, srv.URL, "misskey.example", "cevalice")
+	// 前回実行の残留イベントを消してから投入する(content_eventsはsetupで消えない)。
+	if _, err := pool.Exec(ctx, `DELETE FROM content_events`); err != nil {
+		t.Fatal(err)
+	}
+	// 重み100のカスタムイベント(+100円, kokugo+2)を投入(組み込み21種に対し圧倒的に出やすい)。
+	// メッセージはプレースホルダー({money}/{name})の展開も検証する。
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO content_events (name, message, good, money_min, money_max, params, weight, enabled)
+		 VALUES ('検証入金', '{name}は検証で{money}円拾いました。', true, 100, 100, '{"kokugo": 2}', 100, true)`); err != nil {
+		t.Fatalf("insert event: %v", err)
+	}
+	roll := func(key string) (string, string) {
+		b, _ := json.Marshal(map[string]any{"idempotency_key": key})
+		resp, err := http.Post(srv.URL+"/api/v1/players/"+strconv.FormatInt(alice.ID, 10)+"/events/roll", "application/json", bytes.NewReader(b))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var r struct {
+			Event *struct {
+				Name    string `json:"name"`
+				Message string `json:"message"`
+			} `json:"event"`
+		}
+		json.NewDecoder(resp.Body).Decode(&r)
+		if r.Event != nil {
+			return r.Event.Name, r.Event.Message
+		}
+		return "", ""
+	}
+	fired := false
+	for i := 0; i < 300 && !fired; i++ {
+		if _, err := pool.Exec(ctx, `DELETE FROM player_facility_cooldowns WHERE player_id=$1 AND facility='event_roll'`, alice.ID); err != nil {
+			t.Fatal(err)
+		}
+		var before int64
+		pool.QueryRow(ctx, `SELECT COALESCE(SUM(delta),0) FROM ledger_entry WHERE account=$1`,
+			fmt.Sprintf("player:%d", alice.ID)).Scan(&before)
+		var kokugoBefore int
+		pool.QueryRow(ctx, `SELECT kokugo FROM player_status WHERE player_id=$1`, alice.ID).Scan(&kokugoBefore)
+		if name, msg := roll(fmt.Sprintf("cev-%d", i)); name == "検証入金" {
+			fired = true
+			if msg != "cevaliceは検証で100円拾いました。" {
+				t.Errorf("message = %q, want placeholder-expanded", msg)
+			}
+			var after int64
+			pool.QueryRow(ctx, `SELECT COALESCE(SUM(delta),0) FROM ledger_entry WHERE account=$1`,
+				fmt.Sprintf("player:%d", alice.ID)).Scan(&after)
+			if after-before != 100 {
+				t.Errorf("money delta = %d, want 100", after-before)
+			}
+			var kokugoAfter int
+			pool.QueryRow(ctx, `SELECT kokugo FROM player_status WHERE player_id=$1`, alice.ID).Scan(&kokugoAfter)
+			if kokugoAfter-kokugoBefore != 2 {
+				t.Errorf("kokugo delta = %d, want 2", kokugoAfter-kokugoBefore)
+			}
+		}
+	}
+	if !fired {
+		t.Error("custom event never fired in 300 rolls")
+	}
+}
+
+// TestCustomEventConditions verifies eligibility conditions: a condition-gated
+// event never fires for a player who fails the condition, and can fire once the
+// condition is met.
+func TestCustomEventConditions(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	alice := register(t, srv.URL, "misskey.example", "cevcond")
+	if _, err := pool.Exec(ctx, `DELETE FROM content_events`); err != nil {
+		t.Fatal(err)
+	}
+	// 条件: kokugo>=9999。重み100で、条件さえ満たせば高確率で出る。
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO content_events (name, message, good, money_min, money_max, params, weight, enabled, conditions)
+		 VALUES ('秀才の幸運', '勉強のご褒美に10円拾いました。', true, 10, 10, '{}', 100, true,
+		         '[{"pred":"param_gte","param":"kokugo","value":9999}]')`); err != nil {
+		t.Fatalf("insert event: %v", err)
+	}
+	roll := func(key string) string {
+		b, _ := json.Marshal(map[string]any{"idempotency_key": key})
+		resp, err := http.Post(srv.URL+"/api/v1/players/"+strconv.FormatInt(alice.ID, 10)+"/events/roll", "application/json", bytes.NewReader(b))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var r struct {
+			Event *struct {
+				Name string `json:"name"`
+			} `json:"event"`
+		}
+		json.NewDecoder(resp.Body).Decode(&r)
+		if r.Event != nil {
+			return r.Event.Name
+		}
+		return ""
+	}
+	// 条件未達(kokugo初期値)では絶対に出ない。
+	for i := 0; i < 120; i++ {
+		if _, err := pool.Exec(ctx, `DELETE FROM player_facility_cooldowns WHERE player_id=$1 AND facility='event_roll'`, alice.ID); err != nil {
+			t.Fatal(err)
+		}
+		if roll(fmt.Sprintf("cc-a%d", i)) == "秀才の幸運" {
+			t.Fatal("gated event fired for unqualified player")
+		}
+	}
+	// 条件を満たすと出る。
+	if _, err := pool.Exec(ctx, `UPDATE player_status SET kokugo=9999 WHERE player_id=$1`, alice.ID); err != nil {
+		t.Fatal(err)
+	}
+	fired := false
+	for i := 0; i < 300 && !fired; i++ {
+		if _, err := pool.Exec(ctx, `DELETE FROM player_facility_cooldowns WHERE player_id=$1 AND facility='event_roll'`, alice.ID); err != nil {
+			t.Fatal(err)
+		}
+		fired = roll(fmt.Sprintf("cc-b%d", i)) == "秀才の幸運"
+	}
+	if !fired {
+		t.Error("gated event never fired for qualified player in 300 rolls")
 	}
 }
 
@@ -2326,102 +2471,6 @@ func grantMoney(t *testing.T, pool *pgxpool.Pool, playerID, amount int64) {
 		`INSERT INTO ledger_entry (tx_id, account, delta) VALUES ($1, $2, $3), ($1, $4, $5)`,
 		txid, "player:"+strconv.FormatInt(playerID, 10), amount, "system:test_grant", -amount); err != nil {
 		t.Fatal(err)
-	}
-}
-
-// TestShop covers player shops: opening (fee), stocking from inventory, a buyer
-// purchasing (revenue to owner's savings, item transfers), offerings with the
-// daily cap, and self-buy rejection. Ledger stays zero-sum.
-func TestShop(t *testing.T) {
-	srv, pool := setup(t)
-	ctx := context.Background()
-	led := ledger.New(pool)
-	alice := register(t, srv.URL, "misskey.example", "alice") // 店主
-	bob := register(t, srv.URL, "misskey.example", "bob")     // 買い手
-	grantMoney(t, pool, alice.ID, 2000000)                    // 開設費+仕入れ用
-
-	var drinkID int64
-	if err := pool.QueryRow(ctx, `SELECT id FROM content_items WHERE name = '栄養ドリンク'`).Scan(&drinkID); err != nil {
-		t.Fatal(err)
-	}
-	// aliceが4セット仕入れる。
-	for i := 0; i < 4; i++ {
-		if _, code := itemAction(t, srv.URL, "/buy", alice.ID, drinkID, fmt.Sprintf("ab%d", i)); code != http.StatusOK {
-			t.Fatalf("alice buy status = %d", code)
-		}
-	}
-
-	shopPost := func(id int64, path string, body map[string]any) (int, []byte) {
-		b, _ := json.Marshal(body)
-		resp, err := http.Post(srv.URL+"/api/v1/players/"+strconv.FormatInt(id, 10)+path, "application/json", bytes.NewReader(b))
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer resp.Body.Close()
-		data, _ := io.ReadAll(resp.Body)
-		return resp.StatusCode, data
-	}
-
-	// 開店。
-	if code, body := shopPost(alice.ID, "/shop/open", map[string]any{"name": "アリス商店", "idempotency_key": "open1"}); code != http.StatusOK {
-		t.Fatalf("open shop status = %d, body = %s", code, body)
-	}
-	// 在庫を3出品(価格1000)。
-	if code, body := shopPost(alice.ID, "/shop/stock", map[string]any{"item_id": drinkID, "quantity": 3, "price": 1000}); code != http.StatusOK {
-		t.Fatalf("stock status = %d, body = %s", code, body)
-	}
-
-	// 商店一覧にアリス商店。
-	resp, _ := http.Get(srv.URL + "/api/v1/shops")
-	var shops []struct {
-		OwnerID int64 `json:"owner_id"`
-	}
-	json.NewDecoder(resp.Body).Decode(&shops)
-	resp.Body.Close()
-	if len(shops) != 1 || shops[0].OwnerID != alice.ID {
-		t.Fatalf("shops = %+v", shops)
-	}
-
-	// bobが2個購入 → bob -2000, alice貯金 +2000, 在庫3→1。
-	if code, body := shopPost(bob.ID, "/shop/buy", map[string]any{"owner_id": alice.ID, "item_id": drinkID, "quantity": 2, "idempotency_key": "buy1"}); code != http.StatusOK {
-		t.Fatalf("buy status = %d, body = %s", code, body)
-	}
-	var bobMoney, aliceSavings int64
-	pool.QueryRow(ctx, `SELECT COALESCE(SUM(delta),0) FROM ledger_entry WHERE account = $1`, "player:"+strconv.FormatInt(bob.ID, 10)).Scan(&bobMoney)
-	pool.QueryRow(ctx, `SELECT COALESCE(SUM(delta),0) FROM ledger_entry WHERE account = $1`, "savings:"+strconv.FormatInt(alice.ID, 10)).Scan(&aliceSavings)
-	if bobMoney != 500000-2000 {
-		t.Errorf("bob money = %d, want %d", bobMoney, 500000-2000)
-	}
-	if aliceSavings != 2000 {
-		t.Errorf("alice savings = %d, want 2000", aliceSavings)
-	}
-	var stock int
-	pool.QueryRow(ctx, `SELECT stock FROM shop_listings WHERE owner_id=$1 AND item_id=$2`, alice.ID, drinkID).Scan(&stock)
-	if stock != 1 {
-		t.Errorf("stock = %d, want 1", stock)
-	}
-	var bobQty int
-	pool.QueryRow(ctx, `SELECT quantity FROM player_items WHERE player_id=$1 AND item_id=$2`, bob.ID, drinkID).Scan(&bobQty)
-	if bobQty != 2 {
-		t.Errorf("bob qty = %d, want 2", bobQty)
-	}
-
-	// 自分の店では買えない → 422。
-	if code, _ := shopPost(alice.ID, "/shop/buy", map[string]any{"owner_id": alice.ID, "item_id": drinkID, "quantity": 1, "idempotency_key": "self1"}); code != http.StatusUnprocessableEntity {
-		t.Errorf("self-buy status = %d, want 422", code)
-	}
-
-	// bobがさい銭5000 → OK。さらに20000で日次上限(合計25000>20000)超過 → 422。
-	if code, _ := shopPost(bob.ID, "/shop/offer", map[string]any{"owner_id": alice.ID, "amount": 5000, "idempotency_key": "off1"}); code != http.StatusOK {
-		t.Errorf("offer status != 200")
-	}
-	if code, _ := shopPost(bob.ID, "/shop/offer", map[string]any{"owner_id": alice.ID, "amount": 20000, "idempotency_key": "off2"}); code != http.StatusUnprocessableEntity {
-		t.Errorf("over-limit offer status = %d, want 422", code)
-	}
-
-	// 台帳ゼロ和。
-	if sum, _ := led.AuditZeroSum(ctx); sum != 0 {
-		t.Errorf("ledger zero-sum broken: %d", sum)
 	}
 }
 

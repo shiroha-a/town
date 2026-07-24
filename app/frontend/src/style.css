@@ -9,8 +9,15 @@
 
 body {
   margin: 5px;
-  background-color: #e0ffff;
-  background-image: url(/img/wall029.gif);
+  background-color: #ffffff;
+  /* 旧wall029.gif(緑チェック柄)のCSS再現: 100px周期の帯2方向+帯内ストライプ。
+     半透明緑の重なりで元GIFと同じ3段階の濃淡になる。 */
+  --plaid: rgba(59, 197, 115, 0.25);
+  background-image:
+    repeating-linear-gradient(90deg, transparent 0 50px, var(--plaid) 50px 100px),
+    repeating-linear-gradient(90deg, transparent 0 56px, var(--plaid) 56px 61px, transparent 61px 89px, var(--plaid) 89px 94px, transparent 94px 100px),
+    repeating-linear-gradient(0deg, transparent 0 50px, var(--plaid) 50px 100px),
+    repeating-linear-gradient(0deg, transparent 0 56px, var(--plaid) 56px 61px, transparent 61px 89px, var(--plaid) 89px 94px, transparent 94px 100px);
   font-family: "MS PGothic", Osaka, "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
   font-size: 13px;
   color: #000;
@@ -179,6 +186,9 @@ body {
   padding: 3px 6px;
   margin-bottom: 4px;
 }
+.participant .name.me {
+  font-weight: bold;
+}
 
 /* 街マップ */
 .mapwrap {
@@ -228,15 +238,12 @@ body {
   object-fit: cover;
   pointer-events: none;
 }
-/* 空き地(akichi)マス: うっすらと表示し、クリックで建設会社(そのマス選択済み)へ。 */
+/* 空き地(akichi)マス: クリックで建設会社(そのマス選択済み)へ。
+   SVGのSALE看板は配色が控えめなので減光せずそのまま表示する。 */
 .townmap-grid .akichi-btn .akichi-img {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  opacity: 0.55;
-}
-.townmap-grid .akichi-btn:hover .akichi-img {
-  opacity: 0.9;
 }
 .facility {
   width: 100%;
@@ -311,19 +318,9 @@ body {
 }
 /* 街トップのチャット窓(あいさつの最新表示) */
 .chat-head {
-  display: block;
-  width: 100%;
-  text-align: left;
-  border: 0;
-  background: transparent;
   color: #ff6600;
   font-size: 12px;
   margin-bottom: 2px;
-  cursor: pointer;
-  padding: 0;
-}
-.chat-head:hover {
-  text-decoration: underline;
 }
 .chat-feed {
   background: #fff;
@@ -332,7 +329,7 @@ body {
   margin-bottom: 4px;
   font-size: 11px;
   line-height: 1.6;
-  max-height: 96px;
+  max-height: 200px;
   overflow-y: auto;
 }
 .chat-feed .chat-line {
@@ -343,6 +340,42 @@ body {
 .chat-feed .cn {
   color: #333399;
   font-weight: bold;
+}
+/* 投稿時刻(MM/DD HH:MM) */
+.chat-feed .ct {
+  color: #999;
+  font-size: 10px;
+  margin-right: 3px;
+}
+/* 管理人・宣伝の区切り枠 */
+.chat-feed .chat-sec {
+  margin: 0 0 3px;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+.chat-feed .admin-sec {
+  background: #fff0f0;
+  border: 1px solid #e8bcbc;
+}
+.chat-feed .ad-sec {
+  background: #fffbe0;
+  border: 1px solid #e6d890;
+}
+.chat-feed .cbadge {
+  display: inline-block;
+  font-size: 9px;
+  line-height: 1.4;
+  padding: 0 4px;
+  border-radius: 3px;
+  color: #fff;
+  margin-right: 3px;
+  vertical-align: 1px;
+}
+.chat-feed .cbadge.admin {
+  background: #cc3333;
+}
+.chat-feed .cbadge.ad {
+  background: #cc9900;
 }
 
 /* 街情報ヘッダ */
@@ -407,21 +440,19 @@ body {
   display: block;
 }
 /* 管理者導線(アイコンではなくテキストボタン)。幅は内容に合わせる。 */
+/* 管理者画面ボタン: ラベル無しの歯車アイコン(SVG)。他コマンドと同サイズで、
+   スレート地+アンバーの歯車で管理者専用と分かる配色にする。 */
 .command-icons button.admin-link {
-  width: auto;
-  height: auto;
   background: #445566;
-  color: #fff;
+  color: #ffcc33;
   border: 1px solid #223344;
-  border-radius: 6px;
-  padding: 2px 8px;
-  font-size: 12px;
-  line-height: 1.4;
-  box-shadow: none;
 }
 .command-icons button.admin-link:hover {
-  outline: 0;
   background: #33475a;
+  color: #ffe066;
+}
+.command-icons button.admin-link .gear {
+  display: block;
 }
 /* 就労クールタイム中の仕事アイコン: グレーアウト+残り時間ラベル */
 .command-icons button.on-cooldown {
@@ -620,10 +651,13 @@ body {
   background-color: #e04040;
 }
 
-/* パラメータ一覧(右端) */
+/* パラメータ一覧(右端)。市松柄の上でも読めるよう白背景の箱にする。 */
 .params {
   width: 150px;
   flex: 0 0 auto;
+  background: #fff;
+  border: 1px solid #cfcfcf;
+  padding: 4px 6px;
 }
 .params .phead {
   text-align: center;
@@ -761,4 +795,20 @@ h1.town-title {
   color: #666;
   letter-spacing: 4px;
   margin: 8px 0;
+}
+
+/* モバイル長押しで表示するラベルバブル(v-touch-labelディレクティブが生成) */
+.touch-label-tip {
+  position: fixed;
+  z-index: 3000;
+  display: none;
+  background: rgba(40, 40, 40, 0.92);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 4px 10px;
+  border-radius: 6px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
 }

@@ -18,7 +18,7 @@ const emit = defineEmits<{ 'update:modelValue': [key: string] }>();
       :title="`${e.key}（${e.price}万）`"
       @click="emit('update:modelValue', e.key)"
     >
-      <img :src="`/img/${e.key}.gif`" :alt="e.key" />
+      <img :src="`/img/svg/${e.key}.svg`" :alt="e.key" />
       <span class="ext-price">{{ e.price }}万</span>
     </button>
   </div>

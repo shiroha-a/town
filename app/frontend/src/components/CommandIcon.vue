@@ -68,5 +68,12 @@ defineProps<{ name: string }>();
       <path d="M5 9.5V21h14V9.5" />
       <path d="M9.5 21v-6h5v6" />
     </g>
+    <!-- 足あと帳(左右の足あと: 足裏+かかと) -->
+    <g v-else-if="name === 'ashiato'">
+      <ellipse cx="8" cy="7.5" rx="2.4" ry="3.8" transform="rotate(-15 8 7.5)" />
+      <ellipse cx="6.6" cy="14.2" rx="1.2" ry="1.5" transform="rotate(-15 6.6 14.2)" />
+      <ellipse cx="16" cy="12.5" rx="2.4" ry="3.8" transform="rotate(15 16 12.5)" />
+      <ellipse cx="17.4" cy="19.2" rx="1.2" ry="1.5" transform="rotate(15 17.4 19.2)" />
+    </g>
   </svg>
 </template>

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- road T: up + down + left -->
+  <rect x="9" y="0" width="14" height="32" fill="#b6b6ae"/>
+  <rect x="0" y="9" width="23" height="14" fill="#b6b6ae"/>
+  <g fill="none" stroke="#90908a" stroke-width="0.8">
+    <path d="M22.2 0V32"/>
+    <path d="M9.8 0V9.8H0"/>
+    <path d="M9.8 32V22.2H0"/>
+  </g>
+</svg>
