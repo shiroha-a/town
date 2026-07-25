@@ -1,6 +1,18 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
-import { api, type Player, type PublicSummary, type NewsEntry } from '../api';
+import {
+  api,
+  type Player,
+  type PublicSummary,
+  type NewsEntry,
+  type TownFacility,
+  type TownAsset,
+  type HouseCell,
+  type Greeting,
+  type StockPrice,
+} from '../api';
+import TownMapBoard from './TownMapBoard.vue';
+import RichText from './RichText.vue';
 
 // MiAuthログイン。自分のMisskeyインスタンスを入力すると、そのインスタンスの
 // 承認画面へ飛び、戻ってくるとログインが完了する(アプリの事前登録は不要)。
@@ -20,6 +32,33 @@ const exchanging = ref(false);
 
 const roster = ref<PublicSummary[]>([]);
 const news = ref<NewsEntry[]>([]);
+const facilities = ref<TownFacility[]>([]);
+const assets = ref<TownAsset[]>([]);
+const houses = ref<HouseCell[]>([]);
+const stocks = ref<StockPrice[]>([]);
+const greetings = ref<Greeting[]>([]);
+
+// 株価は街トップと同じ並び(Ａ〜Ｅ)で出す。
+const tickerItems = computed(() =>
+  stocks.value.map((s, i) => ({
+    symbol: s.symbol,
+    label: 'ＡＢＣＤＥ'[i] ?? s.symbol,
+    priceText: s.price.toLocaleString('ja-JP'),
+  })),
+);
+// あいさつは新しい5件だけ。取得もその件数に絞る(全件引いて捨てない)。
+const GREET_LIMIT = 5;
+
+// 空の色は街トップと同じ基準(JSTの時刻)で決める。入口でも同じ空を見せる。
+const skyColor = computed(() => {
+  const jstHour = (new Date().getUTCHours() + 9) % 24;
+  if (jstHour >= 22) return '#333366';
+  if (jstHour >= 18) return '#666699';
+  if (jstHour >= 16) return '#ff9966';
+  if (jstHour >= 10) return '#ffff99';
+  if (jstHour >= 7) return '#ffcc66';
+  return '#333366';
+});
 
 onMounted(async () => {
   // 前回使ったインスタンスを覚えておく(入力の手間を減らすだけ)。
@@ -47,9 +86,22 @@ onMounted(async () => {
 });
 
 async function loadTown() {
-  const [r, n] = await Promise.allSettled([api.listPlayers(), api.townNews(8)]);
+  const [r, n, f, a, h, st, g] = await Promise.allSettled([
+    api.listPlayers(),
+    api.townNews(8),
+    api.townMap(),
+    api.townAssets(),
+    api.publicHouses(),
+    api.stocks(),
+    api.greetings(GREET_LIMIT),
+  ]);
   if (r.status === 'fulfilled') roster.value = r.value;
   if (n.status === 'fulfilled') news.value = n.value;
+  if (f.status === 'fulfilled') facilities.value = f.value;
+  if (a.status === 'fulfilled') assets.value = a.value;
+  if (h.status === 'fulfilled') houses.value = h.value;
+  if (st.status === 'fulfilled') stocks.value = st.value.prices;
+  if (g.status === 'fulfilled') greetings.value = g.value;
 }
 
 // 新しい住民から順に数人だけ出す。
@@ -62,6 +114,14 @@ const tokenSettingsURL = computed(() => {
   const host = props.loggedOutHost?.trim() || instance.value.trim();
   return host ? `https://${host}/settings/apps` : '';
 });
+
+// チャットの時刻表示は街トップと同じ形式にする。
+function fmtChatTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 
 function fmtDay(iso: string): string {
   const d = new Date(iso);
@@ -99,6 +159,34 @@ async function login() {
 
     <template v-else>
       <div class="cols">
+        <!-- 街の様子(レガシーの入口と同じく、入る前から街が見える) -->
+        <div class="ent-map">
+          <div class="box-head">この街のようす</div>
+          <div class="map-body">
+            <TownMapBoard
+              :facilities="facilities"
+              :assets="assets"
+              :houses="houses"
+              :town="0"
+              :sky-color="skyColor"
+            />
+            <div v-if="tickerItems.length" class="ticker">
+              <span v-for="s in tickerItems" :key="s.symbol" class="tk-item"
+                >{{ s.label }}株 {{ s.priceText }}円</span
+              >
+            </div>
+            <div v-if="greetings.length" class="chat">
+              <div class="chat-head">●チャット（あいさつ）</div>
+              <div v-for="g in greetings" :key="g.id" class="chat-line">
+                <span class="ct">{{ fmtChatTime(g.posted_at) }}</span>
+                <span class="cn">{{ g.user_name }}</span
+                >：<span :style="{ color: g.color }"><RichText :text="g.body" /></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="ent-side">
         <!-- 入口 -->
         <div class="ent-gate">
           <div class="box-head">街に入る</div>
@@ -168,6 +256,7 @@ async function login() {
             <div v-else class="empty">まだ何も起きていません。</div>
           </div>
         </div>
+        </div>
       </div>
     </template>
   </div>
@@ -175,7 +264,7 @@ async function login() {
 
 <style scoped>
 .entrance {
-  max-width: 860px;
+  max-width: 1100px;
   margin: 24px auto;
   padding: 0 8px;
 }
@@ -207,12 +296,62 @@ async function login() {
   align-items: flex-start;
   margin-top: 12px;
 }
-.ent-gate {
-  flex: 1 1 58%;
+.ent-map {
+  flex: 0 1 auto;
   min-width: 0;
 }
+.map-body {
+  background: #fff;
+  border: 1px solid #999;
+  padding: 6px;
+  overflow-x: auto;
+}
+.ticker {
+  border-top: 1px dotted #ccc;
+  margin-top: 6px;
+  padding-top: 5px;
+  font-size: 11px;
+  color: #cc0000;
+  text-align: center;
+}
+.tk-item {
+  margin: 0 5px;
+  white-space: nowrap;
+}
+.chat {
+  border-top: 1px dotted #ccc;
+  margin-top: 6px;
+  padding-top: 5px;
+}
+.chat-head {
+  font-size: 11px;
+  color: #663300;
+  font-weight: bold;
+}
+.chat-line {
+  font-size: 12px;
+  line-height: 1.7;
+  color: #333;
+  word-break: break-word;
+}
+.chat-line .ct {
+  color: #999;
+  font-size: 10px;
+  margin-right: 4px;
+}
+.chat-line .cn {
+  color: #006699;
+  font-weight: bold;
+}
+.ent-side {
+  flex: 1 1 340px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ent-gate,
 .ent-now {
-  flex: 1 1 42%;
   min-width: 0;
 }
 .box-head {
@@ -346,8 +485,8 @@ async function login() {
   .cols {
     flex-direction: column;
   }
-  .ent-gate,
-  .ent-now {
+  .ent-map,
+  .ent-side {
     width: 100%;
   }
   .town-name {

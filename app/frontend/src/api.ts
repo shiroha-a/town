@@ -1224,6 +1224,7 @@ export const api = {
     request<SerialUse[]>('GET', `/admin/serials/${sid}/uses`),
   rankingKeys: () => request<RankingKey[]>('GET', '/ranking/keys'),
   ranking: (key: string, self: number) => request<RankingResult>('GET', `/ranking?key=${key}&self=${self}`),
+  publicHouses: () => request<HouseCell[]>('GET', '/houses'),
   townMap: () => request<TownFacility[]>('GET', '/townmap'),
   townAssets: () => request<TownAsset[]>('GET', '/townassets'),
   towns: () => request<Town[]>('GET', '/towns'),

@@ -29,6 +29,17 @@ func (s *Server) building(w http.ResponseWriter, r *http.Request) {
 
 // houses returns every house across all towns (for main-screen grid rendering).
 // Own is relative to the caller (playerID).
+// publicHouses lists the houses on the map for visitors (入口の街マップ)。
+// 所有者名と外観は住民名鑑と同じく公開情報。playerID=0 なので own は常にfalse。
+func (s *Server) publicHouses(w http.ResponseWriter, r *http.Request) {
+	list, err := s.content.ListHouses(r.Context(), 0)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
 func (s *Server) houses(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
