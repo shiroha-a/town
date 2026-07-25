@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { api, type Player, type ShopItem } from '../api';
-import { PARAM_COLUMNS_MAIN, PARAM_COLUMNS_POWER, satietyLabel } from '../params';
+import { PARAM_COLUMNS, PARAM_COLUMNS_MAIN, PARAM_COLUMNS_POWER, satietyLabel } from '../params';
 import Toast from './Toast.vue';
 import { useToast, buildEffectLines } from '../toast';
 
@@ -81,12 +81,14 @@ async function eat(food: ShopItem) {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="food in menu" :key="food.id" :data-test="`food-${food.id}`">
-            <td class="l">{{ food.name }}</td>
-            <td class="stock" :class="{ soldout: food.stock === 0 }">
+          <template v-for="food in menu" :key="food.id">
+          <tr :data-test="`food-${food.id}`">
+            <!-- 効果行がある品はメニュー/在庫/食べるを2行にまたがせる(レガシー同様)。 -->
+            <td class="l" :rowspan="food.special ? 2 : 1">{{ food.name }}</td>
+            <td class="stock" :class="{ soldout: food.stock === 0 }" :rowspan="food.special ? 2 : 1">
               {{ food.stock < 0 ? '-' : food.stock === 0 ? '売切' : food.stock }}
             </td>
-            <td class="eat">
+            <td class="eat" :rowspan="food.special ? 2 : 1">
               <button class="btn" :disabled="busy || food.stock === 0" @click="eat(food)">
                 {{ food.stock === 0 ? '売切' : '食べる' }}
               </button>
@@ -100,6 +102,11 @@ async function eat(food: ShopItem) {
               {{ food.params[c.key] ?? 0 }}
             </td>
           </tr>
+          <!-- 特殊効果(体重/身長/病気)はレガシー同様に1行下へ出す。 -->
+          <tr v-if="food.special" class="special-row" :data-test="`special-${food.id}`">
+            <td :colspan="PARAM_COLUMNS.length + 2">【 効果 】{{ food.special }}</td>
+          </tr>
+          </template>
         </tbody>
       </table>
     </div>
@@ -200,5 +207,14 @@ async function eat(food: ShopItem) {
 .menu-table td.stock.soldout {
   color: #cc0000;
   font-weight: bold;
+}
+.menu-table tr.special-row td {
+  background: #fff6e0;
+  color: #995500;
+  text-align: left;
+  /* 本行(11px)より一段小さくし、行間も詰めて注記として従属させる */
+  font-size: 10px;
+  line-height: 1.25;
+  padding: 0 8px 1px;
 }
 </style>

@@ -3,6 +3,7 @@ import { ref, reactive, computed, onMounted } from 'vue';
 import {
   api,
   assetUrl,
+  DISEASE_OPTIONS,
   type Player,
   type EffectOp,
   type Condition,
@@ -1027,9 +1028,16 @@ async function deleteEdit() {
                   <select v-model="op.op">
                     <option value="add_param">パラメータ</option>
                     <option value="add_money">お金</option>
+                    <option value="add_weight_g">体重(g)</option>
+                    <option value="add_height_cm">身長(cm)</option>
+                    <option value="add_disease">病気指数</option>
                   </select>
                   <select v-if="op.op === 'add_param'" v-model="op.param">
                     <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">{{ PARAM_FULL[p] ?? p }}</option>
+                  </select>
+                  <select v-else-if="op.op === 'add_disease'" v-model="op.disease" title="空=万能(どの病気にも効く)">
+                    <option value="">万能</option>
+                    <option v-for="d in DISEASE_OPTIONS" :key="d" :value="d">{{ d }}のみ</option>
                   </select>
                   <input type="number" v-model.number="op.amount" />
                   <button class="btn mini" @click="item.effect.splice(i, 1)">×</button>
@@ -1102,9 +1110,16 @@ async function deleteEdit() {
                   <select v-model="op.op">
                     <option value="add_param">パラメータ</option>
                     <option value="add_money">お金</option>
+                    <option value="add_weight_g">体重(g)</option>
+                    <option value="add_height_cm">身長(cm)</option>
+                    <option value="add_disease">病気指数</option>
                   </select>
                   <select v-if="op.op === 'add_param'" v-model="op.param">
                     <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">{{ PARAM_FULL[p] ?? p }}</option>
+                  </select>
+                  <select v-else-if="op.op === 'add_disease'" v-model="op.disease" title="空=万能(どの病気にも効く)">
+                    <option value="">万能</option>
+                    <option v-for="d in DISEASE_OPTIONS" :key="d" :value="d">{{ d }}のみ</option>
                   </select>
                   <input type="number" v-model.number="op.amount" />
                   <button class="btn mini" @click="job.effect.splice(i, 1)">×</button>
@@ -1604,9 +1619,16 @@ async function deleteEdit() {
             <select v-model="op.op">
               <option value="add_param">パラメータ</option>
               <option value="add_money">お金</option>
+              <option value="add_weight_g">体重(g)</option>
+              <option value="add_height_cm">身長(cm)</option>
+              <option value="add_disease">病気指数</option>
             </select>
             <select v-if="op.op === 'add_param'" v-model="op.param">
               <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">{{ PARAM_FULL[p] ?? p }}</option>
+            </select>
+            <select v-else-if="op.op === 'add_disease'" v-model="op.disease" title="空=万能(どの病気にも効く)">
+              <option value="">万能</option>
+              <option v-for="d in DISEASE_OPTIONS" :key="d" :value="d">{{ d }}のみ</option>
             </select>
             <input type="number" v-model.number="op.amount" />
             <button class="btn mini" @click="editing.effect.splice(i, 1)">×</button>
@@ -1655,9 +1677,16 @@ async function deleteEdit() {
             <select v-model="op.op">
               <option value="add_param">パラメータ</option>
               <option value="add_money">お金</option>
+              <option value="add_weight_g">体重(g)</option>
+              <option value="add_height_cm">身長(cm)</option>
+              <option value="add_disease">病気指数</option>
             </select>
             <select v-if="op.op === 'add_param'" v-model="op.param">
               <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">{{ PARAM_FULL[p] ?? p }}</option>
+            </select>
+            <select v-else-if="op.op === 'add_disease'" v-model="op.disease" title="空=万能(どの病気にも効く)">
+              <option value="">万能</option>
+              <option v-for="d in DISEASE_OPTIONS" :key="d" :value="d">{{ d }}のみ</option>
             </select>
             <input type="number" v-model.number="op.amount" />
             <button class="btn mini" @click="editingJob.effect.splice(i, 1)">×</button>

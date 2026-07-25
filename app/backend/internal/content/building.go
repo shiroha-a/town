@@ -390,6 +390,7 @@ type HouseShopItem struct {
 	Money          int64          `json:"money"`           // 使用時のお金増減
 	Params         map[string]int `json:"params"`          // 使用時の上昇パラメータ
 	CalorieG       int            `json:"calorie_g"`       // カロリー(g換算)
+	Special        string         `json:"special"`         // 特殊効果の説明(体重/身長/病気)
 	Durability     int            `json:"durability"`      // 耐久
 	DurabilityUnit string         `json:"durability_unit"` // 'use'(回)/'day'(日)
 	IntervalMin    int            `json:"interval_min"`    // 使用間隔(分)
@@ -485,7 +486,7 @@ func (s *Service) HouseShop(ctx context.Context, viewerID, houseID int64) (*Hous
 				&it.IntervalMin, &it.BodyCost, &it.NouCost, &owned); err != nil {
 			return nil, fmt.Errorf("item detail: %w", err)
 		}
-		it.Money, it.Params = effectSummary(effJSON)
+		it.Money, it.Params, it.Special = effectSummary(effJSON)
 		if owned != nil {
 			it.Owned = *owned
 		}

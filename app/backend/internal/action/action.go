@@ -3238,17 +3238,20 @@ func (s *Service) readState(ctx context.Context, tx pgx.Tx, playerID int64) (eff
 		kokugo, suugaku, rika, syakai, eigo, ongaku, bijutsu        int
 		looks, tairyoku, kenkou, speed, power, wanryoku, kyakuryoku int
 		love, omoshirosa                                            int
+		weightG, heightCm, diseaseIndex                             int
 	)
 	err := tx.QueryRow(ctx,
 		`SELECT energy, energy_max, nou_energy, nou_energy_max, satiety,
 		        kokugo, suugaku, rika, syakai, eigo, ongaku, bijutsu,
 		        looks, tairyoku, kenkou, speed, power, wanryoku, kyakuryoku,
-		        love, omoshirosa
+		        love, omoshirosa,
+		        weight_g, height_cm, disease_index
 		 FROM player_status WHERE player_id = $1`, playerID).
 		Scan(&energy, &energyMax, &nou, &nouMax, &satiety,
 			&kokugo, &suugaku, &rika, &syakai, &eigo, &ongaku, &bijutsu,
 			&looks, &tairyoku, &kenkou, &speed, &power, &wanryoku, &kyakuryoku,
-			&love, &omoshirosa)
+			&love, &omoshirosa,
+			&weightG, &heightCm, &diseaseIndex)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return effects.State{}, player.ErrNotFound
 	}
@@ -3265,7 +3268,11 @@ func (s *Service) readState(ctx context.Context, tx pgx.Tx, playerID int64) (eff
 
 	m := detailedParamMax
 	return effects.State{
-		Money: money,
+		Money:        money,
+		WeightG:      weightG,
+		HeightCm:     heightCm,
+		DiseaseIndex: diseaseIndex,
+		DiseaseName:  condition.DiseaseName(diseaseIndex),
 		Params: map[string]effects.ParamState{
 			"energy":     {Value: energy, Max: energyMax},
 			"nou_energy": {Value: nou, Max: nouMax},
@@ -3314,6 +3321,33 @@ func (s *Service) applyEffect(ctx context.Context, tx pgx.Tx, playerID int64, ac
 	if len(plan.Params) > 0 {
 		if err := player.RefreshPowerMax(ctx, tx, playerID); err != nil {
 			return err
+		}
+	}
+
+	// 体重・身長・病気指数(レガシーの特殊効果 ウエイトアップ/ダイエット/身長/縮み/万能/風邪薬など)。
+	scalars := []struct {
+		change *effects.ValueChange
+		col    string
+		field  string
+	}{
+		{plan.Weight, "weight_g", "weight_g"},
+		{plan.Height, "height_cm", "height_cm"},
+		{plan.Disease, "disease_index", "disease_index"},
+	}
+	for _, sc := range scalars {
+		if sc.change == nil || sc.change.OldValue == sc.change.NewValue {
+			continue
+		}
+		if _, err := tx.Exec(ctx,
+			`UPDATE player_status SET `+sc.col+` = $1, updated_at = now() WHERE player_id = $2`,
+			sc.change.NewValue, playerID); err != nil {
+			return fmt.Errorf("update %s: %w", sc.col, err)
+		}
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO status_history (player_id, field, old_value, new_value, reason)
+			 VALUES ($1, $2, $3, $4, $5)`,
+			playerID, sc.field, strconv.Itoa(sc.change.OldValue), strconv.Itoa(sc.change.NewValue), actionType); err != nil {
+			return fmt.Errorf("insert status_history: %w", err)
 		}
 	}
 

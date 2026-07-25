@@ -144,8 +144,11 @@ async function use(it: ItemStack) {
               <tr class="cat-row">
                 <td :colspan="PARAM_COLUMNS.length + 6">●{{ cat }}</td>
               </tr>
-              <tr v-for="it in list" :key="it.item_id" :data-test="`item-${it.item_id}`">
-                <td class="l">○{{ it.name }}</td>
+              <template v-for="it in list" :key="it.item_id">
+              <tr :data-test="`item-${it.item_id}`">
+                <!-- 効果行がある品は、品名/使用可/使うを2行にまたがせてどの品の効果か分かるようにする
+                     (レガシー depart.cgi の rowspan=2 と同じ)。 -->
+                <td class="l" :rowspan="it.special ? 2 : 1">○{{ it.name }}</td>
                 <td
                   class="cooldown"
                   :class="{
@@ -154,10 +157,11 @@ async function use(it: ItemStack) {
                     wait: cooldowns[it.item_id].active && !cooldowns[it.item_id].soon,
                   }"
                   :data-test="`cooldown-${it.item_id}`"
+                  :rowspan="it.special ? 2 : 1"
                 >
                   {{ cooldowns[it.item_id].label }}
                 </td>
-                <td>
+                <td :rowspan="it.special ? 2 : 1">
                   <button
                     class="btn"
                     :disabled="busy || cooldowns[it.item_id].active"
@@ -177,6 +181,12 @@ async function use(it: ItemStack) {
                 </td>
                 <td class="interval">{{ it.interval_min > 0 ? `${it.interval_min}分` : '-' }}</td>
               </tr>
+              <!-- 特殊効果(体重/身長/病気)は列に収まらないので、レガシー depart.cgi の
+                   備考行と同じく1行下にcolspanで出す。 -->
+              <tr v-if="it.special" class="special-row" :data-test="`special-${it.item_id}`">
+                <td :colspan="PARAM_COLUMNS.length + 3">【 効果 】{{ it.special }}</td>
+              </tr>
+              </template>
             </tbody>
           </template>
         </table>
@@ -291,5 +301,14 @@ async function use(it: ItemStack) {
   border-color: #bbb;
   cursor: not-allowed;
   opacity: 0.7;
+}
+.item-table tr.special-row td {
+  background: #fff6e0;
+  color: #995500;
+  text-align: left;
+  /* 本行(11px)より一段小さくし、行間も詰めて注記として従属させる */
+  font-size: 10px;
+  line-height: 1.25;
+  padding: 0 8px 1px;
 }
 </style>

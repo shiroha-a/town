@@ -22,6 +22,7 @@ type YamiItem struct {
 	Money          int64          `json:"money"`
 	Params         map[string]int `json:"params"`
 	CalorieG       int            `json:"calorie_g"`
+	Special        string         `json:"special"` // 特殊効果の説明(体重/身長/病気)
 	DurabilityUnit string         `json:"durability_unit"`
 	IntervalMin    int            `json:"interval_min"`
 	BodyCost       int            `json:"body_cost"`
@@ -77,7 +78,7 @@ func (s *Service) Yami(ctx context.Context, viewerID, houseID int64) (*YamiView,
 			&it.IntervalMin, &it.BodyCost, &it.NouCost); err != nil {
 			return nil, fmt.Errorf("scan yami: %w", err)
 		}
-		it.Money, it.Params = effectSummary(effJSON)
+		it.Money, it.Params, it.Special = effectSummary(effJSON)
 		view.Items = append(view.Items, it)
 	}
 	return view, rows.Err()

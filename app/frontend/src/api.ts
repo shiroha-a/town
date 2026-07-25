@@ -13,6 +13,7 @@ export interface ItemStack {
   params: Record<string, number>;
   interval_min: number;
   calorie_g: number; // 摂取カロリー(食べると体重+calorie_g g)
+  special: string; // 特殊効果の説明(体重/身長/病気。無ければ空)
   // クールタイム中の再使用可能時刻(ISO8601)。使用可能ならnull。
   next_available_at: string | null;
 }
@@ -104,6 +105,7 @@ export interface ShopItem {
   durability_unit: string; // 'use'(回) or 'day'(日)
   power_multiplier: number; // 温泉の回復速度倍率(0=温泉ではない)
   calorie_g: number; // 摂取カロリー(食べると体重+calorie_g g)
+  special: string; // 特殊効果の説明(体重/身長/病気。無ければ空)
   stock: number; // 本日の店頭在庫(-1=無制限)
 }
 
@@ -304,10 +306,14 @@ export interface LoanQuote {
 
 // 効果エンジンのop(add_param / add_money)。
 export interface EffectOp {
-  op: 'add_param' | 'add_money';
+  op: 'add_param' | 'add_money' | 'add_weight_g' | 'add_height_cm' | 'add_disease';
   param?: string;
   amount: number;
+  // add_disease限定: 指定するとその病気のときだけ効く(空=万能)。
+  disease?: string;
 }
+// add_diseaseで指定できる病名(バックエンドのeffects.AllDiseasesと対応)。
+export const DISEASE_OPTIONS = ['風邪', '下痢', '肺炎', '結核', '脳腫瘍', '癌'];
 // 条件(param_gte)。
 export interface Condition {
   pred: 'param_gte';
@@ -778,6 +784,7 @@ export interface HouseShopItem {
   money: number;
   params: Record<string, number>;
   calorie_g: number;
+  special: string;
   durability: number;
   durability_unit: string; // 'use'(回)/'day'(日)
   interval_min: number;
@@ -822,6 +829,7 @@ export interface YamiItem {
   money: number;
   params: Record<string, number>;
   calorie_g: number;
+  special: string;
   durability_unit: string;
   interval_min: number;
   body_cost: number;

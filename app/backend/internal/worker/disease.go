@@ -7,11 +7,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/shiroha-a/town/internal/condition"
+	"github.com/shiroha-a/town/internal/effects"
 )
 
+// 病気指数の上下限は効果エンジンと共有する(アイテムの回復効果と日次ドリフトで
+// 範囲が食い違わないようにするため)。
 const (
-	diseaseCeil  = 50   // 健康時の上限(基準50を超えて回復はしない)
-	diseaseFloor = -150 // 病気指数の下限(暴走防止のクリップ)
+	diseaseCeil  = effects.DiseaseCeil
+	diseaseFloor = effects.DiseaseFloor
 )
 
 // EvaluateDisease advances the disease index of every player whose last

@@ -21,16 +21,16 @@ import (
 
 // Player is the aggregate returned to callers.
 type Player struct {
-	ID           int64
-	InstanceHost string
-	RemoteUserID string
-	DisplayName  string
-	Roles        []string
-	Money        int64
-	Savings      int64
-	SuperSavings int64
-	LoanDaily    int64 // 住宅ローンの日額返済(なければ0)
-	LoanCount    int   // 住宅ローンの残り返済回数(なければ0)
+	ID            int64
+	InstanceHost  string
+	RemoteUserID  string
+	DisplayName   string
+	Roles         []string
+	Money         int64
+	Savings       int64
+	SuperSavings  int64
+	LoanDaily     int64     // 住宅ローンの日額返済(なければ0)
+	LoanCount     int       // 住宅ローンの残り返済回数(なければ0)
 	CurrentTown   int       // 現在いる街(0=公園..4=謎の街)。街移動で変化
 	CreatedAt     time.Time // 入居日(役場の名鑑/プロフィールで在住日数を出す)
 	Status        Status
@@ -76,6 +76,7 @@ type ItemStack struct {
 	Params          map[string]int // 使用時の上昇パラメータ
 	IntervalMin     int            // 使用間隔(分)
 	CalorieG        int            // 摂取カロリー(食べると体重+calorie_g g)
+	Special         string         // 特殊効果の説明(体重/身長/病気。無ければ空)
 	NextAvailableAt *time.Time     // クールタイム中の再使用可能時刻(未使用/経過済みはnil)
 }
 
@@ -554,6 +555,7 @@ func (s *Service) Get(ctx context.Context, id int64) (*Player, error) {
 		}
 		if eff, err := effects.ParseEffect(effJSON); err == nil {
 			it.Money = eff.MoneySum()
+			it.Special = eff.SpecialSummary()
 			it.Params = map[string]int{}
 			for k, v := range eff.ParamSum() {
 				if v != 0 {

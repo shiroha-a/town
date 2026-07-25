@@ -101,12 +101,15 @@ async function buy(it: ShopItem) {
               <tr class="cat-row">
                 <td :colspan="PARAM_COLUMNS.length + 7">●{{ cat }}</td>
               </tr>
-              <tr v-for="it in list" :key="it.id" :data-test="`shop-${it.id}`">
-                <td class="l">{{ it.name }}</td>
-                <td class="stock" :class="{ soldout: it.stock === 0 }">
+              <template v-for="it in list" :key="it.id">
+              <tr :data-test="`shop-${it.id}`">
+                <!-- 効果行がある品は、品名/在庫/買うを2行にまたがせてどの品の効果か分かるようにする
+                     (レガシー depart.cgi の rowspan=2 と同じ)。 -->
+                <td class="l" :rowspan="it.special ? 2 : 1">{{ it.name }}</td>
+                <td class="stock" :class="{ soldout: it.stock === 0 }" :rowspan="it.special ? 2 : 1">
                   {{ it.stock < 0 ? '-' : it.stock === 0 ? '売切' : it.stock }}
                 </td>
-                <td class="buy">
+                <td class="buy" :rowspan="it.special ? 2 : 1">
                   <button class="btn" :disabled="busy || it.stock === 0" @click="buy(it)">
                     {{ it.stock === 0 ? '売切' : '買う' }}
                   </button>
@@ -122,6 +125,12 @@ async function buy(it: ShopItem) {
                 </td>
                 <td class="interval">{{ intervalLabel(it.interval_min) }}</td>
               </tr>
+              <!-- 特殊効果(体重/身長/病気)は列に収まらないので1行下にcolspanで出す
+                   (レガシー depart.cgi の備考行と同じ方式)。 -->
+              <tr v-if="it.special" class="special-row" :data-test="`special-${it.id}`">
+                <td :colspan="PARAM_COLUMNS.length + 4">【 効果 】{{ it.special }}</td>
+              </tr>
+              </template>
             </tbody>
           </template>
         </table>
@@ -217,6 +226,15 @@ async function buy(it: ShopItem) {
   color: #cc3300;
   font-weight: bold;
   text-align: right;
+}
+.depart-table tr.special-row td {
+  background: #fff6e0;
+  color: #995500;
+  text-align: left;
+  /* 本行(11px)より一段小さくし、行間も詰めて注記として従属させる */
+  font-size: 10px;
+  line-height: 1.25;
+  padding: 0 8px 1px;
 }
 .depart-table tr.cat-row td {
   background: #ccff99;

@@ -233,20 +233,21 @@ func (s *Service) ListItems(ctx context.Context) ([]Item, error) {
 	return items, rows.Err()
 }
 
-// effectSummary parses an effect and returns its net money delta and non-zero
-// per-parameter deltas (for displaying "rising parameters").
-func effectSummary(effJSON []byte) (int64, map[string]int) {
+// effectSummary parses an effect and returns its net money delta, non-zero
+// per-parameter deltas (for displaying "rising parameters") and the special
+// (体重/身長/病気) effects as a display label.
+func effectSummary(effJSON []byte) (int64, map[string]int, string) {
 	params := map[string]int{}
 	eff, err := effects.ParseEffect(effJSON)
 	if err != nil {
-		return 0, params
+		return 0, params, ""
 	}
 	for k, v := range eff.ParamSum() {
 		if v != 0 {
 			params[k] = v
 		}
 	}
-	return eff.MoneySum(), params
+	return eff.MoneySum(), params, eff.SpecialSummary()
 }
 
 // requirementSummary parses conditions into per-parameter minimums (for
@@ -274,6 +275,7 @@ type ShopItem struct {
 	PowerMultiplier int            `json:"power_multiplier"` // 温泉の回復速度倍率(0=温泉ではない)
 	CalorieG        int            `json:"calorie_g"`        // 摂取カロリー(食べると体重+calorie_g g)
 	Stock           int            `json:"stock"`            // 本日の店頭在庫(-1=無制限)
+	Special         string         `json:"special"`          // 特殊効果の説明(体重/身長/病気。無ければ空)
 }
 
 // ListShopItems returns the general department-store items (facility=”).
@@ -324,7 +326,7 @@ func (s *Service) listItems(ctx context.Context, facility string) ([]ShopItem, e
 		if err := rows.Scan(&it.ID, &it.Name, &it.Category, &it.Price, &effJSON, &it.IntervalMin, &it.Durability, &it.DurabilityUnit, &it.PowerMultiplier, &it.CalorieG, &it.Stock); err != nil {
 			return nil, fmt.Errorf("scan item: %w", err)
 		}
-		it.Money, it.Params = effectSummary(effJSON)
+		it.Money, it.Params, it.Special = effectSummary(effJSON)
 		items = append(items, it)
 	}
 	return items, rows.Err()
@@ -370,7 +372,7 @@ func (s *Service) ListSelectableJobs(ctx context.Context) ([]JobOption, error) {
 			return nil, fmt.Errorf("scan job: %w", err)
 		}
 		opt.Pay = opt.Salary
-		_, opt.WorkParams = effectSummary(effJSON)
+		_, opt.WorkParams, _ = effectSummary(effJSON)
 		opt.Requirements = requirementSummary(reqJSON)
 		// 表示用の1回消費量(実際のdo_workと同じ式: 基準+基準×ランク係数)。
 		opt.EnergyCost = jobrule.PowerSpend(bodyCost, opt.Rank)
