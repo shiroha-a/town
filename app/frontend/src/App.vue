@@ -23,6 +23,7 @@ import MailView from './components/MailView.vue';
 import AshiatoView from './components/AshiatoView.vue';
 import CLeagueView from './components/CLeagueView.vue';
 import YakubaView from './components/YakubaView.vue';
+import ProfileView from './components/ProfileView.vue';
 import TsuriView from './components/TsuriView.vue';
 import GiftShopView from './components/GiftShopView.vue';
 import TokutenView from './components/TokutenView.vue';
@@ -170,6 +171,7 @@ const facilityTitles: Record<string, string> = {
     <TokutenView v-else-if="view === 'tokuten'" :player="player" @update="onUpdate" @back="back" />
     <BingoView v-else-if="view === 'bingo'" :player="player" @update="onUpdate" @back="back" />
     <YakubaView v-else-if="view === 'yakuba'" :player="player" @back="back" />
+    <ProfileView v-else-if="view === 'prof'" :player="player" @back="back" />
     <AdminView v-else-if="view === 'admin'" :player="player" @back="back" />
     <PlaceholderView v-else :title="facilityTitles[view] ?? view" @back="back" />
   </template>

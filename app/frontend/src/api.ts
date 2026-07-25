@@ -1063,6 +1063,52 @@ export interface ShopStockView {
 
 // 管理APIの認可はログインセッション(HttpOnly cookie)で行う。
 // 以前は X-Acting-Player-Id ヘッダを自己申告していたが、詐称できるため廃止した。
+// Misskey連携(prof施設)。
+export type MisskeyProfile = {
+  player_id: number;
+  username: string;
+  host: string;
+  acct: string;
+  name: string;
+  avatar_url: string;
+  banner_url: string;
+  description: string;
+  followers_count: number;
+  following_count: number;
+  notes_count: number;
+  is_bot: boolean;
+  is_cat: boolean;
+  is_locked: boolean;
+  fetched_at: string;
+  profile_url: string;
+  /** 相手インスタンスに繋がらずキャッシュを表示している。 */
+  stale: boolean;
+};
+
+export type FollowState = {
+  self: boolean;
+  /** フォロー済みかを確かめられたか(未解決のリモート相手ではfalse)。 */
+  known: boolean;
+  following: boolean;
+  pending: boolean;
+  can_follow: boolean;
+  fallback_url: string;
+};
+
+export type MisskeyProfileResp = {
+  player_id: number;
+  display_name: string;
+  profile: MisskeyProfile;
+  follow: FollowState | null;
+};
+
+export type FollowResult = {
+  following: boolean;
+  pending: boolean;
+  message: string;
+  fallback_url: string;
+};
+
 export const api = {
   register: (instanceHost: string, remoteUserId: string, displayName: string) =>
     request<Player>('POST', '/players', {
@@ -1072,6 +1118,11 @@ export const api = {
     }),
   getPlayer: (id: number) => request<Player>('GET', `/players/${id}`),
   listPlayers: () => request<PublicSummary[]>('GET', '/players'),
+  misskeyProfile: (id: number) => request<MisskeyProfileResp>('GET', `/players/${id}/misskey`),
+  misskeyFollow: (targetId: number) =>
+    request<FollowResult>('POST', '/misskey/follow', { target_id: targetId }),
+  misskeyUnfollow: (targetId: number) =>
+    request<FollowResult>('POST', '/misskey/unfollow', { target_id: targetId }),
   playerProfile: (id: number) => request<PublicProfile>('GET', `/players/${id}/profile`),
   // 役場: 街のニュース(街全体)と住民ごとの出来事。
   townNews: (limit = 100) => request<NewsEntry[]>('GET', `/news?limit=${limit}`),

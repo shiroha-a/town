@@ -155,7 +155,7 @@ const KEY_PRESETS: { key: string; label: string }[] = [
   { key: 'gifutoya', label: 'ギフト屋' },
   { key: 'tokuten', label: '特典交換所' },
   { key: 'bingo', label: 'ビンゴ会場' },
-  { key: 'prof', label: 'プロフィール(準備中)' },
+  { key: 'prof', label: 'プロフィール' },
   { key: 'mail', label: 'メール(準備中)' },
   { key: 'doukyo', label: 'キャラ作成(準備中)' },
   { key: 'aisatu', label: 'あいさつ(準備中)' },
