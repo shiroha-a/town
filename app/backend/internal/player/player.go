@@ -307,14 +307,30 @@ type AdminPlayerSummary struct {
 	Money       int64
 	Job         string
 	JobLevel    int
+	// Misskeyアカウントの紐付け。誰なのかを管理画面で特定するために出す。
+	InstanceHost string
+	RemoteUserID string
+	// Username はプロフィールを取得済みのときだけ入る(未取得なら空)。
+	Username string
+}
+
+// Acct renders @user@host, or an empty string while the username is unknown.
+func (a AdminPlayerSummary) Acct() string {
+	if a.Username == "" || a.InstanceHost == "" {
+		return ""
+	}
+	return "@" + a.Username + "@" + a.InstanceHost
 }
 
 // AdminList returns all active players with admin-relevant fields.
 func (s *Service) AdminList(ctx context.Context) ([]AdminPlayerSummary, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT p.id, p.display_name, ps.job, ps.job_level,
-		        COALESCE((SELECT array_agg(role ORDER BY role) FROM player_roles WHERE player_id = p.id), '{}')
-		 FROM players p JOIN player_status ps ON ps.player_id = p.id
+		        COALESCE((SELECT array_agg(role ORDER BY role) FROM player_roles WHERE player_id = p.id), '{}'),
+		        p.instance_host, p.remote_user_id, COALESCE(mp.username, '')
+		 FROM players p
+		 JOIN player_status ps ON ps.player_id = p.id
+		 LEFT JOIN misskey_profiles mp ON mp.player_id = p.id
 		 WHERE p.deleted_at IS NULL ORDER BY p.id`)
 	if err != nil {
 		return nil, fmt.Errorf("admin list players: %w", err)
@@ -322,7 +338,8 @@ func (s *Service) AdminList(ctx context.Context) ([]AdminPlayerSummary, error) {
 	out := []AdminPlayerSummary{}
 	for rows.Next() {
 		var a AdminPlayerSummary
-		if err := rows.Scan(&a.ID, &a.DisplayName, &a.Job, &a.JobLevel, &a.Roles); err != nil {
+		if err := rows.Scan(&a.ID, &a.DisplayName, &a.Job, &a.JobLevel, &a.Roles,
+			&a.InstanceHost, &a.RemoteUserID, &a.Username); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("scan admin player: %w", err)
 		}

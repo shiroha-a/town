@@ -880,6 +880,14 @@ const jobOptions = computed(() => {
   if (editingPlayer.value?.job) set.add(editingPlayer.value.job);
   return [...set];
 });
+// 編集中ユーザーのMisskey紐付け。一覧の行から引く(編集APIには含めない)。
+const editingRow = computed(() =>
+  editingPlayer.value ? players.value.find((p) => p.id === editingPlayer.value?.id) : undefined,
+);
+const editingAcct = computed(() => editingRow.value?.acct ?? '');
+const editingHost = computed(() => editingRow.value?.instance_host ?? '');
+const editingRemoteID = computed(() => editingRow.value?.remote_user_id ?? '');
+
 async function openEditPlayer(id: number) {
   message.value = '';
   try {
@@ -1133,10 +1141,14 @@ async function deleteEdit() {
               <h3>ユーザー一覧<span class="hint"> ※行をクリックで確認/編集</span></h3>
               <div class="table-scroll">
                 <table class="list-table">
-                  <thead><tr><th>ID</th><th class="l">名前</th><th>職業</th><th>Lv</th><th>所持金</th><th>権限</th></tr></thead>
+                  <thead><tr><th>ID</th><th class="l">名前</th><th class="l">Misskey</th><th>職業</th><th>Lv</th><th>所持金</th><th>権限</th></tr></thead>
                   <tbody>
                     <tr v-for="u in players" :key="u.id" class="clickable" @click="openEditPlayer(u.id)">
-                      <td>{{ u.id }}</td><td class="l">{{ u.display_name }}</td><td>{{ u.job }}</td>
+                      <td>{{ u.id }}</td><td class="l">{{ u.display_name }}</td>
+                      <td class="l acct" :title="`${u.instance_host} / ${u.remote_user_id}`">
+                        {{ u.acct || `(${u.instance_host})` }}
+                      </td>
+                      <td>{{ u.job }}</td>
                       <td>{{ u.job_level }}</td><td class="r">{{ u.money.toLocaleString('ja-JP') }}円</td>
                       <td>{{ u.roles.includes('admin') ? '管理者' : '' }}</td>
                     </tr>
@@ -2012,6 +2024,10 @@ async function deleteEdit() {
     <div v-if="editingPlayer" class="modal-overlay" @click.self="closeEditPlayer">
       <div class="modal wide-modal">
         <h3>ユーザー編集（ID {{ editingPlayer.id }}）</h3>
+        <div class="acct-line">
+          Misskey: <b>{{ editingAcct || '(プロフィール未取得)' }}</b>
+          <span class="acct-raw">{{ editingHost }} / {{ editingRemoteID }}</span>
+        </div>
         <label>名前<input v-model="editingPlayer.display_name" /></label>
         <label class="chk"><input type="checkbox" v-model="editingPlayer.is_admin" /> 管理者権限</label>
         <div class="econ-grid">
@@ -2054,6 +2070,21 @@ async function deleteEdit() {
 </template>
 
 <style scoped>
+.acct {
+  font-size: 11px;
+  color: #556;
+  word-break: break-all;
+}
+.acct-line {
+  font-size: 12px;
+  color: #334;
+  margin-bottom: 6px;
+}
+.acct-line .acct-raw {
+  margin-left: 8px;
+  font-size: 10px;
+  color: #889;
+}
 .admin-page {
   background-color: #dfe6ee;
   padding: 6px;

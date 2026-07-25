@@ -496,6 +496,10 @@ export interface AdminPlayerSummary {
   money: number;
   job: string;
   job_level: number;
+  /** @user@host。プロフィール未取得だと空。 */
+  acct: string;
+  instance_host: string;
+  remote_user_id: string;
 }
 // プレイヤーの管理者編集ペイロード。
 export interface AdminPlayerPayload {

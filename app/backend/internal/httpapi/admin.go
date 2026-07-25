@@ -478,6 +478,11 @@ type adminPlayerSummaryResp struct {
 	Money       int64    `json:"money"`
 	Job         string   `json:"job"`
 	JobLevel    int      `json:"job_level"`
+	// Misskeyアカウントの紐付け。acctはプロフィール未取得だと空になるので、
+	// その場合でも特定できるようホストと相手側IDも出す。
+	Acct         string `json:"acct"`
+	InstanceHost string `json:"instance_host"`
+	RemoteUserID string `json:"remote_user_id"`
 }
 
 func (s *Server) adminListPlayers(w http.ResponseWriter, r *http.Request) {
@@ -497,6 +502,7 @@ func (s *Server) adminListPlayers(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, adminPlayerSummaryResp{
 			ID: p.ID, DisplayName: p.DisplayName, Roles: roles, Money: p.Money, Job: p.Job, JobLevel: p.JobLevel,
+			Acct: p.Acct(), InstanceHost: p.InstanceHost, RemoteUserID: p.RemoteUserID,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
