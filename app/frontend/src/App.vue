@@ -188,6 +188,11 @@ const facilityTitles: Record<string, string> = {
     <AdminView v-else-if="view === 'admin'" :player="player" @back="back" />
     <PlaceholderView v-else :title="facilityTitles[view] ?? view" @back="back" />
   </template>
+
+  <div class="footer">
+    [HOME]<br />
+    - TOWN リライト版 (Vue) -
+  </div>
 </template>
 
 <style scoped>
