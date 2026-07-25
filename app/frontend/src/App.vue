@@ -33,32 +33,35 @@ import PlaceholderView from './components/PlaceholderView.vue';
 const player = ref<Player | null>(null);
 const view = ref('town');
 
-// 開発用の簡易セッション(MiAuth導入時に本認証へ置換)。
-const STORAGE_KEY = 'town.playerId';
+// ログイン状態はHttpOnly cookieのセッションで持つ(MiAuth)。
+// 起動時に /auth/me で復元し、未ログインならログイン画面を出す。
+const booting = ref(true);
 
 onMounted(async () => {
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (saved) {
-    try {
-      player.value = await api.getPlayer(Number(saved));
-    } catch {
-      localStorage.removeItem(STORAGE_KEY);
-    }
+  try {
+    player.value = await api.authMe();
+  } catch {
+    player.value = null;
+  } finally {
+    booting.value = false;
   }
 });
 
 function onLogin(p: Player) {
   player.value = p;
   view.value = 'town';
-  localStorage.setItem(STORAGE_KEY, String(p.id));
 }
 function onUpdate(p: Player) {
   player.value = p;
 }
-function onLogout() {
+async function onLogout() {
+  try {
+    await api.authLogout();
+  } catch {
+    // 失敗してもクライアント側は未ログイン扱いにする。
+  }
   player.value = null;
   view.value = 'town';
-  localStorage.removeItem(STORAGE_KEY);
 }
 // 家訪問(view='house')で開く家のID。街の家クリックからnavigate経由で渡される。
 const houseId = ref<number | null>(null);
@@ -114,7 +117,11 @@ const facilityTitles: Record<string, string> = {
 </script>
 
 <template>
-  <template v-if="!player">
+  <template v-if="booting">
+    <h1 class="town-title">Ｔｏｗｎ</h1>
+    <div class="booting">読み込み中…</div>
+  </template>
+  <template v-else-if="!player">
     <h1 class="town-title">Ｔｏｗｎ</h1>
     <LoginView @login="onLogin" />
   </template>
@@ -167,3 +174,12 @@ const facilityTitles: Record<string, string> = {
     <PlaceholderView v-else :title="facilityTitles[view] ?? view" @back="back" />
   </template>
 </template>
+
+<style scoped>
+.booting {
+  text-align: center;
+  color: #666;
+  font-size: 14px;
+  padding: 40px 0;
+}
+</style>

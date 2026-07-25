@@ -28,7 +28,7 @@ const emit = defineEmits<{ back: [] }>();
 const isAdmin = computed(() => props.player.roles.includes('admin'));
 
 // 各セクションの開閉。既定は折りたたみ(false)。
-const open = reactive({ item: false, job: false, user: false, settings: false, towns: false, map: false, events: false, serials: false, bingo: false });
+const open = reactive({ item: false, job: false, user: false, settings: false, towns: false, map: false, events: false, serials: false, bingo: false, instances: false });
 
 // 効果/条件で対象にできるパラメータ。
 const PARAM_OPTIONS = [
@@ -107,17 +107,18 @@ const settings = ref<GameSettings | null>(null);
 async function refresh() {
   if (!isAdmin.value) return;
   try {
-    items.value = await api.adminListItems(props.player.id);
-    jobs.value = await api.adminListJobs(props.player.id);
-    players.value = await api.adminListPlayers(props.player.id);
-    settings.value = await api.adminGetSettings(props.player.id);
+    items.value = await api.adminListItems();
+    jobs.value = await api.adminListJobs();
+    players.value = await api.adminListPlayers();
+    settings.value = await api.adminGetSettings();
     townmap.value = await api.townMap();
     assets.value = await api.townAssets();
-    houseCells.value = await api.adminHouseCells(props.player.id);
-    uploadedAssets.value = await api.adminListAssets(props.player.id);
-    facPresets.value = await api.adminFacilityPresets(props.player.id);
-    adminEvents.value = await api.adminListEvents(props.player.id);
-    serials.value = await api.adminSerials(props.player.id);
+    houseCells.value = await api.adminHouseCells();
+    uploadedAssets.value = await api.adminListAssets();
+    facPresets.value = await api.adminFacilityPresets();
+    adminEvents.value = await api.adminListEvents();
+    serials.value = await api.adminSerials();
+    instanceData.value = await api.adminInstances();
     townList.value = await api.towns();
     syncTownDraft();
     selectedIdx.value = null;
@@ -289,7 +290,7 @@ async function savePreset() {
   }
   busy.value = true;
   try {
-    facPresets.value = await api.adminUpdateFacilityPresets(props.player.id, [
+    facPresets.value = await api.adminUpdateFacilityPresets([
       ...facPresets.value,
       { ...presetDraft.value, alt: presetDraft.value.alt.trim() },
     ]);
@@ -308,7 +309,7 @@ async function deletePreset(i: number) {
   busy.value = true;
   try {
     const next = facPresets.value.filter((_, j) => j !== i);
-    facPresets.value = await api.adminUpdateFacilityPresets(props.player.id, next);
+    facPresets.value = await api.adminUpdateFacilityPresets(next);
     message.value = '施設プリセットを削除しました。';
     kind.value = 'ok';
   } catch (e) {
@@ -393,7 +394,7 @@ async function saveTownMap() {
   busy.value = true;
   message.value = '';
   try {
-    townmap.value = await api.adminUpdateTownMap(props.player.id, townmap.value);
+    townmap.value = await api.adminUpdateTownMap(townmap.value);
     selectedIdx.value = null;
     message.value = 'タウンマップを更新しました。';
     kind.value = 'ok';
@@ -468,7 +469,7 @@ async function saveTownAssets() {
   busy.value = true;
   message.value = '';
   try {
-    assets.value = await api.adminUpdateTownAssets(props.player.id, assets.value);
+    assets.value = await api.adminUpdateTownAssets(assets.value);
     message.value = '背景レイヤーを更新しました。';
     kind.value = 'ok';
   } catch (e) {
@@ -500,8 +501,8 @@ async function onUploadAsset(e: Event) {
     });
     const b64 = dataUrl.split(',')[1] ?? '';
     const name = slugFromFilename(file.name);
-    const res = await api.adminUploadAsset(props.player.id, name, file.type, b64);
-    uploadedAssets.value = await api.adminListAssets(props.player.id);
+    const res = await api.adminUploadAsset(name, file.type, b64);
+    uploadedAssets.value = await api.adminListAssets();
     assetBrush.value = `u:${res.name}`; // アップロードした素材を筆に選択
     message.value = `背景アセット「${res.name}」を追加しました。`;
     kind.value = 'ok';
@@ -520,8 +521,8 @@ async function deleteUploadedAsset(img: string) {
   busy.value = true;
   message.value = '';
   try {
-    await api.adminDeleteAsset(props.player.id, name);
-    uploadedAssets.value = await api.adminListAssets(props.player.id);
+    await api.adminDeleteAsset(name);
+    uploadedAssets.value = await api.adminListAssets();
     if (assetBrush.value === img) assetBrush.value = BG_PRESETS[0]; // 筆が消えたら組み込みに戻す
     message.value = `背景アセット「${name}」を削除しました。`;
     kind.value = 'ok';
@@ -576,13 +577,49 @@ function onBgDrop(col: number, rowIdx: number) {
   assets.value.push(moved);
 }
 
+// 参加できるインスタンスの許可/拒否リスト(MiAuthログインの入口を制御する)。
+const instanceData = ref<import('../api').InstanceRules | null>(null);
+const instForm = reactive({ host: '', kind: 'block' as 'block' | 'allow', note: '' });
+async function loadInstances() {
+  try {
+    instanceData.value = await api.adminInstances();
+  } catch (e) {
+    fail(e);
+  }
+}
+async function saveInstance() {
+  if (!instForm.host.trim()) return;
+  busy.value = true;
+  try {
+    await api.adminPutInstance({ ...instForm });
+    instForm.host = '';
+    instForm.note = '';
+    await loadInstances();
+  } catch (e) {
+    fail(e);
+  } finally {
+    busy.value = false;
+  }
+}
+async function deleteInstance(host: string) {
+  busy.value = true;
+  try {
+    await api.adminDeleteInstance(host);
+    await loadInstances();
+  } catch (e) {
+    fail(e);
+  } finally {
+    busy.value = false;
+  }
+}
+
 // ビンゴ大会の開催(街全体の共有イベント。開始すると新しい抽選番号が確定する)。
 const bingoCfg = reactive({ max_number: 60, per_day: 20, days: 3, lines_to_win: 2 });
 async function startBingo() {
   if (!window.confirm('新しいビンゴ大会を開始します。よろしいですか?')) return;
   busy.value = true;
   try {
-    await api.adminStartBingo(props.player.id, bingoCfg);
+    await api.adminStartBingo(bingoCfg);
     message.value = 'ビンゴ大会を開始しました。';
     kind.value = 'ok';
   } catch (e) {
@@ -608,7 +645,8 @@ const serialUsesFor = ref(0);
 
 async function loadSerials() {
   try {
-    serials.value = await api.adminSerials(props.player.id);
+    serials.value = await api.adminSerials();
+    instanceData.value = await api.adminInstances();
   } catch (e) {
     fail(e);
   }
@@ -629,8 +667,8 @@ async function saveSerial() {
   busy.value = true;
   try {
     const payload = { ...serialForm, effect: JSON.stringify(serialOps.value) };
-    if (serialForm.id > 0) await api.adminUpdateSerial(props.player.id, payload);
-    else await api.adminCreateSerial(props.player.id, payload);
+    if (serialForm.id > 0) await api.adminUpdateSerial(payload);
+    else await api.adminCreateSerial(payload);
     resetSerial();
     await loadSerials();
     message.value = '保存しました。';
@@ -644,7 +682,7 @@ async function saveSerial() {
 async function deleteSerial(sid: number) {
   busy.value = true;
   try {
-    await api.adminDeleteSerial(props.player.id, sid);
+    await api.adminDeleteSerial(sid);
     if (serialForm.id === sid) resetSerial();
     await loadSerials();
   } catch (e) {
@@ -656,7 +694,7 @@ async function deleteSerial(sid: number) {
 async function showSerialUses(sid: number) {
   try {
     serialUsesFor.value = sid;
-    serialUses.value = await api.adminSerialUses(props.player.id, sid);
+    serialUses.value = await api.adminSerialUses(sid);
   } catch (e) {
     fail(e);
   }
@@ -716,10 +754,11 @@ async function evSave() {
       if (r.key && r.value) params[r.key] = r.value;
     }
     const payload = { ...evForm.value, params, conditions: evCondRows.value };
-    if (payload.id > 0) await api.adminUpdateEvent(props.player.id, payload);
-    else await api.adminCreateEvent(props.player.id, payload);
-    adminEvents.value = await api.adminListEvents(props.player.id);
-    serials.value = await api.adminSerials(props.player.id);
+    if (payload.id > 0) await api.adminUpdateEvent(payload);
+    else await api.adminCreateEvent(payload);
+    adminEvents.value = await api.adminListEvents();
+    serials.value = await api.adminSerials();
+    instanceData.value = await api.adminInstances();
     evReset();
     message.value = 'イベントを保存しました。';
     kind.value = 'ok';
@@ -734,9 +773,10 @@ async function evDelete() {
   if (!confirm(`イベント「${evForm.value.name}」を削除しますか?`)) return;
   busy.value = true;
   try {
-    await api.adminDeleteEvent(props.player.id, evForm.value.id);
-    adminEvents.value = await api.adminListEvents(props.player.id);
-    serials.value = await api.adminSerials(props.player.id);
+    await api.adminDeleteEvent(evForm.value.id);
+    adminEvents.value = await api.adminListEvents();
+    serials.value = await api.adminSerials();
+    instanceData.value = await api.adminInstances();
     evReset();
     message.value = 'イベントを削除しました。';
     kind.value = 'ok';
@@ -771,7 +811,7 @@ async function saveTowns() {
   busy.value = true;
   message.value = '';
   try {
-    await api.adminUpdateTowns(props.player.id, townDraft.value);
+    await api.adminUpdateTowns(townDraft.value);
     townList.value = await api.towns();
     syncTownDraft();
     message.value = '街の設定を更新しました。';
@@ -804,7 +844,7 @@ async function saveSettings() {
   busy.value = true;
   message.value = '';
   try {
-    settings.value = await api.adminUpdateSettings(props.player.id, settings.value);
+    settings.value = await api.adminUpdateSettings(settings.value);
     message.value = 'サーバー設定を更新しました。';
     kind.value = 'ok';
   } catch (e) {
@@ -873,7 +913,7 @@ async function savePlayer() {
   message.value = '';
   try {
     const { id, ...payload } = editingPlayer.value;
-    await api.adminUpdatePlayer(props.player.id, id, payload);
+    await api.adminUpdatePlayer(id, payload);
     message.value = `ユーザー「${payload.display_name}」を更新しました。`;
     kind.value = 'ok';
     closeEditPlayer();
@@ -890,7 +930,7 @@ async function deletePlayer() {
   busy.value = true;
   message.value = '';
   try {
-    await api.adminDeletePlayer(props.player.id, editingPlayer.value.id);
+    await api.adminDeletePlayer(editingPlayer.value.id);
     message.value = 'ユーザーを論理削除しました。';
     kind.value = 'ok';
     closeEditPlayer();
@@ -908,7 +948,7 @@ async function simulate() {
   try {
     // 仮想的な標準state(お金10万・全パラメータ10/上限999)で試算する。
     const params = Object.fromEntries(PARAM_OPTIONS.map((p) => [p, { value: 10, max: 999 }]));
-    sim.value = await api.adminSimulate(props.player.id, item.effect, { money: 100000, params });
+    sim.value = await api.adminSimulate(item.effect, { money: 100000, params });
   } catch (e) {
     sim.value = null;
     fail(e);
@@ -921,7 +961,7 @@ async function createItem() {
   busy.value = true;
   message.value = '';
   try {
-    await api.adminCreateItem(props.player.id, {
+    await api.adminCreateItem({
       name: item.name,
       category: item.category,
       price: item.price,
@@ -947,7 +987,7 @@ async function createJob() {
   busy.value = true;
   message.value = '';
   try {
-    await api.adminCreateJob(props.player.id, { ...job });
+    await api.adminCreateJob({ ...job });
     message.value = `職業「${job.name}」を作成しました。`;
     kind.value = 'ok';
     Object.assign(job, emptyJob());
@@ -977,7 +1017,7 @@ async function saveJob() {
   message.value = '';
   try {
     const e = editingJob.value;
-    await api.adminUpdateJob(props.player.id, e.id, {
+    await api.adminUpdateJob(e.id, {
       name: e.name,
       requirements: e.requirements,
       effect: e.effect,
@@ -1007,7 +1047,7 @@ async function deleteJob() {
   busy.value = true;
   message.value = '';
   try {
-    await api.adminDeleteJob(props.player.id, editingJob.value.id);
+    await api.adminDeleteJob(editingJob.value.id);
     message.value = '職業を削除しました。';
     kind.value = 'ok';
     closeEditJob();
@@ -1032,7 +1072,7 @@ async function saveEdit() {
   busy.value = true;
   message.value = '';
   try {
-    await api.adminUpdateItem(props.player.id, editing.value.id, {
+    await api.adminUpdateItem(editing.value.id, {
       name: editing.value.name,
       category: editing.value.category,
       price: editing.value.price,
@@ -1056,7 +1096,7 @@ async function deleteEdit() {
   busy.value = true;
   message.value = '';
   try {
-    await api.adminDeleteItem(props.player.id, editing.value.id);
+    await api.adminDeleteItem(editing.value.id);
     message.value = 'アイテムを削除しました。';
     kind.value = 'ok';
     closeEdit();
@@ -1333,6 +1373,61 @@ async function deleteEdit() {
                       <td :class="{ off: !e.enabled }">{{ e.enabled ? '○' : '×' }}</td>
                     </tr>
                     <tr v-if="!adminEvents.length"><td colspan="6" class="muted">まだカスタムイベントがありません。</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <!-- 参加できるインスタンス -->
+        <section class="fold">
+          <button class="fold-head" @click="open.instances = !open.instances">
+            <span class="caret">{{ open.instances ? '▼' : '▶' }}</span>
+            参加インスタンス（{{ instanceData?.policy === 'whitelist' ? 'ホワイトリスト' : 'ブラックリスト' }}・{{ instanceData?.rules.length ?? 0 }}件）
+          </button>
+          <div v-if="open.instances" class="fold-body">
+            <section class="panel">
+              <h3>
+                方針
+                <span class="hint"> ※方針は「サーバー設定」の instance_policy で切り替えます</span>
+              </h3>
+              <p class="hint">
+                現在: <b>{{ instanceData?.policy === 'whitelist' ? 'ホワイトリスト方式(allowに登録したインスタンスだけ参加可)' : 'ブラックリスト方式(blockに登録した以外は参加可)' }}</b><br />
+                ※2つのリストは別々に保持されるので、ホワイトリストを準備してから切り替えられます。
+              </p>
+            </section>
+
+            <section class="panel">
+              <h3>ルールを追加</h3>
+              <label>インスタンス<input v-model="instForm.host" placeholder="misskey.io" data-test="inst-host" /></label>
+              <label>種別
+                <select v-model="instForm.kind" data-test="inst-kind">
+                  <option value="block">block（拒否リスト）</option>
+                  <option value="allow">allow（許可リスト）</option>
+                </select>
+              </label>
+              <label>メモ<input v-model="instForm.note" class="wide" placeholder="なぜ登録したか" /></label>
+              <div class="actions">
+                <button class="btn primary" :disabled="busy" data-test="inst-save" @click="saveInstance">追加</button>
+              </div>
+            </section>
+
+            <section class="panel">
+              <h3>登録済み</h3>
+              <div class="table-scroll">
+                <table class="admin-table" data-test="inst-table">
+                  <thead>
+                    <tr><th class="l">インスタンス</th><th>種別</th><th class="l">メモ</th><th></th></tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="r in instanceData?.rules ?? []" :key="r.host">
+                      <td class="l mono">{{ r.host }}</td>
+                      <td :class="{ off: r.kind === 'block' }">{{ r.kind }}</td>
+                      <td class="l">{{ r.note }}</td>
+                      <td><button class="btn mini danger" :disabled="busy" @click="deleteInstance(r.host)">削除</button></td>
+                    </tr>
+                    <tr v-if="!instanceData?.rules.length"><td colspan="4" class="muted">まだルールがありません。</td></tr>
                   </tbody>
                 </table>
               </div>

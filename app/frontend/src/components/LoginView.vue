@@ -1,50 +1,55 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, onMounted } from 'vue';
 import { api, type Player } from '../api';
 
+// MiAuthログイン。自分のMisskeyインスタンスを入力すると、そのインスタンスの
+// 承認画面へ飛び、戻ってくるとログインが完了する(アプリの事前登録は不要)。
 const emit = defineEmits<{ login: [player: Player] }>();
 
-// 新規登録フォーム
-const instanceHost = ref('misskey.example');
-const remoteUserId = ref('');
-const displayName = ref('');
+const STORAGE_KEY = 'town.instance';
 
-// 既存プレイヤーをIDで再開(開発用)
-const playerId = ref<number | null>(null);
-
+const instance = ref('');
 const error = ref('');
 const busy = ref(false);
+// コールバックから戻った直後の引き換え中かどうか。
+const exchanging = ref(false);
 
-async function register() {
-  if (!remoteUserId.value) {
-    error.value = 'ユーザーIDを入力してください。';
+onMounted(async () => {
+  // 前回使ったインスタンスを覚えておく(入力の手間を減らすだけ)。
+  instance.value = localStorage.getItem(STORAGE_KEY) ?? '';
+
+  // /auth/callback?session=... で戻ってきたら引き換える。
+  const url = new URL(window.location.href);
+  const session = url.searchParams.get('session');
+  if (!session) return;
+  exchanging.value = true;
+  try {
+    const p = await api.authCallback(session);
+    // URLからsessionを消してから通常画面へ(リロードで再送されないように)。
+    window.history.replaceState({}, '', '/');
+    emit('login', p);
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
+    window.history.replaceState({}, '', '/');
+  } finally {
+    exchanging.value = false;
+  }
+});
+
+async function login() {
+  if (!instance.value.trim()) {
+    error.value = 'インスタンスを入力してください。';
     return;
   }
   error.value = '';
   busy.value = true;
   try {
-    const p = await api.register(instanceHost.value, remoteUserId.value, displayName.value);
-    emit('login', p);
+    const res = await api.authStart(instance.value);
+    localStorage.setItem(STORAGE_KEY, res.instance);
+    // インスタンスの承認画面へ。承認するとcallbackへ戻ってくる。
+    window.location.href = res.url;
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
-  } finally {
-    busy.value = false;
-  }
-}
-
-async function enterExisting() {
-  if (!playerId.value) {
-    error.value = 'プレイヤーIDを入力してください。';
-    return;
-  }
-  error.value = '';
-  busy.value = true;
-  try {
-    const p = await api.getPlayer(playerId.value);
-    emit('login', p);
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
-  } finally {
     busy.value = false;
   }
 }
@@ -52,40 +57,97 @@ async function enterExisting() {
 
 <template>
   <div class="login-panel">
-    <h2>街に入る（新規登録・再開）</h2>
-    <table class="grid">
-      <tbody>
-        <tr>
-          <td>インスタンス</td>
-          <td><input type="text" v-model="instanceHost" data-test="instance-host" /></td>
-        </tr>
-        <tr>
-          <td>ユーザーID</td>
-          <td><input type="text" v-model="remoteUserId" data-test="remote-user-id" /></td>
-        </tr>
-        <tr>
-          <td>表示名</td>
-          <td><input type="text" v-model="displayName" data-test="display-name" /></td>
-        </tr>
-      </tbody>
-    </table>
-    <div class="actions" style="margin-top: 8px">
-      <button class="btn" :disabled="busy" data-test="register" @click="register">街へ入る</button>
-    </div>
-    <p class="muted">
-      初回はそのまま新規登録されます。登録済みの方は、登録時と同じインスタンスとユーザーIDを入れると
-      同じプレイヤーで再開できます（表示名は初回登録時のみ反映されます）。
-    </p>
-  </div>
+    <h2>街に入る</h2>
 
-  <div class="login-panel">
-    <h2>プレイヤーIDで再開(開発用)</h2>
-    <div class="actions">
-      <input type="number" v-model.number="playerId" placeholder="プレイヤーID" data-test="player-id" />
-      <button class="btn" :disabled="busy" @click="enterExisting">再開</button>
-    </div>
-    <p class="muted">MiAuth導入時にこのdevログインは本認証へ置き換えます。</p>
-  </div>
+    <div v-if="exchanging" class="exchanging" data-test="exchanging">ログインしています…</div>
 
-  <div v-if="error" class="message error" data-test="error">{{ error }}</div>
+    <template v-else>
+      <p class="lead">
+        お使いのMisskeyインスタンスを入力してください。<br />
+        インスタンスの承認画面が開き、許可すると街に入れます。
+      </p>
+      <div class="row">
+        <span class="lbl">インスタンス</span>
+        <input
+          type="text"
+          v-model="instance"
+          placeholder="misskey.io"
+          data-test="instance"
+          autocapitalize="off"
+          autocorrect="off"
+          spellcheck="false"
+          @keydown.enter="login"
+        />
+        <button class="btn primary" :disabled="busy" data-test="login" @click="login">
+          {{ busy ? '接続中…' : 'ログイン' }}
+        </button>
+      </div>
+      <p class="note">
+        ※初めての方はこの操作でそのまま登録されます。<br />
+        ※アカウント情報の閲覧と、ゲーム内からのフォローの許可をお願いしています。
+      </p>
+    </template>
+
+    <div v-if="error" class="message error" data-test="login-error">{{ error }}</div>
+  </div>
 </template>
+
+<style scoped>
+.login-panel {
+  max-width: 560px;
+  margin: 40px auto;
+  background: #fff;
+  border: 1px solid #999;
+  padding: 20px 24px;
+}
+h2 {
+  margin: 0 0 12px;
+  color: #663300;
+  font-size: 18px;
+}
+.lead {
+  font-size: 13px;
+  color: #333;
+  line-height: 1.7;
+  margin: 0 0 14px;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.lbl {
+  color: #006699;
+  font-size: 13px;
+}
+.row input {
+  flex: 1 1 200px;
+  font-size: 15px;
+  padding: 4px 6px;
+}
+.note {
+  font-size: 11px;
+  color: #888;
+  line-height: 1.7;
+  margin: 12px 0 0;
+}
+.exchanging {
+  font-size: 14px;
+  color: #006699;
+  padding: 20px 0;
+  text-align: center;
+}
+.message.error {
+  margin-top: 12px;
+}
+@media (max-width: 700px) {
+  .login-panel {
+    margin: 16px 8px;
+    padding: 14px;
+  }
+  .row input {
+    flex: 1 1 100%;
+  }
+}
+</style>
