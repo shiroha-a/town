@@ -21,12 +21,14 @@ import (
 	"github.com/shiroha-a/town/internal/keiba"
 	"github.com/shiroha-a/town/internal/ledger"
 	"github.com/shiroha-a/town/internal/mail"
+	"github.com/shiroha-a/town/internal/miauth"
 	"github.com/shiroha-a/town/internal/news"
 	"github.com/shiroha-a/town/internal/player"
 	"github.com/shiroha-a/town/internal/ranking"
 	"github.com/shiroha-a/town/internal/rediscli"
 	"github.com/shiroha-a/town/internal/rng"
 	"github.com/shiroha-a/town/internal/serial"
+	"github.com/shiroha-a/town/internal/session"
 	"github.com/shiroha-a/town/internal/settings"
 	"github.com/shiroha-a/town/internal/stock"
 	"github.com/shiroha-a/town/internal/townmap"
@@ -78,6 +80,7 @@ func Run(ctx context.Context, mode string, cfg *config.Config) error {
 		MoveWalkSecs:             cfg.Game.MoveWalkSecs,
 		MoveBusSecs:              cfg.Game.MoveBusSecs,
 		Towns:                    defaultTownConfigs(),
+		InstancePolicy:           string(miauth.Blacklist),
 	})
 	if err != nil {
 		return fmt.Errorf("load settings: %w", err)
@@ -105,10 +108,34 @@ func Run(ctx context.Context, mode string, cfg *config.Config) error {
 	newsSvc := news.New(pool)
 	rankingSvc := ranking.New(pool)
 	serialSvc := serial.New(pool, rng.New(0))
+	// MiAuth(ログイン)。トークンの暗号鍵が無い環境ではトークンを保存しない。
+	miauthClient := miauth.NewClient()
+	instanceRules := miauth.NewRules(pool)
+	// cookieのSecureはHTTPSでのみ有効にする。開発はTailscale等の素のHTTPで
+	// アクセスするため既定はオフで、TOWN_COOKIE_SECURE=1 で有効化する。
+	sessions := session.New(pool, os.Getenv("TOWN_COOKIE_SECURE") == "1")
+	if key := os.Getenv("TOWN_TOKEN_KEY"); key != "" {
+		tc, err := miauth.NewTokenCipher(key)
+		if err != nil {
+			return fmt.Errorf("token cipher: %w", err)
+		}
+		players = players.WithTokenCipher(tc)
+	} else {
+		logger.Warn("TOWN_TOKEN_KEY が未設定のため、Misskeyのアクセストークンは保存されません")
+	}
+
+	authDeps := httpapi.AuthDeps{
+		Pool:           pool,
+		MiAuth:         miauthClient,
+		InstanceRules:  instanceRules,
+		Sessions:       sessions,
+		AppName:        cfg.Server.AppName,
+		AllowedOrigins: cfg.Server.AllowedOrigins,
+	}
 
 	switch mode {
 	case "web":
-		return runWeb(ctx, cfg, logger, players, actions, contentSvc, st, tmap, stockSvc, keibaSvc, mailSvc, greetingSvc, attendanceSvc, cleagueSvc, newsSvc, rankingSvc, serialSvc)
+		return runWeb(ctx, cfg, logger, players, actions, contentSvc, st, tmap, stockSvc, keibaSvc, mailSvc, greetingSvc, attendanceSvc, cleagueSvc, newsSvc, rankingSvc, serialSvc, authDeps)
 	case "worker":
 		return worker.New(rdb, pool, led, cfg, st, logger).Run(ctx)
 	default:
@@ -116,10 +143,10 @@ func Run(ctx context.Context, mode string, cfg *config.Config) error {
 	}
 }
 
-func runWeb(ctx context.Context, cfg *config.Config, logger *slog.Logger, players *player.Service, actions *action.Service, contentSvc *content.Service, st *settings.Store, tmap *townmap.Store, stockSvc *stock.Service, keibaSvc *keiba.Service, mailSvc *mail.Service, greetingSvc *greeting.Service, attendanceSvc *attendance.Service, cleagueSvc *cleague.Service, newsSvc *news.Service, rankingSvc *ranking.Service, serialSvc *serial.Service) error {
+func runWeb(ctx context.Context, cfg *config.Config, logger *slog.Logger, players *player.Service, actions *action.Service, contentSvc *content.Service, st *settings.Store, tmap *townmap.Store, stockSvc *stock.Service, keibaSvc *keiba.Service, mailSvc *mail.Service, greetingSvc *greeting.Service, attendanceSvc *attendance.Service, cleagueSvc *cleague.Service, newsSvc *news.Service, rankingSvc *ranking.Service, serialSvc *serial.Service, authDeps httpapi.AuthDeps) error {
 	srv := &http.Server{
 		Addr:              cfg.Server.HTTPAddr,
-		Handler:           httpapi.NewServer(players, actions, contentSvc, st, tmap, stockSvc, keibaSvc, mailSvc, greetingSvc, attendanceSvc, cleagueSvc, newsSvc, rankingSvc, serialSvc),
+		Handler:           httpapi.NewServer(players, actions, contentSvc, st, tmap, stockSvc, keibaSvc, mailSvc, greetingSvc, attendanceSvc, cleagueSvc, newsSvc, rankingSvc, serialSvc, authDeps),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

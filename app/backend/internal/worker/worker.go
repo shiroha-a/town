@@ -161,6 +161,11 @@ func (w *Worker) runDailyIfNeeded(ctx context.Context, now time.Time) {
 		if err := DecayDayItems(ctx, tx); err != nil {
 			return err
 		}
+		// 期限切れのログインセッションと、承認されずに放置されたMiAuthの
+		// 保留セッションを掃除する。
+		if err := PurgeSessions(ctx, tx); err != nil {
+			return err
+		}
 		// ロト6の日次抽選(前日以前の未抽選プールを抽選し賞金を銀行へ振り込む)。
 		if _, err := DrawLoto6(ctx, tx, w.ledger, w.rng, date); err != nil {
 			return err

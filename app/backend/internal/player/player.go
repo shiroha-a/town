@@ -14,6 +14,7 @@ import (
 	"github.com/shiroha-a/town/internal/condition"
 	"github.com/shiroha-a/town/internal/effects"
 	"github.com/shiroha-a/town/internal/ledger"
+	"github.com/shiroha-a/town/internal/miauth"
 	"github.com/shiroha-a/town/internal/news"
 	"github.com/shiroha-a/town/internal/rng"
 	"github.com/shiroha-a/town/internal/settings"
@@ -112,10 +113,19 @@ type Service struct {
 	ledger   *ledger.Repo
 	rng      *rng.Rand
 	settings *settings.Store
+	// tokenCipher seals Misskey access tokens at rest. nil when no operational
+	// key is configured (the token is then not stored at all).
+	tokenCipher *miauth.TokenCipher
 }
 
 func New(pool *pgxpool.Pool, l *ledger.Repo, r *rng.Rand, st *settings.Store) *Service {
 	return &Service{pool: pool, ledger: l, rng: r, settings: st}
+}
+
+// WithTokenCipher attaches the cipher used to store Misskey access tokens.
+func (s *Service) WithTokenCipher(c *miauth.TokenCipher) *Service {
+	s.tokenCipher = c
+	return s
 }
 
 // ErrNotFound is returned when a player does not exist.
@@ -194,6 +204,41 @@ func (s *Service) Register(ctx context.Context, instanceHost, remoteUserID, disp
 	}
 
 	return s.Get(ctx, id)
+}
+
+// SetMisskeyToken stores the player's Misskey access token, encrypted at rest.
+// A nil cipher means no operational key is configured; the token is then not
+// stored at all rather than being written in the clear.
+func (s *Service) SetMisskeyToken(ctx context.Context, id int64, token string) error {
+	if s.tokenCipher == nil {
+		return nil
+	}
+	enc, err := s.tokenCipher.Seal(token)
+	if err != nil {
+		return fmt.Errorf("seal token: %w", err)
+	}
+	if _, err := s.pool.Exec(ctx,
+		`UPDATE players SET misskey_token_enc = $2 WHERE id = $1`, id, enc); err != nil {
+		return fmt.Errorf("save token: %w", err)
+	}
+	return nil
+}
+
+// MisskeyToken returns the player's decrypted Misskey access token, or "" when
+// none is stored.
+func (s *Service) MisskeyToken(ctx context.Context, id int64) (string, error) {
+	if s.tokenCipher == nil {
+		return "", nil
+	}
+	var enc []byte
+	if err := s.pool.QueryRow(ctx,
+		`SELECT misskey_token_enc FROM players WHERE id = $1`, id).Scan(&enc); err != nil {
+		return "", fmt.Errorf("read token: %w", err)
+	}
+	if len(enc) == 0 {
+		return "", nil
+	}
+	return s.tokenCipher.Open(enc)
 }
 
 // RefreshPowerMax recomputes energy_max / nou_energy_max from the player's
@@ -592,10 +637,15 @@ func (s *Service) TouchLastSeen(ctx context.Context, id int64) {
 // Participants lists players active within the last 20 minutes
 // (レガシー$logout_time=1200秒の参加者リスト相当)。
 func (s *Service) Participants(ctx context.Context) ([]Participant, error) {
+	// 「いま街にいる人」はログインセッションの最終アクセスで判定する
+	// (旧: players.last_seen_at。MiAuth導入でセッションが真の在席情報になった)。
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, display_name FROM players
-		 WHERE deleted_at IS NULL AND last_seen_at > now() - interval '20 minutes'
-		 ORDER BY last_seen_at ASC`)
+		`SELECT p.id, p.display_name
+		 FROM players p
+		 JOIN (SELECT player_id, max(last_seen_at) AS seen FROM sessions
+		       WHERE expires_at > now() GROUP BY player_id) s ON s.player_id = p.id
+		 WHERE p.deleted_at IS NULL AND s.seen > now() - interval '20 minutes'
+		 ORDER BY s.seen ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("list participants: %w", err)
 	}

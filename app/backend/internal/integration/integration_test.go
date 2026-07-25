@@ -14,6 +14,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"strconv"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -30,11 +32,13 @@ import (
 	"github.com/shiroha-a/town/internal/keiba"
 	"github.com/shiroha-a/town/internal/ledger"
 	"github.com/shiroha-a/town/internal/mail"
+	"github.com/shiroha-a/town/internal/miauth"
 	"github.com/shiroha-a/town/internal/news"
 	"github.com/shiroha-a/town/internal/player"
 	"github.com/shiroha-a/town/internal/ranking"
 	"github.com/shiroha-a/town/internal/rng"
 	"github.com/shiroha-a/town/internal/serial"
+	"github.com/shiroha-a/town/internal/session"
 	"github.com/shiroha-a/town/internal/settings"
 	"github.com/shiroha-a/town/internal/stock"
 	"github.com/shiroha-a/town/internal/townmap"
@@ -147,7 +151,23 @@ func setup(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 		pool.Close()
 		t.Fatalf("townmap set: %v", err)
 	}
-	srv := httptest.NewServer(httpapi.NewServer(svc, actions, contentSvc, st, tmap, stock.New(pool), keiba.New(pool, rng.New(7)), mail.New(pool, time.UTC, 5), greeting.New(pool), attendance.New(pool, time.UTC, 5), cleague.New(pool), news.New(pool), ranking.New(pool), serial.New(pool, rng.New(3))))
+	sessions := session.New(pool, false)
+	// 認可ガード(自分のIDしか操作できない)を通すため、テストのHTTP呼び出しに
+	// ログインcookieを自動で付ける。テストは逐次実行なのでプロセス共有で足りる。
+	testPlayerSvc, testSessionStore, testTokens = svc, sessions, &sync.Map{}
+	prevTransport := http.DefaultClient.Transport
+	http.DefaultClient.Transport = sessionTransport{base: http.DefaultTransport}
+	t.Cleanup(func() { http.DefaultClient.Transport = prevTransport })
+
+	srv := httptest.NewServer(httpapi.NewServer(svc, actions, contentSvc, st, tmap, stock.New(pool), keiba.New(pool, rng.New(7)), mail.New(pool, time.UTC, 5), greeting.New(pool), attendance.New(pool, time.UTC, 5), cleague.New(pool), news.New(pool), ranking.New(pool), serial.New(pool, rng.New(3)),
+		httpapi.AuthDeps{
+			Pool:           pool,
+			MiAuth:         miauth.NewClient(),
+			InstanceRules:  miauth.NewRules(pool),
+			Sessions:       sessions,
+			AppName:        "TOWN",
+			AllowedOrigins: []string{"all"},
+		}))
 	t.Cleanup(func() {
 		srv.Close()
 		pool.Close()
@@ -170,22 +190,71 @@ func newTestSettings(t *testing.T, ctx context.Context, pool *pgxpool.Pool, g se
 	return st
 }
 
+// テスト用の認証。本番ではMiAuthのコールバックがcookieを配るが、テストは
+// http.Get/http.Post で直接APIを叩くため、経路の {id}(管理APIは
+// X-Acting-Player-Id)から register 時のセッションを引いて自動で付与する。
+// 呼び出し側数百箇所を書き換えずに認可ガードを通すための仕組み。
+var (
+	testPlayerSvc    *player.Service
+	testSessionStore *session.Store
+	testTokens       *sync.Map // player id -> session token
+)
+
+type sessionTransport struct{ base http.RoundTripper }
+
+func (t sessionTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	id := testPathPlayerID(req.URL.Path)
+	if id == 0 {
+		id, _ = strconv.ParseInt(req.Header.Get("X-Acting-Player-Id"), 10, 64)
+	}
+	if tok, ok := testTokens.Load(id); ok {
+		req = req.Clone(req.Context())
+		req.AddCookie(&http.Cookie{Name: session.CookieName, Value: tok.(string)})
+	}
+	return t.base.RoundTrip(req)
+}
+
+// testPathPlayerID pulls the {id} out of /api/v1/players/{id}/... , or 0.
+func testPathPlayerID(path string) int64 {
+	rest, ok := strings.CutPrefix(path, "/api/v1/players/")
+	if !ok {
+		return 0
+	}
+	if i := strings.IndexByte(rest, '/'); i >= 0 {
+		rest = rest[:i]
+	}
+	id, _ := strconv.ParseInt(rest, 10, 64)
+	return id
+}
+
+// register creates a player through the same service call the MiAuth callback
+// uses, opens a session for it, and returns the player as the API renders it.
 func register(t *testing.T, base, host, uid string) playerResp {
 	t.Helper()
-	body, _ := json.Marshal(map[string]string{"instance_host": host, "remote_user_id": uid})
-	resp, err := http.Post(base+"/api/v1/players", "application/json", bytes.NewReader(body))
+	ctx := context.Background()
+	p, err := testPlayerSvc.Register(ctx, host, uid, uid)
 	if err != nil {
-		t.Fatalf("post: %v", err)
+		t.Fatalf("register: %v", err)
+	}
+	token, err := testSessionStore.Issue(ctx, p.ID)
+	if err != nil {
+		t.Fatalf("issue session: %v", err)
+	}
+	testTokens.Store(p.ID, token)
+
+	resp, err := http.Get(base + "/api/v1/players/" + strconv.FormatInt(p.ID, 10))
+	if err != nil {
+		t.Fatalf("get player: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("register status: %d", resp.StatusCode)
+		t.Fatalf("get player status: %d", resp.StatusCode)
 	}
-	var p playerResp
-	if err := json.NewDecoder(resp.Body).Decode(&p); err != nil {
+	var out playerResp
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	return p
+	return out
 }
 
 func hasRole(roles []string, want string) bool {
