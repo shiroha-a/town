@@ -14,8 +14,8 @@ app/frontend/public/svg-preview.html
 town_test/
 
 # レガシー原本・ローカル参照(第三者ゲーム。公開リポジトリには含めない)
+# レガシー環境の説明は .tmp/README.md へ移動した(公開用READMEを別途置けるように)
 /town/
 /scripts/
 /docker/
 /compose.yaml
-/README.md
