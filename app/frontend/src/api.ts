@@ -128,6 +128,8 @@ async function request<T>(
     method,
     headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...(headers ?? {}) },
     body: body ? JSON.stringify(body) : undefined,
+    // ログインセッションはHttpOnly cookieで持つため、常に送る。
+    credentials: 'same-origin',
   });
   const text = await res.text();
   const data = text ? JSON.parse(text) : null;
@@ -185,6 +187,25 @@ export interface FishingResult {
 export interface FishingPickResp {
   player: Player;
   result: FishingResult;
+}
+
+// 管理: 参加できるインスタンスの許可/拒否リスト。
+export interface InstanceRule {
+  host: string;
+  kind: 'block' | 'allow';
+  note: string;
+  created_at: string;
+}
+export interface InstanceRules {
+  policy: 'blacklist' | 'whitelist';
+  rules: InstanceRule[];
+}
+
+// MiAuthログイン。
+export interface AuthStartResp {
+  url: string; // ここへブラウザを飛ばす
+  instance: string;
+  instance_name: string;
 }
 
 // ビンゴ大会。
@@ -475,6 +496,10 @@ export interface AdminPlayerSummary {
   money: number;
   job: string;
   job_level: number;
+  /** @user@host。プロフィール未取得だと空。 */
+  acct: string;
+  instance_host: string;
+  remote_user_id: string;
 }
 // プレイヤーの管理者編集ペイロード。
 export interface AdminPlayerPayload {
@@ -1040,9 +1065,79 @@ export interface ShopStockView {
   items: ShopStockItem[];
 }
 
-function adminHeaders(actingId: number): Record<string, string> {
-  return { 'X-Acting-Player-Id': String(actingId) };
-}
+// 管理APIの認可はログインセッション(HttpOnly cookie)で行う。
+// 以前は X-Acting-Player-Id ヘッダを自己申告していたが、詐称できるため廃止した。
+// Misskey連携(prof施設)。
+// カスタム絵文字。
+export type UsedEmoji = {
+  host: string;
+  name: string;
+  url: string;
+  license: string;
+  category: string;
+};
+
+export type PickerEmoji = {
+  name: string;
+  category: string;
+  url: string;
+  aliases: string[] | null;
+};
+
+export type EmojiResolveResult = {
+  allowed: boolean;
+  reason?: string;
+  message?: string;
+  emoji?: UsedEmoji;
+  shortcode?: string;
+};
+
+export type MisskeyProfile = {
+  player_id: number;
+  username: string;
+  host: string;
+  acct: string;
+  name: string;
+  avatar_url: string;
+  banner_url: string;
+  description: string;
+  followers_count: number;
+  following_count: number;
+  notes_count: number;
+  is_bot: boolean;
+  is_cat: boolean;
+  is_locked: boolean;
+  fetched_at: string;
+  profile_url: string;
+  /** 名前・自己紹介で使われている絵文字の shortcode->url。 */
+  emojis: Record<string, string>;
+  /** 相手インスタンスに繋がらずキャッシュを表示している。 */
+  stale: boolean;
+};
+
+export type FollowState = {
+  self: boolean;
+  /** フォロー済みかを確かめられたか(未解決のリモート相手ではfalse)。 */
+  known: boolean;
+  following: boolean;
+  pending: boolean;
+  can_follow: boolean;
+  fallback_url: string;
+};
+
+export type MisskeyProfileResp = {
+  player_id: number;
+  display_name: string;
+  profile: MisskeyProfile;
+  follow: FollowState | null;
+};
+
+export type FollowResult = {
+  following: boolean;
+  pending: boolean;
+  message: string;
+  fallback_url: string;
+};
 
 export const api = {
   register: (instanceHost: string, remoteUserId: string, displayName: string) =>
@@ -1053,6 +1148,20 @@ export const api = {
     }),
   getPlayer: (id: number) => request<Player>('GET', `/players/${id}`),
   listPlayers: () => request<PublicSummary[]>('GET', '/players'),
+  emojiList: (host?: string) =>
+    request<{ host: string; emojis: PickerEmoji[]; verdicts: Record<string, string> }>(
+      'GET',
+      `/emojis${host ? `?host=${encodeURIComponent(host)}` : ''}`,
+    ),
+  resolveEmoji: (host: string, name: string) =>
+    request<EmojiResolveResult>('POST', '/emojis/resolve', { host, name }),
+  usedEmojis: () =>
+    request<{ emojis: UsedEmoji[] }>('GET', '/emojis/used').then((r) => r.emojis),
+  misskeyProfile: (id: number) => request<MisskeyProfileResp>('GET', `/players/${id}/misskey`),
+  misskeyFollow: (targetId: number) =>
+    request<FollowResult>('POST', '/misskey/follow', { target_id: targetId }),
+  misskeyUnfollow: (targetId: number) =>
+    request<FollowResult>('POST', '/misskey/unfollow', { target_id: targetId }),
   playerProfile: (id: number) => request<PublicProfile>('GET', `/players/${id}/profile`),
   // 役場: 街のニュース(街全体)と住民ごとの出来事。
   townNews: (limit = 100) => request<NewsEntry[]>('GET', `/news?limit=${limit}`),
@@ -1068,6 +1177,19 @@ export const api = {
       card,
       idempotency_key: newIdempotencyKey(),
     }),
+  // インスタンスを指定して認可URLをもらう(飛ばすのは呼び出し側)。
+  adminInstances: () =>
+    request<InstanceRules>('GET', '/admin/instances'),
+  adminPutInstance: (r: { host: string; kind: string; note: string }) =>
+    request<{ ok: boolean }>('PUT', '/admin/instances', r),
+  adminDeleteInstance: (host: string) =>
+    request<{ deleted: boolean }>('DELETE', `/admin/instances/${encodeURIComponent(host)}`),
+  authStart: (instance: string) =>
+    request<AuthStartResp>('POST', '/auth/start', { instance, origin: window.location.origin }),
+  // コールバックで受け取ったsessionを引き換えてログインする。
+  authCallback: (session: string) => request<Player>('POST', '/auth/callback', { session }),
+  authMe: () => request<Player>('GET', '/auth/me'),
+  authLogout: () => request<{ ok: boolean }>('POST', '/auth/logout'),
   bingo: (id: number) => request<BingoState>('GET', `/players/${id}/bingo`),
   bingoTakeCard: (id: number) =>
     request<Player>('POST', `/players/${id}/bingo/card`, { idempotency_key: newIdempotencyKey() }),
@@ -1076,8 +1198,8 @@ export const api = {
       card_id: cardId,
       idempotency_key: newIdempotencyKey(),
     }),
-  adminStartBingo: (actingId: number, cfg: { max_number: number; per_day: number; days: number; lines_to_win: number }) =>
-    request<{ started: boolean }>('POST', '/admin/bingo', cfg, adminHeaders(actingId)),
+  adminStartBingo: (cfg: { max_number: number; per_day: number; days: number; lines_to_win: number }) =>
+    request<{ started: boolean }>('POST', '/admin/bingo', cfg),
   redeemSerial: (id: number, code: string) =>
     request<SerialRedeemResp>('POST', `/players/${id}/serial/redeem`, {
       code,
@@ -1090,18 +1212,19 @@ export const api = {
       uses,
       idempotency_key: newIdempotencyKey(),
     }),
-  adminSerials: (actingId: number) =>
-    request<SerialCode[]>('GET', '/admin/serials', undefined, adminHeaders(actingId)),
-  adminCreateSerial: (actingId: number, c: Partial<SerialCode>) =>
-    request<SerialCode>('POST', '/admin/serials', c, adminHeaders(actingId)),
-  adminUpdateSerial: (actingId: number, c: SerialCode) =>
-    request<SerialCode>('PUT', `/admin/serials/${c.id}`, c, adminHeaders(actingId)),
-  adminDeleteSerial: (actingId: number, sid: number) =>
-    request<{ deleted: boolean }>('DELETE', `/admin/serials/${sid}`, undefined, adminHeaders(actingId)),
-  adminSerialUses: (actingId: number, sid: number) =>
-    request<SerialUse[]>('GET', `/admin/serials/${sid}/uses`, undefined, adminHeaders(actingId)),
+  adminSerials: () =>
+    request<SerialCode[]>('GET', '/admin/serials'),
+  adminCreateSerial: (c: Partial<SerialCode>) =>
+    request<SerialCode>('POST', '/admin/serials', c),
+  adminUpdateSerial: (c: SerialCode) =>
+    request<SerialCode>('PUT', `/admin/serials/${c.id}`, c),
+  adminDeleteSerial: (sid: number) =>
+    request<{ deleted: boolean }>('DELETE', `/admin/serials/${sid}`),
+  adminSerialUses: (sid: number) =>
+    request<SerialUse[]>('GET', `/admin/serials/${sid}/uses`),
   rankingKeys: () => request<RankingKey[]>('GET', '/ranking/keys'),
   ranking: (key: string, self: number) => request<RankingResult>('GET', `/ranking?key=${key}&self=${self}`),
+  publicHouses: () => request<HouseCell[]>('GET', '/houses'),
   townMap: () => request<TownFacility[]>('GET', '/townmap'),
   townAssets: () => request<TownAsset[]>('GET', '/townassets'),
   towns: () => request<Town[]>('GET', '/towns'),
@@ -1509,15 +1632,13 @@ export const api = {
       idempotency_key: newIdempotencyKey(),
     }),
 
-  // 管理者API(X-Acting-Player-Idヘッダ + adminロール)。
-  adminListItems: (actingId: number) =>
-    request<AdminItem[]>('GET', '/admin/items', undefined, adminHeaders(actingId)),
+  // 管理者API(ログインセッションのadminロールで認可)。
+  adminListItems: () =>
+    request<AdminItem[]>('GET', '/admin/items'),
   adminCreateItem: (
-    actingId: number,
     item: { name: string; category: string; price: number; effect: EffectOp[]; stock_master: number | null },
-  ) => request<AdminItem>('POST', '/admin/items', item, adminHeaders(actingId)),
+  ) => request<AdminItem>('POST', '/admin/items', item),
   adminUpdateItem: (
-    actingId: number,
     id: number,
     item: {
       name: string;
@@ -1527,65 +1648,64 @@ export const api = {
       enabled: boolean;
       stock_master: number | null;
     },
-  ) => request<AdminItem>('PUT', `/admin/items/${id}`, item, adminHeaders(actingId)),
-  adminDeleteItem: (actingId: number, id: number) =>
-    request<{ deleted: boolean }>('DELETE', `/admin/items/${id}`, undefined, adminHeaders(actingId)),
-  adminListJobs: (actingId: number) =>
-    request<AdminJob[]>('GET', '/admin/jobs', undefined, adminHeaders(actingId)),
-  adminCreateJob: (actingId: number, job: JobPayload) =>
-    request<AdminJob>('POST', '/admin/jobs', job, adminHeaders(actingId)),
-  adminUpdateJob: (actingId: number, id: number, job: JobPayload) =>
-    request<AdminJob>('PUT', `/admin/jobs/${id}`, job, adminHeaders(actingId)),
-  adminDeleteJob: (actingId: number, id: number) =>
-    request<{ deleted: boolean }>('DELETE', `/admin/jobs/${id}`, undefined, adminHeaders(actingId)),
+  ) => request<AdminItem>('PUT', `/admin/items/${id}`, item),
+  adminDeleteItem: (id: number) =>
+    request<{ deleted: boolean }>('DELETE', `/admin/items/${id}`),
+  adminListJobs: () =>
+    request<AdminJob[]>('GET', '/admin/jobs'),
+  adminCreateJob: (job: JobPayload) =>
+    request<AdminJob>('POST', '/admin/jobs', job),
+  adminUpdateJob: (id: number, job: JobPayload) =>
+    request<AdminJob>('PUT', `/admin/jobs/${id}`, job),
+  adminDeleteJob: (id: number) =>
+    request<{ deleted: boolean }>('DELETE', `/admin/jobs/${id}`),
   adminSimulate: (
-    actingId: number,
     effect: EffectOp[],
     state: { money: number; params: Record<string, { value: number; max: number }> },
-  ) => request<SimResult>('POST', '/admin/simulate', { effect, state }, adminHeaders(actingId)),
-  adminListPlayers: (actingId: number) =>
-    request<AdminPlayerSummary[]>('GET', '/admin/players', undefined, adminHeaders(actingId)),
-  adminUpdatePlayer: (actingId: number, id: number, payload: AdminPlayerPayload) =>
-    request<Player>('PUT', `/admin/players/${id}`, payload, adminHeaders(actingId)),
-  adminDeletePlayer: (actingId: number, id: number) =>
-    request<{ deleted: boolean }>('DELETE', `/admin/players/${id}`, undefined, adminHeaders(actingId)),
-  adminDeleteGreeting: (actingId: number, id: number) =>
-    request<{ deleted: boolean }>('DELETE', `/admin/greetings/${id}`, undefined, adminHeaders(actingId)),
-  adminGetSettings: (actingId: number) =>
-    request<GameSettings>('GET', '/admin/settings', undefined, adminHeaders(actingId)),
-  adminUpdateSettings: (actingId: number, settings: GameSettings) =>
-    request<GameSettings>('PUT', '/admin/settings', settings, adminHeaders(actingId)),
-  adminUpdateTownMap: (actingId: number, facilities: TownFacility[]) =>
-    request<TownFacility[]>('PUT', '/admin/townmap', facilities, adminHeaders(actingId)),
-  adminUpdateTownAssets: (actingId: number, assets: TownAsset[]) =>
-    request<TownAsset[]>('PUT', '/admin/townassets', assets, adminHeaders(actingId)),
+  ) => request<SimResult>('POST', '/admin/simulate', { effect, state }),
+  adminListPlayers: () =>
+    request<AdminPlayerSummary[]>('GET', '/admin/players'),
+  adminUpdatePlayer: (id: number, payload: AdminPlayerPayload) =>
+    request<Player>('PUT', `/admin/players/${id}`, payload),
+  adminDeletePlayer: (id: number) =>
+    request<{ deleted: boolean }>('DELETE', `/admin/players/${id}`),
+  adminDeleteGreeting: (id: number) =>
+    request<{ deleted: boolean }>('DELETE', `/admin/greetings/${id}`),
+  adminGetSettings: () =>
+    request<GameSettings>('GET', '/admin/settings'),
+  adminUpdateSettings: (settings: GameSettings) =>
+    request<GameSettings>('PUT', '/admin/settings', settings),
+  adminUpdateTownMap: (facilities: TownFacility[]) =>
+    request<TownFacility[]>('PUT', '/admin/townmap', facilities),
+  adminUpdateTownAssets: (assets: TownAsset[]) =>
+    request<TownAsset[]>('PUT', '/admin/townassets', assets),
   // 施設プリセット(画像・表示名・遷移先の保存済みテンプレート)。
-  adminFacilityPresets: (actingId: number) =>
-    request<FacilityPreset[]>('GET', '/admin/townmap/presets', undefined, adminHeaders(actingId)),
-  adminUpdateFacilityPresets: (actingId: number, presets: FacilityPreset[]) =>
-    request<FacilityPreset[]>('PUT', '/admin/townmap/presets', presets, adminHeaders(actingId)),
+  adminFacilityPresets: () =>
+    request<FacilityPreset[]>('GET', '/admin/townmap/presets'),
+  adminUpdateFacilityPresets: (presets: FacilityPreset[]) =>
+    request<FacilityPreset[]>('PUT', '/admin/townmap/presets', presets),
   // カスタムイベント(ランダムイベントの追加/編集/削除)。
-  adminListEvents: (actingId: number) =>
-    request<AdminEvent[]>('GET', '/admin/events', undefined, adminHeaders(actingId)),
-  adminCreateEvent: (actingId: number, e: Omit<AdminEvent, 'id'>) =>
-    request<AdminEvent>('POST', '/admin/events', e, adminHeaders(actingId)),
-  adminUpdateEvent: (actingId: number, e: AdminEvent) =>
-    request<AdminEvent>('PUT', `/admin/events/${e.id}`, e, adminHeaders(actingId)),
-  adminDeleteEvent: (actingId: number, id: number) =>
-    request<{ deleted: boolean }>('DELETE', `/admin/events/${id}`, undefined, adminHeaders(actingId)),
+  adminListEvents: () =>
+    request<AdminEvent[]>('GET', '/admin/events'),
+  adminCreateEvent: (e: Omit<AdminEvent, 'id'>) =>
+    request<AdminEvent>('POST', '/admin/events', e),
+  adminUpdateEvent: (e: AdminEvent) =>
+    request<AdminEvent>('PUT', `/admin/events/${e.id}`, e),
+  adminDeleteEvent: (id: number) =>
+    request<{ deleted: boolean }>('DELETE', `/admin/events/${id}`),
   // 家が建っているマス(施設エディタでロックするため)。
-  adminHouseCells: (actingId: number) =>
-    request<PlotCell[]>('GET', '/admin/townmap/houses', undefined, adminHeaders(actingId)),
+  adminHouseCells: () =>
+    request<PlotCell[]>('GET', '/admin/townmap/houses'),
   // アップロード済み画像名の一覧(背景アセットのパレット用)。
-  adminListAssets: (actingId: number) =>
-    request<string[]>('GET', '/admin/assets', undefined, adminHeaders(actingId)),
+  adminListAssets: () =>
+    request<string[]>('GET', '/admin/assets'),
   // 背景アセット画像をアップロード(base64)。nameはURLスラッグ。
-  adminUploadAsset: (actingId: number, name: string, mime: string, data: string) =>
-    request<{ name: string }>('POST', '/admin/assets', { name, mime, data }, adminHeaders(actingId)),
+  adminUploadAsset: (name: string, mime: string, data: string) =>
+    request<{ name: string }>('POST', '/admin/assets', { name, mime, data }),
   // アップロード画像を削除(配置中は422)。
-  adminDeleteAsset: (actingId: number, name: string) =>
-    request<{ ok: boolean }>('DELETE', `/admin/assets/${encodeURIComponent(name)}`, undefined, adminHeaders(actingId)),
+  adminDeleteAsset: (name: string) =>
+    request<{ ok: boolean }>('DELETE', `/admin/assets/${encodeURIComponent(name)}`),
   // 街の一覧(名前・地価)を更新。街番号は並び順で決まる。
-  adminUpdateTowns: (actingId: number, towns: TownConfig[]) =>
-    request<Town[]>('PUT', '/admin/towns', towns, adminHeaders(actingId)),
+  adminUpdateTowns: (towns: TownConfig[]) =>
+    request<Town[]>('PUT', '/admin/towns', towns),
 };

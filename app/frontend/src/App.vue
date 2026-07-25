@@ -23,6 +23,7 @@ import MailView from './components/MailView.vue';
 import AshiatoView from './components/AshiatoView.vue';
 import CLeagueView from './components/CLeagueView.vue';
 import YakubaView from './components/YakubaView.vue';
+import ProfileView from './components/ProfileView.vue';
 import TsuriView from './components/TsuriView.vue';
 import GiftShopView from './components/GiftShopView.vue';
 import TokutenView from './components/TokutenView.vue';
@@ -33,32 +34,49 @@ import PlaceholderView from './components/PlaceholderView.vue';
 const player = ref<Player | null>(null);
 const view = ref('town');
 
-// 開発用の簡易セッション(MiAuth導入時に本認証へ置換)。
-const STORAGE_KEY = 'town.playerId';
+// ログイン状態はHttpOnly cookieのセッションで持つ(MiAuth)。
+// 起動時に /auth/me で復元し、未ログインならログイン画面を出す。
+const booting = ref(true);
 
 onMounted(async () => {
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (saved) {
-    try {
-      player.value = await api.getPlayer(Number(saved));
-    } catch {
-      localStorage.removeItem(STORAGE_KEY);
-    }
+  try {
+    player.value = await api.authMe();
+  } catch {
+    player.value = null;
+  } finally {
+    booting.value = false;
   }
 });
 
 function onLogin(p: Player) {
   player.value = p;
   view.value = 'town';
-  localStorage.setItem(STORAGE_KEY, String(p.id));
 }
 function onUpdate(p: Player) {
   player.value = p;
 }
-function onLogout() {
+// ログアウト直後だけログイン画面に後始末の案内を出す。ホストは直前の
+// プレイヤーから取る(このブラウザでログインしていないと入力欄は空のため)。
+const loggedOut = ref(false);
+const loggedOutHost = ref('');
+
+async function onLogout() {
+  // MiAuthはログインのたびにMisskey側で新しいアクセストークンを発行する。
+  // i/revoke-token は secure:true でアクセストークンから呼べないため、
+  // こちらから古いトークンを消せない。無駄なログアウトを減らすために断りを入れる。
+  const ok = window.confirm(
+    'ログアウトしますか？\n次にログインすると、Misskey側で新しいアクセストークンが発行されます。',
+  );
+  if (!ok) return;
+  loggedOutHost.value = player.value?.instance_host ?? '';
+  try {
+    await api.authLogout();
+  } catch {
+    // 失敗してもクライアント側は未ログイン扱いにする。
+  }
   player.value = null;
   view.value = 'town';
-  localStorage.removeItem(STORAGE_KEY);
+  loggedOut.value = true;
 }
 // 家訪問(view='house')で開く家のID。街の家クリックからnavigate経由で渡される。
 const houseId = ref<number | null>(null);
@@ -114,9 +132,12 @@ const facilityTitles: Record<string, string> = {
 </script>
 
 <template>
-  <template v-if="!player">
+  <template v-if="booting">
     <h1 class="town-title">Ｔｏｗｎ</h1>
-    <LoginView @login="onLogin" />
+    <div class="booting">読み込み中…</div>
+  </template>
+  <template v-else-if="!player">
+    <LoginView :logged-out="loggedOut" :logged-out-host="loggedOutHost" @login="onLogin" />
   </template>
   <template v-else>
     <TownView v-if="view === 'town'" :player="player" @navigate="navigate" @reload="reload" @logout="onLogout" />
@@ -163,7 +184,22 @@ const facilityTitles: Record<string, string> = {
     <TokutenView v-else-if="view === 'tokuten'" :player="player" @update="onUpdate" @back="back" />
     <BingoView v-else-if="view === 'bingo'" :player="player" @update="onUpdate" @back="back" />
     <YakubaView v-else-if="view === 'yakuba'" :player="player" @back="back" />
+    <ProfileView v-else-if="view === 'prof'" :player="player" @back="back" />
     <AdminView v-else-if="view === 'admin'" :player="player" @back="back" />
     <PlaceholderView v-else :title="facilityTitles[view] ?? view" @back="back" />
   </template>
+
+  <div class="footer">
+    [HOME]<br />
+    - TOWN リライト版 (Vue) -
+  </div>
 </template>
+
+<style scoped>
+.booting {
+  text-align: center;
+  color: #666;
+  font-size: 14px;
+  padding: 40px 0;
+}
+</style>

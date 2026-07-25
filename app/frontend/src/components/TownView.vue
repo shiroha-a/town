@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import RichText from './RichText.vue';
+import TownMapBoard from './TownMapBoard.vue';
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue';
-import { api, WARP_FEE, assetUrl, type Player, type Params, type TownFacility, type TownAsset, type Town, type HouseCell, type MoveResult, type WorkResponse } from '../api';
+import { api, WARP_FEE, type Player, type Params, type TownFacility, type TownAsset, type Town, type HouseCell, type MoveResult, type WorkResponse } from '../api';
 import { satietyLabel } from '../params';
 import CommandIcon from './CommandIcon.vue';
 import PowerBar from './PowerBar.vue';
@@ -46,29 +48,13 @@ const currentTownLandPrice = computed(() => townLandPrice(displayTown.value));
 // 施設は全街ぶんをまとめて取得し、表示中の街のものだけを描画する。
 // 空き地(akichi)は施設アイコンとしては描画せず、空き地マスとして別扱いする。
 const facilities = ref<TownFacility[]>([]);
-const facilityAt = (col: number, row: number) =>
-  facilities.value.find(
-    (f) => f.key !== 'akichi' && f.town === displayTown.value && f.col === col && f.row === row,
-  );
-// 空き地(akichi)マスか(表示中の街)。家が建っていれば空き地扱いしない。
-const akichiAt = (col: number, row: number) =>
-  facilities.value.some(
-    (f) => f.key === 'akichi' && f.town === displayTown.value && f.col === col && f.row === row,
-  );
 
 // 全街の家。表示中の街のものをグリッドに描画する(外装アイコン)。
 const houses = ref<HouseCell[]>([]);
-const houseAt = (col: number, row: number) =>
-  houses.value.find((h) => h.town === displayTown.value && h.col === col && h.row === row);
 
 // 背景アセット(装飾レイヤー)。施設の下にセル単位で敷く。表示中の街のものを描画する。
 // 1マスに複数レイヤーを重ねられる(配列順=重ね順、後のものが上)。
 const assets = ref<TownAsset[]>([]);
-const assetsAt = (col: number, row: number) =>
-  assets.value.filter((a) => a.town === displayTown.value && a.col === col && a.row === row);
-
-const cols = Array.from({ length: 16 }, (_, i) => i + 1);
-const rows = 'ABCDEFGHIJKL'.split('');
 
 onMounted(async () => {
   try {
@@ -280,9 +266,6 @@ function clickAkichi(col: number, row: number) {
 }
 
 // 家のツールチップ。家主が設定したマウスオーバーコメント(setumei)を改行して表示する。
-function houseTitle(h: HouseCell): string {
-  return h.setumei ? `${h.owner_name}さんの家\n「${h.setumei}」` : `${h.owner_name}さんの家`;
-}
 
 // ワープ(高額・即時)。トップ画面の持ち物欄の下のプルダウンで行き先を選び移動する。
 const warpFee = WARP_FEE;
@@ -625,51 +608,17 @@ const paramBar = (v: number) => Math.max(3, Math.round((v / paramMax.value) * 10
     <!-- 左カラム: 街マップ -->
     <div class="col-left">
       <div class="mapwrap">
-        <div class="townmap-grid" :style="{ backgroundColor: skyColor }">
-          <div class="th corner"></div>
-          <div v-for="c in cols" :key="'h' + c" class="th">{{ c }}</div>
-          <template v-for="(r, ri) in rows" :key="r">
-            <div class="th">{{ r }}</div>
-            <div v-for="c in cols" :key="r + '-' + c" class="tcell">
-              <img
-                v-for="(a, ai) in assetsAt(c, ri)"
-                :key="'bg' + ai"
-                class="cell-bg"
-                :src="assetUrl(a.img)"
-                alt=""
-              />
-              <!-- 空き地(家が建っていないakichiマス)。クリックでそのマスに建築。 -->
-              <button
-                v-if="akichiAt(c, ri) && !houseAt(c, ri) && !facilityAt(c, ri)"
-                v-touch-label
-                class="facility akichi-btn"
-                :title="`${r}${c}（空き地）クリックで建築`"
-                @click="clickAkichi(c, ri)"
-              >
-                <img class="akichi-img" src="/img/svg/akiti.svg" alt="空き地" />
-              </button>
-              <!-- 家。クリックでその家のコンテンツ(訪問パネル)を開く。 -->
-              <button
-                v-else-if="houseAt(c, ri)"
-                v-touch-label
-                class="facility house-cell"
-                :title="houseTitle(houseAt(c, ri)!)"
-                @click="clickHouse(houseAt(c, ri)!)"
-              >
-                <img :src="`/img/svg/${houseAt(c, ri)!.exterior}.svg`" :alt="`${houseAt(c, ri)!.owner_name}さんの家`" />
-              </button>
-              <button
-                v-if="facilityAt(c, ri)"
-                v-touch-label
-                class="facility"
-                :title="facilityAt(c, ri)!.alt"
-                @click="clickFacility(facilityAt(c, ri)!)"
-              >
-                <img :src="`/img/svg/${facilityAt(c, ri)!.img}.svg`" :alt="facilityAt(c, ri)!.alt" />
-              </button>
-            </div>
-          </template>
-        </div>
+        <TownMapBoard
+          :facilities="facilities"
+          :assets="assets"
+          :houses="houses"
+          :town="displayTown"
+          :sky-color="skyColor"
+          interactive
+          @facility="clickFacility"
+          @house="clickHouse"
+          @akichi="(p) => clickAkichi(p.col, p.row)"
+        />
       </div>
       <div class="ticker">
         <template v-if="tickerItems.length">
@@ -690,7 +639,7 @@ const paramBar = (v: number) => Math.max(3, Math.round((v / paramMax.value) * 10
           <div v-for="g in adminGreets" :key="g.id" class="chat-line">
             <span class="cbadge admin">管理人</span>
             <span class="ct">{{ fmtChatTime(g.posted_at) }}</span>
-            <span class="cn">{{ g.user_name }}</span>：<span :style="{ color: g.color }">{{ g.body }}</span>
+            <span class="cn">{{ g.user_name }}</span>：<span :style="{ color: g.color }"><RichText :text="g.body" /></span>
           </div>
         </div>
         <!-- 宣伝(有料枠、最新2件) -->
@@ -698,13 +647,13 @@ const paramBar = (v: number) => Math.max(3, Math.round((v / paramMax.value) * 10
           <div v-for="g in adGreets" :key="g.id" class="chat-line">
             <span class="cbadge ad">宣伝</span>
             <span class="ct">{{ fmtChatTime(g.posted_at) }}</span>
-            <span class="cn">{{ g.user_name }}</span>：<span :style="{ color: g.color }">{{ g.body }}</span>
+            <span class="cn">{{ g.user_name }}</span>：<span :style="{ color: g.color }"><RichText :text="g.body" /></span>
           </div>
         </div>
         <!-- 通常のあいさつ(最新6件) -->
         <div v-for="g in normalGreets" :key="g.id" class="chat-line">
           <span class="ct">{{ fmtChatTime(g.posted_at) }}</span>
-          <span class="cn">{{ g.user_name }}</span>：<span :style="{ color: g.color }">{{ g.body }}</span>
+          <span class="cn">{{ g.user_name }}</span>：<span :style="{ color: g.color }"><RichText :text="g.body" /></span>
         </div>
       </div>
     </div>
@@ -818,11 +767,6 @@ const paramBar = (v: number) => Math.max(3, Math.round((v / paramMax.value) * 10
         </div>
       </div>
     </div>
-  </div>
-
-  <div class="footer">
-    [HOME]<br />
-    - TOWN リライト版 (Vue) -
   </div>
 
   <!-- あいさつ投稿モーダル(SNS風) -->

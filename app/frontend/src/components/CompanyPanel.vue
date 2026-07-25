@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import CommandIcon from './CommandIcon.vue';
+import EmojiPicker from './EmojiPicker.vue';
+import RichText from './RichText.vue';
 import { ref, computed, onMounted } from 'vue';
 import { api, type Player, type CompanyView } from '../api';
 import Toast from './Toast.vue';
@@ -12,6 +15,12 @@ const emit = defineEmits<{ update: [player: Player] }>();
 
 const yen = (n: number) => n.toLocaleString('ja-JP');
 const busy = ref(false);
+const emojiFor = ref<'open' | 'member' | null>(null);
+function insertEmoji(code: string) {
+  if (emojiFor.value === 'open') openBody.value += code;
+  else if (emojiFor.value === 'member') memberBody.value += code;
+  emojiFor.value = null;
+}
 const { toast, showToast, closeToast } = useToast();
 
 const view = ref<CompanyView | null>(null);
@@ -307,7 +316,12 @@ const doSeizou = async () => {
         <div class="bbs-head">■メッセージ来訪者</div>
         <textarea v-model="openBody" rows="4" class="bbs-area"></textarea>
         <label v-if="!view.own && !view.officer" class="chk"><input v-model="openJoin" type="checkbox" />●入会希望</label>
-        <div><button class="btn" :disabled="busy" @click="postOpen">OK</button></div>
+        <div class="btn-row">
+          <button class="btn" :disabled="busy" @click="postOpen">OK</button>
+          <button class="btn emoji-btn" title="絵文字を入れる" @click="emojiFor = 'open'">
+            <CommandIcon name="emoji" />
+          </button>
+        </div>
         <div class="bbs-head2">来訪者掲示板</div>
         <div v-for="p in view.bbs_open" :key="p.id" class="bbs-post">
           <div class="bbs-meta">
@@ -320,14 +334,19 @@ const doSeizou = async () => {
               @click="approve(p.id)"
             >入会</button>
           </div>
-          <div class="bbs-body">{{ p.body }}</div>
+          <div class="bbs-body"><RichText :text="p.body" /></div>
         </div>
       </div>
       <div v-if="view.own || view.officer" class="bbs-col">
         <div class="bbs-head">■メッセージメンバー</div>
         <textarea v-model="memberBody" rows="4" class="bbs-area"></textarea>
         <label v-if="!view.own" class="chk"><input v-model="memberLeave" type="checkbox" />●退会希望</label>
-        <div><button class="btn" :disabled="busy" @click="postMember">OK</button></div>
+        <div class="btn-row">
+          <button class="btn" :disabled="busy" @click="postMember">OK</button>
+          <button class="btn emoji-btn" title="絵文字を入れる" @click="emojiFor = 'member'">
+            <CommandIcon name="emoji" />
+          </button>
+        </div>
         <div class="bbs-head2">メンバー掲示板</div>
         <div v-for="p in view.bbs_member" :key="p.id" class="bbs-post">
           <div class="bbs-meta">
@@ -340,7 +359,7 @@ const doSeizou = async () => {
               @click="approve(p.id)"
             >退会</button>
           </div>
-          <div class="bbs-body">{{ p.body }}</div>
+          <div class="bbs-body"><RichText :text="p.body" /></div>
         </div>
         <div v-if="view.own" class="del-line">
           <select v-model="delBoard">
@@ -378,9 +397,27 @@ const doSeizou = async () => {
       <button class="btn" :disabled="busy || !view.materials.has_shop || view.materials.made_today" @click="doSeizou">変更／作成</button>
     </div>
   </div>
+  <EmojiPicker v-if="emojiFor" @pick="insertEmoji" @close="emojiFor = null" />
 </template>
 
 <style scoped>
+/* 絵文字ボタン。アイコンのみで、隣のテキストボタンと高さを揃えるために
+   align-items: stretch の行に入れる(文字の行高に依存させない)。 */
+.btn-row {
+  display: inline-flex;
+  gap: 6px;
+  align-items: stretch;
+}
+.emoji-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 8px;
+}
+.emoji-btn :deep(.cmd-icon) {
+  width: 15px;
+  height: 15px;
+}
 .company {
   max-width: 820px;
   margin: 8px auto 0;

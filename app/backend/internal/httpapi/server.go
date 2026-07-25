@@ -5,17 +5,23 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/shiroha-a/town/internal/action"
 	"github.com/shiroha-a/town/internal/attendance"
 	"github.com/shiroha-a/town/internal/cleague"
 	"github.com/shiroha-a/town/internal/content"
+	"github.com/shiroha-a/town/internal/emoji"
 	"github.com/shiroha-a/town/internal/greeting"
 	"github.com/shiroha-a/town/internal/keiba"
 	"github.com/shiroha-a/town/internal/mail"
+	"github.com/shiroha-a/town/internal/miauth"
 	"github.com/shiroha-a/town/internal/news"
 	"github.com/shiroha-a/town/internal/player"
+	"github.com/shiroha-a/town/internal/profile"
 	"github.com/shiroha-a/town/internal/ranking"
 	"github.com/shiroha-a/town/internal/serial"
+	"github.com/shiroha-a/town/internal/session"
 	"github.com/shiroha-a/town/internal/settings"
 	"github.com/shiroha-a/town/internal/stock"
 	"github.com/shiroha-a/town/internal/townmap"
@@ -38,14 +44,47 @@ type Server struct {
 	ranking    *ranking.Service
 	serial     *serial.Service
 	greetHub   *greetHub // あいさつSSE配信のプロセス内ハブ
+
+	// MiAuth(ログイン)まわり。
+	pool           *pgxpool.Pool
+	miauth         *miauth.Client
+	instanceRules  *miauth.Rules
+	sessions       *session.Store
+	profiles       *profile.Service
+	emojis         *emoji.Service
+	appName        string
+	allowedOrigins []string
+}
+
+// instancePolicy reads the current instance policy from settings.
+func (s *Server) instancePolicy(_ *http.Request) miauth.Policy {
+	if s.settings.Get().InstancePolicy == string(miauth.Whitelist) {
+		return miauth.Whitelist
+	}
+	return miauth.Blacklist
+}
+
+// AuthDeps bundles the MiAuth/Misskey dependencies so NewServer's signature
+// does not grow another six positional arguments.
+type AuthDeps struct {
+	Pool           *pgxpool.Pool
+	MiAuth         *miauth.Client
+	InstanceRules  *miauth.Rules
+	Sessions       *session.Store
+	Profiles       *profile.Service
+	Emojis         *emoji.Service
+	AppName        string
+	AllowedOrigins []string
 }
 
 // NewServer builds the HTTP handler for the REST API.
-func NewServer(players *player.Service, actions *action.Service, contentSvc *content.Service, st *settings.Store, tmap *townmap.Store, stockSvc *stock.Service, keibaSvc *keiba.Service, mailSvc *mail.Service, greetingSvc *greeting.Service, attendanceSvc *attendance.Service, cleagueSvc *cleague.Service, newsSvc *news.Service, rankingSvc *ranking.Service, serialSvc *serial.Service) http.Handler {
-	s := &Server{players: players, actions: actions, content: contentSvc, settings: st, townmap: tmap, stock: stockSvc, keiba: keibaSvc, mail: mailSvc, greeting: greetingSvc, attendance: attendanceSvc, cleague: cleagueSvc, news: newsSvc, ranking: rankingSvc, serial: serialSvc, greetHub: newGreetHub()}
+func NewServer(players *player.Service, actions *action.Service, contentSvc *content.Service, st *settings.Store, tmap *townmap.Store, stockSvc *stock.Service, keibaSvc *keiba.Service, mailSvc *mail.Service, greetingSvc *greeting.Service, attendanceSvc *attendance.Service, cleagueSvc *cleague.Service, newsSvc *news.Service, rankingSvc *ranking.Service, serialSvc *serial.Service, auth AuthDeps) http.Handler {
+	s := &Server{players: players, actions: actions, content: contentSvc, settings: st, townmap: tmap, stock: stockSvc, keiba: keibaSvc, mail: mailSvc, greeting: greetingSvc, attendance: attendanceSvc, cleague: cleagueSvc, news: newsSvc, ranking: rankingSvc, serial: serialSvc, greetHub: newGreetHub(),
+		pool: auth.Pool, miauth: auth.MiAuth, instanceRules: auth.InstanceRules,
+		sessions: auth.Sessions, profiles: auth.Profiles, emojis: auth.Emojis,
+		appName: auth.AppName, allowedOrigins: auth.AllowedOrigins}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", s.health)
-	mux.HandleFunc("POST /api/v1/players", s.registerPlayer)
 	mux.HandleFunc("GET /api/v1/players", s.listPlayers)
 	mux.HandleFunc("GET /api/v1/players/{id}", s.getPlayer)
 	mux.HandleFunc("GET /api/v1/participants", s.participants)
@@ -53,6 +92,13 @@ func NewServer(players *player.Service, actions *action.Service, contentSvc *con
 	mux.HandleFunc("GET /api/v1/players/{id}/fishing", s.fishing)
 	mux.HandleFunc("POST /api/v1/players/{id}/fishing/start", s.fishingStart)
 	mux.HandleFunc("POST /api/v1/players/{id}/fishing/pick", s.fishingPick)
+	mux.HandleFunc("GET /api/v1/admin/instances", s.adminListInstanceRules)
+	mux.HandleFunc("PUT /api/v1/admin/instances", s.adminPutInstanceRule)
+	mux.HandleFunc("DELETE /api/v1/admin/instances/{host}", s.adminDeleteInstanceRule)
+	mux.HandleFunc("POST /api/v1/auth/start", s.authStart)
+	mux.HandleFunc("POST /api/v1/auth/callback", s.authCallback)
+	mux.HandleFunc("GET /api/v1/auth/me", s.authMe)
+	mux.HandleFunc("POST /api/v1/auth/logout", s.authLogout)
 	mux.HandleFunc("GET /api/v1/players/{id}/bingo", s.bingo)
 	mux.HandleFunc("POST /api/v1/players/{id}/bingo/card", s.bingoTakeCard)
 	mux.HandleFunc("POST /api/v1/players/{id}/bingo/claim", s.bingoClaim)
@@ -70,6 +116,7 @@ func NewServer(players *player.Service, actions *action.Service, contentSvc *con
 	mux.HandleFunc("GET /api/v1/ranking", s.townRanking)
 	mux.HandleFunc("GET /api/v1/ranking/keys", s.rankingKeys)
 	mux.HandleFunc("GET /api/v1/townmap", s.townMap)
+	mux.HandleFunc("GET /api/v1/houses", s.publicHouses)
 	mux.HandleFunc("GET /api/v1/townassets", s.townAssets)
 	mux.HandleFunc("GET /api/v1/towns", s.towns)
 	mux.HandleFunc("GET /api/v1/players/{id}/houses", s.houses)
@@ -167,7 +214,18 @@ func NewServer(players *player.Service, actions *action.Service, contentSvc *con
 	mux.HandleFunc("POST /api/v1/players/{id}/bank/loan/borrow", s.loanBorrow)
 	mux.HandleFunc("POST /api/v1/players/{id}/bank/loan/repay", s.loanRepay)
 
-	// 管理者API(暫定認可: X-Acting-Player-Idヘッダのadminロール。将来MiAuthで置換)
+	// Misskey連携(prof施設)。プロフィール参照は対象の住民、フォローは
+	// セッションの本人が実行者なのでパスにIDを取らない。
+	mux.HandleFunc("GET /api/v1/players/{id}/misskey", s.misskeyProfile)
+	mux.HandleFunc("POST /api/v1/misskey/follow", s.misskeyFollow)
+	mux.HandleFunc("POST /api/v1/misskey/unfollow", s.misskeyUnfollow)
+
+	// カスタム絵文字。使われた絵文字の辞書は投稿の描画に要るので公開GET。
+	mux.HandleFunc("GET /api/v1/emojis", s.emojiList)
+	mux.HandleFunc("POST /api/v1/emojis/resolve", s.emojiResolve)
+	mux.HandleFunc("GET /api/v1/emojis/used", s.emojiUsed)
+
+	// 管理者API(認可はauthGuardで一括: セッション + adminロール)
 	mux.HandleFunc("POST /api/v1/admin/items", s.createItem)
 	mux.HandleFunc("GET /api/v1/admin/items", s.listItems)
 	mux.HandleFunc("PUT /api/v1/admin/items/{id}", s.updateItem)
@@ -195,7 +253,7 @@ func NewServer(players *player.Service, actions *action.Service, contentSvc *con
 	mux.HandleFunc("GET /api/v1/admin/players", s.adminListPlayers)
 	mux.HandleFunc("PUT /api/v1/admin/players/{id}", s.adminUpdatePlayer)
 	mux.HandleFunc("DELETE /api/v1/admin/players/{id}", s.adminDeletePlayer)
-	return recoverer(mux)
+	return recoverer(s.authGuard(mux))
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

@@ -5,6 +5,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -21,6 +22,13 @@ type Config struct {
 
 type ServerConfig struct {
 	HTTPAddr string `yaml:"http_addr"`
+	// AllowedOrigins lists the origins the SPA may be served from. MiAuth の
+	// コールバックURLはここに載っているオリジンからしか組み立てない(そうしないと
+	// Hostを詐称されてコールバックを攻撃者のサイトへ向けられ、session を奪われる)。
+	// 特別値 "all" は全許可。**テスト環境専用**で、本番では必ず列挙すること。
+	AllowedOrigins []string `yaml:"allowed_origins"`
+	// AppName は MiAuth の同意画面に出るアプリ名。
+	AppName string `yaml:"app_name"`
 }
 
 type DatabaseConfig struct {
@@ -99,6 +107,18 @@ func (d *Duration) UnmarshalYAML(value *yaml.Node) error {
 // Std returns the underlying time.Duration.
 func (d Duration) Std() time.Duration { return time.Duration(d) }
 
+// splitList parses a comma-separated env value into a trimmed list.
+func splitList(v string) []string {
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // Load reads the config file (path from TOWN_CONFIG, default "default.yml")
 // and applies environment overrides used in containerized deployments.
 func Load() (*Config, error) {
@@ -122,6 +142,15 @@ func Load() (*Config, error) {
 	}
 	if v := os.Getenv("TOWN_REDIS_ADDR"); v != "" {
 		c.Redis.Addr = v
+	}
+	if v := os.Getenv("TOWN_ALLOWED_ORIGINS"); v != "" {
+		c.Server.AllowedOrigins = splitList(v)
+	}
+	if v := os.Getenv("TOWN_APP_NAME"); v != "" {
+		c.Server.AppName = v
+	}
+	if c.Server.AppName == "" {
+		c.Server.AppName = "TOWN"
 	}
 	return &c, nil
 }

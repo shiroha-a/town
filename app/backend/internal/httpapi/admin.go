@@ -273,28 +273,13 @@ func (s *Server) adminUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.settings.Get())
 }
 
-// requireAdmin is an INTERIM authorization check used until MiAuth provides the
-// authenticated session. The acting player is passed via the X-Acting-Player-Id
-// header and must hold the admin role. This is deliberately temporary — once
-// MiAuth lands, the acting identity comes from the session, not a header.
+// requireAdmin is kept for handlers that were written against it, but the real
+// check now happens once in authGuard (session + admin role). Reaching a
+// handler already means the guard let it through; this only guards against a
+// route being registered outside /api/v1/admin/ by mistake.
 func (s *Server) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
-	h := r.Header.Get("X-Acting-Player-Id")
-	if h == "" {
-		writeError(w, http.StatusUnauthorized, "認証が必要です(X-Acting-Player-Id)")
-		return false
-	}
-	id, err := strconv.ParseInt(h, 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid X-Acting-Player-Id")
-		return false
-	}
-	ok, err := s.players.HasRole(r.Context(), id, "admin")
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return false
-	}
-	if !ok {
-		writeError(w, http.StatusForbidden, "権限がありません")
+	if PlayerIDFrom(r.Context()) == 0 {
+		writeError(w, http.StatusUnauthorized, "ログインしてください。")
 		return false
 	}
 	return true
@@ -493,6 +478,11 @@ type adminPlayerSummaryResp struct {
 	Money       int64    `json:"money"`
 	Job         string   `json:"job"`
 	JobLevel    int      `json:"job_level"`
+	// Misskeyアカウントの紐付け。acctはプロフィール未取得だと空になるので、
+	// その場合でも特定できるようホストと相手側IDも出す。
+	Acct         string `json:"acct"`
+	InstanceHost string `json:"instance_host"`
+	RemoteUserID string `json:"remote_user_id"`
 }
 
 func (s *Server) adminListPlayers(w http.ResponseWriter, r *http.Request) {
@@ -512,6 +502,7 @@ func (s *Server) adminListPlayers(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, adminPlayerSummaryResp{
 			ID: p.ID, DisplayName: p.DisplayName, Roles: roles, Money: p.Money, Job: p.Job, JobLevel: p.JobLevel,
+			Acct: p.Acct(), InstanceHost: p.InstanceHost, RemoteUserID: p.RemoteUserID,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)

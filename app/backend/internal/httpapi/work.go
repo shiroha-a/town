@@ -17,12 +17,12 @@ type workReq struct {
 
 // workResultResp is the salary/raise/bonus summary shown on the work result page.
 type workResultResp struct {
-	ExpGained  int      `json:"exp_gained"`
-	NewLevel   int      `json:"new_level"`
-	LeveledUp  bool     `json:"leveled_up"`
-	ThisSalary int64    `json:"this_salary"`
-	Pay        int64    `json:"pay"`
-	PayEvery   int      `json:"pay_every"`
+	ExpGained   int      `json:"exp_gained"`
+	NewLevel    int      `json:"new_level"`
+	LeveledUp   bool     `json:"leveled_up"`
+	ThisSalary  int64    `json:"this_salary"`
+	Pay         int64    `json:"pay"`
+	PayEvery    int      `json:"pay_every"`
 	Bonus       int64    `json:"bonus"`
 	WorkBonus   int64    `json:"work_bonus"`
 	WeightLossG int      `json:"weight_loss_g"`
@@ -72,12 +72,12 @@ func (s *Server) work(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, workResp{
 		playerResp: toResp(p),
 		WorkResult: workResultResp{
-			ExpGained:  result.ExpGained,
-			NewLevel:   result.NewLevel,
-			LeveledUp:  result.LeveledUp,
-			ThisSalary: result.ThisSalary,
-			Pay:        result.Pay,
-			PayEvery:   result.PayEvery,
+			ExpGained:   result.ExpGained,
+			NewLevel:    result.NewLevel,
+			LeveledUp:   result.LeveledUp,
+			ThisSalary:  result.ThisSalary,
+			Pay:         result.Pay,
+			PayEvery:    result.PayEvery,
 			Bonus:       result.Bonus,
 			WorkBonus:   result.WorkBonus,
 			WeightLossG: result.WeightLossG,
