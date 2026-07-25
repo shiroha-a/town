@@ -65,6 +65,11 @@ go run ./cmd/town web      # REST API
 go run ./cmd/town worker   # 時間進行(別ターミナル)
 ```
 
+## API
+
+REST APIは `/api/v1` 以下にあります。全162エンドポイントの一覧と、認可の区分・
+冪等キー・エラー形式は [docs/api.md](docs/api.md) を参照してください。
+
 ## テスト
 
 ```sh
