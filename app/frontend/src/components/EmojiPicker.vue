@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
 import { api, type PickerEmoji } from '../api';
 import { rememberEmoji } from '../emoji';
 
@@ -22,6 +22,11 @@ const message = ref('');
 const busyName = ref('');
 // 判定済みの絵文字。'ok' か拒否理由が入る。使えないものに印を付けるために持つ。
 const verdicts = ref<Record<string, string>>({});
+
+// 印を付けるだけでは邪魔なこともあるので、隠す選択肢も出す。選択は覚えておく。
+const HIDE_KEY = 'town.emoji.hideUnusable';
+const hideUnusable = ref(localStorage.getItem(HIDE_KEY) === '1');
+watch(hideUnusable, (v) => localStorage.setItem(HIDE_KEY, v ? '1' : '0'));
 
 const REASON_LABEL: Record<string, string> = {
   no_license: 'ライセンスの表記がありません',
@@ -49,6 +54,7 @@ const categories = computed(() => {
 const filtered = computed(() => {
   const q = query.value.trim().toLowerCase();
   return items.value.filter((e) => {
+    if (hideUnusable.value && rejectedReason(e.name)) return false;
     if (category.value && (e.category || '') !== category.value) return false;
     if (!q) return true;
     if (e.name.toLowerCase().includes(q)) return true;
@@ -123,6 +129,9 @@ onMounted(() => load());
           <option v-for="c in categories" :key="c" :value="c">{{ c || '(未分類)' }}</option>
         </select>
         <input v-model="query" class="ep-search" placeholder="名前で検索" spellcheck="false" />
+        <label class="ep-hide">
+          <input v-model="hideUnusable" type="checkbox" />使えないものを隠す
+        </label>
       </div>
 
       <div v-if="message" class="ep-message">{{ message }}</div>
@@ -145,7 +154,7 @@ onMounted(() => load());
       </div>
 
       <div class="ep-foot">
-        {{ host }} の絵文字 {{ filtered.length }}件
+        {{ host }} の絵文字 {{ filtered.length }}件<span v-if="hideUnusable">（使えないものを除く）</span>
         <span v-if="filtered.length > MAX_SHOWN">（{{ MAX_SHOWN }}件まで表示。検索で絞り込んでください）</span>
         <span class="ep-lic">※ライセンスが設定された絵文字のみ使えます</span>
       </div>
@@ -212,6 +221,15 @@ onMounted(() => load());
   flex: 1 1 140px;
   font-size: 12px;
   padding: 3px 5px;
+}
+.ep-hide {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: #666;
+  white-space: nowrap;
+  cursor: pointer;
 }
 .ep-message {
   background: #ffeeee;
