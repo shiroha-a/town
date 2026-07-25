@@ -45,6 +45,7 @@ func (s *Server) mailUnread(w http.ResponseWriter, r *http.Request) {
 type mailSendReq struct {
 	RecipientID int64  `json:"recipient_id"`
 	Body        string `json:"body"`
+	GiftID      int64  `json:"gift_id"` // >0で贈り物を1個添付する
 }
 
 func (s *Server) mailSend(w http.ResponseWriter, r *http.Request) {
@@ -61,7 +62,7 @@ func (s *Server) mailSend(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "recipient_id is required")
 		return
 	}
-	writeMailResult(w, s.mail.Send(r.Context(), id, req.RecipientID, req.Body))
+	writeMailResult(w, s.mail.Send(r.Context(), id, req.RecipientID, req.Body, req.GiftID, s.actions.GrantGift))
 }
 
 func (s *Server) mailDelete(w http.ResponseWriter, r *http.Request) {

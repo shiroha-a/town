@@ -20,9 +20,8 @@ const inventory = ref<YamiInventoryItem[]>([]);
 const priceDrafts = ref<Record<number, string>>({});
 const payMethods = ref<Record<number, string>>({});
 
-const CREDIT_CARDS = ['クレジットカード', 'ゴールドクレジットカード', 'スペシャルクレジットカード'];
 const hasCreditCard = computed(() =>
-  props.player.items.some((it) => CREDIT_CARDS.includes(it.name) && it.remaining_uses > 0),
+  props.player.items.some((it) => it.enables_credit && it.remaining_uses > 0),
 );
 
 // 商品テーブルのパラメータ列(レガシー闇市の 国..面)。

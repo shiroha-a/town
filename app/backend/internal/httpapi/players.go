@@ -51,6 +51,8 @@ type itemResp struct {
 	Params          map[string]int `json:"params"`
 	IntervalMin     int            `json:"interval_min"`
 	CalorieG        int            `json:"calorie_g"`
+	Special         string         `json:"special"`
+	EnablesCredit   bool           `json:"enables_credit"`
 	NextAvailableAt *time.Time     `json:"next_available_at"`
 }
 
@@ -74,16 +76,16 @@ type paramsResp struct {
 }
 
 type playerResp struct {
-	ID           int64      `json:"id"`
-	InstanceHost string     `json:"instance_host"`
-	RemoteUserID string     `json:"remote_user_id"`
-	DisplayName  string     `json:"display_name"`
-	Roles        []string   `json:"roles"`
-	Money        int64      `json:"money"`
-	Savings      int64      `json:"savings"`
-	SuperSavings int64      `json:"super_savings"`
-	LoanDaily    int64      `json:"loan_daily"`
-	LoanCount    int        `json:"loan_count"`
+	ID            int64      `json:"id"`
+	InstanceHost  string     `json:"instance_host"`
+	RemoteUserID  string     `json:"remote_user_id"`
+	DisplayName   string     `json:"display_name"`
+	Roles         []string   `json:"roles"`
+	Money         int64      `json:"money"`
+	Savings       int64      `json:"savings"`
+	SuperSavings  int64      `json:"super_savings"`
+	LoanDaily     int64      `json:"loan_daily"`
+	LoanCount     int        `json:"loan_count"`
 	CurrentTown   int        `json:"current_town"`
 	Status        statusResp `json:"status"`
 	Params        paramsResp `json:"params"`
@@ -119,6 +121,8 @@ func toResp(p *player.Player) playerResp {
 			Params:          params,
 			IntervalMin:     it.IntervalMin,
 			CalorieG:        it.CalorieG,
+			Special:         it.Special,
+			EnablesCredit:   it.EnablesCredit,
 			NextAvailableAt: it.NextAvailableAt,
 		})
 	}

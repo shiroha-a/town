@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
-import { api, type Player, type MailMessage, type PublicSummary } from '../api';
+import { api, type Player, type MailMessage, type PublicSummary, type Gift } from '../api';
 
 // メール: 住人あての1対1メッセージ。受信箱・送信箱を1画面にまとめて表示する。
 const props = defineProps<{ player: Player }>();
@@ -10,6 +10,9 @@ const received = ref<MailMessage[]>([]);
 const sent = ref<MailMessage[]>([]);
 const players = ref<PublicSummary[]>([]);
 const recipientId = ref<number | ''>('');
+// 贈り物の添付(ギフト屋で作ったギフトを1個送る)。
+const gifts = ref<Gift[]>([]);
+const giftId = ref<number | ''>('');
 const body = ref('');
 const message = ref('');
 const kind = ref<'ok' | 'error'>('ok');
@@ -22,6 +25,7 @@ async function load() {
     const mb = await api.getMail(props.player.id);
     received.value = mb.received;
     sent.value = mb.sent;
+    gifts.value = (await api.giftShop(props.player.id)).gifts;
   } catch (e) {
     fail(e);
   }
@@ -49,7 +53,8 @@ async function send() {
   busy.value = true;
   message.value = '';
   try {
-    await api.mailSend(props.player.id, recipientId.value, body.value);
+    await api.mailSend(props.player.id, recipientId.value, body.value, giftId.value === '' ? 0 : giftId.value);
+    giftId.value = '';
     message.value = 'メッセージを送信しました。';
     kind.value = 'ok';
     body.value = '';
@@ -115,6 +120,13 @@ async function del(m: MailMessage) {
         <span class="lbl">本文</span>
         <textarea v-model="body" rows="3" placeholder="メッセージを入力"></textarea>
       </label>
+      <label class="row" v-if="gifts.length">
+        <span class="lbl">贈り物</span>
+        <select v-model="giftId" data-test="gift-select">
+          <option value="">添付しない</option>
+          <option v-for="g in gifts" :key="g.id" :value="g.id">{{ g.name }}（残り{{ g.uses }}）</option>
+        </select>
+      </label>
       <div class="actions">
         <button class="btn primary" :disabled="busy" @click="send">送信</button>
       </div>
@@ -133,6 +145,7 @@ async function del(m: MailMessage) {
             <span v-if="m.saved" class="badge saved">保存</span>
           </div>
           <div class="mail-body">{{ m.body }}</div>
+          <div v-if="m.gift_item_name" class="gift-note">🎁 {{ m.gift_item_name }} が贈られてきました。</div>
           <div class="mail-act">
             <button class="btn mini" :disabled="busy" @click="toggleSave(m)">{{ m.saved ? '保存解除' : '保存する' }}</button>
             <button class="btn mini danger" :disabled="busy" @click="del(m)">削除する</button>
@@ -151,6 +164,7 @@ async function del(m: MailMessage) {
             <span v-if="m.saved" class="badge saved">保存</span>
           </div>
           <div class="mail-body">{{ m.body }}</div>
+          <div v-if="m.gift_item_name" class="gift-note">🎁 {{ m.gift_item_name }} を贈りました。</div>
           <div class="mail-act">
             <button class="btn mini" :disabled="busy" @click="toggleSave(m)">{{ m.saved ? '保存解除' : '保存する' }}</button>
             <button class="btn mini danger" :disabled="busy" @click="del(m)">削除する</button>
@@ -299,5 +313,13 @@ async function del(m: MailMessage) {
   background: #663399;
   color: #fff;
   border-color: #442266;
+}
+.gift-note {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #b36b00;
+  background: #fff6e0;
+  border-radius: 4px;
+  padding: 2px 6px;
 }
 </style>

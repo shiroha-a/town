@@ -45,9 +45,20 @@ export function buildEffectLines(before: Player, after: Player): string[] {
   if (nDiff !== 0) lines.push(`頭脳パワー ${nDiff > 0 ? '+' : ''}${nDiff}`);
   const sDiff = after.status.satiety - before.status.satiety;
   if (sDiff !== 0) lines.push(`満腹度 ${sDiff > 0 ? '+' : ''}${sDiff}`);
-  // 体重はg保持なのでkg小数1位で表示する(カロリーのある飲食で増える)。
+  // 体重はg保持なのでkg小数1位で表示する(カロリーのある飲食や特殊効果で増減)。
   const wDiff = after.status.weight_g - before.status.weight_g;
   if (wDiff !== 0) lines.push(`体重 ${wDiff > 0 ? '+' : ''}${(wDiff / 1000).toFixed(1)}kg`);
+  // 身長・体調(病気指数)の特殊効果。病気指数は数値を出さず、回復した旨と病名の変化で見せる。
+  const hDiff = after.status.height_cm - before.status.height_cm;
+  if (hDiff !== 0) lines.push(`身長 ${hDiff > 0 ? '+' : ''}${hDiff}cm`);
+  const dDiff = after.status.disease_index - before.status.disease_index;
+  if (dDiff > 0) {
+    lines.push(
+      before.status.disease_name && !after.status.disease_name
+        ? `${before.status.disease_name}が治った`
+        : '体調が回復した',
+    );
+  }
   const bp = before.params as unknown as Record<string, number>;
   const ap = after.params as unknown as Record<string, number>;
   for (const key of PARAM_ORDER) {

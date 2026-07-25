@@ -132,9 +132,8 @@ const selectedItemId = ref<number | null>(null);
 const buyQtySel = ref(1);
 const qtyChoices = [1, 2, 3, 4];
 const payMethod = ref<'cash' | 'credit'>('cash');
-const CREDIT_CARDS = ['クレジットカード', 'ゴールドクレジットカード', 'スペシャルクレジットカード'];
 const hasCreditCard = computed(() =>
-  props.player.items.some((it) => CREDIT_CARDS.includes(it.name) && it.remaining_uses > 0),
+  props.player.items.some((it) => it.enables_credit && it.remaining_uses > 0),
 );
 const neighborDiscount = computed(
   () => allHouses.value.some((h) => h.own && h.town === house.value?.town) && !house.value?.own,

@@ -23,6 +23,10 @@ import MailView from './components/MailView.vue';
 import AshiatoView from './components/AshiatoView.vue';
 import CLeagueView from './components/CLeagueView.vue';
 import YakubaView from './components/YakubaView.vue';
+import TsuriView from './components/TsuriView.vue';
+import GiftShopView from './components/GiftShopView.vue';
+import TokutenView from './components/TokutenView.vue';
+import BingoView from './components/BingoView.vue';
 import AdminView from './components/AdminView.vue';
 import PlaceholderView from './components/PlaceholderView.vue';
 
@@ -102,6 +106,10 @@ const facilityTitles: Record<string, string> = {
   prof: 'プロフィール',
   mail: 'メール',
   doukyo: 'キャラ作成',
+  tsuri: '釣りゲーム',
+  gifutoya: 'ギフト屋',
+  tokuten: '特典交換所',
+  bingo: 'ビンゴ会場',
 };
 </script>
 
@@ -150,6 +158,10 @@ const facilityTitles: Record<string, string> = {
     <MailView v-else-if="view === 'mail'" :player="player" @back="back" />
     <AshiatoView v-else-if="view === 'ashiato'" :player="player" @back="back" />
     <CLeagueView v-else-if="view === 'doukyo'" :player="player" @update="onUpdate" @back="back" />
+    <TsuriView v-else-if="view === 'tsuri'" :player="player" @update="onUpdate" @back="back" />
+    <GiftShopView v-else-if="view === 'gifutoya'" :player="player" @update="onUpdate" @back="back" />
+    <TokutenView v-else-if="view === 'tokuten'" :player="player" @update="onUpdate" @back="back" />
+    <BingoView v-else-if="view === 'bingo'" :player="player" @update="onUpdate" @back="back" />
     <YakubaView v-else-if="view === 'yakuba'" :player="player" @back="back" />
     <AdminView v-else-if="view === 'admin'" :player="player" @back="back" />
     <PlaceholderView v-else :title="facilityTitles[view] ?? view" @back="back" />

@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <ellipse cx="16" cy="30" rx="11.5" ry="1.5" fill="#000" opacity="0.12"/>
+  <!-- 店舗 -->
+  <rect x="3" y="9" width="26" height="20.5" rx="1" fill="#f2e6d0"/>
+  <rect x="3" y="9" width="26" height="3.6" fill="#c0392b"/>
+  <!-- 庇のストライプ -->
+  <g fill="#ffffff" opacity="0.85">
+    <rect x="5.2" y="9" width="2.6" height="3.6"/>
+    <rect x="10.4" y="9" width="2.6" height="3.6"/>
+    <rect x="15.6" y="9" width="2.6" height="3.6"/>
+    <rect x="20.8" y="9" width="2.6" height="3.6"/>
+    <rect x="26" y="9" width="2.6" height="3.6"/>
+  </g>
+  <!-- ショーウィンドウ -->
+  <rect x="5" y="14.5" width="9" height="7" rx="0.6" fill="#bfe6f0" stroke="#8fb8c4" stroke-width="0.8"/>
+  <rect x="18" y="14.5" width="9" height="7" rx="0.6" fill="#bfe6f0" stroke="#8fb8c4" stroke-width="0.8"/>
+  <!-- 入口 -->
+  <rect x="12.5" y="23" width="7" height="6.5" rx="0.5" fill="#8a6a45"/>
+  <!-- 大きなプレゼント箱 -->
+  <g transform="translate(16 18)">
+    <rect x="-5" y="-2.5" width="10" height="8" rx="0.6" fill="#e8453c"/>
+    <rect x="-5.8" y="-4.2" width="11.6" height="2.4" rx="0.5" fill="#f4685f"/>
+    <rect x="-1" y="-4.2" width="2" height="9.7" fill="#ffd452"/>
+    <path d="M-1 -4.2q-3.4-2.6-1.2-3.6T-1 -4.2Z" fill="#ffd452"/>
+    <path d="M1 -4.2q3.4-2.6 1.2-3.6T1 -4.2Z" fill="#ffd452"/>
+  </g>
+</svg>

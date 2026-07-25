@@ -164,6 +164,7 @@ func (s *Server) eat(w http.ResponseWriter, r *http.Request) {
 
 type facilityUseReq struct {
 	MenuID         int64  `json:"menu_id"`
+	PayMethod      string `json:"pay_method"` // "cash"(既定)/"credit"
 	IdempotencyKey string `json:"idempotency_key"`
 }
 
@@ -183,7 +184,7 @@ func (s *Server) facilityUse(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "menu_id is required")
 		return
 	}
-	p, err := s.actions.DoFacilityAction(r.Context(), id, r.PathValue("facility"), req.MenuID, req.IdempotencyKey)
+	p, err := s.actions.DoFacilityAction(r.Context(), id, r.PathValue("facility"), req.MenuID, req.PayMethod, req.IdempotencyKey)
 	writeFacilityResult(w, p, err)
 }
 

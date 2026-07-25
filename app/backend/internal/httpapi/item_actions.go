@@ -13,8 +13,9 @@ import (
 
 type itemActionReq struct {
 	ItemID         int64  `json:"item_id"`
-	Sets           int    `json:"sets"`     // 購入セット数(buyのみ、0/未指定は1扱い)
-	Facility       string `json:"facility"` // 購入元(buyのみ。''=デパート, 'hanbai'=自販機)
+	Sets           int    `json:"sets"`       // 購入セット数(buyのみ、0/未指定は1扱い)
+	Facility       string `json:"facility"`   // 購入元(buyのみ。''=デパート, 'hanbai'=自販機)
+	PayMethod      string `json:"pay_method"` // 購入元(buyのみ)。"cash"(既定)/"credit"
 	IdempotencyKey string `json:"idempotency_key"`
 }
 
@@ -60,7 +61,7 @@ func (s *Server) buy(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	p, err := s.actions.DoBuy(r.Context(), id, req.Facility, req.ItemID, req.Sets, req.IdempotencyKey)
+	p, err := s.actions.DoBuy(r.Context(), id, req.Facility, req.ItemID, req.Sets, req.PayMethod, req.IdempotencyKey)
 	writeItemActionResult(w, p, err)
 }
 

@@ -65,6 +65,10 @@ func Default() []Facility {
 		{Key: "kentiku", Img: "kentiku", Alt: "建設会社", Col: 13, Row: 4, Ready: true},
 		{Key: "hanbai", Img: "hanbai", Alt: "自動販売機", Col: 4, Row: 4, Ready: true},
 		{Key: "yakuba", Img: "yakuba", Alt: "役場（住民名鑑）", Col: 6, Row: 7, Ready: true},
+		{Key: "tsuri", Img: "tsuri", Alt: "釣りゲーム", Col: 2, Row: 9, Ready: true},
+		{Key: "gifutoya", Img: "gifutoya", Alt: "ギフト屋", Col: 12, Row: 9, Ready: true},
+		{Key: "tokuten", Img: "tokuten", Alt: "特典交換所", Col: 6, Row: 9, Ready: true},
+		{Key: "bingo", Img: "bingo", Alt: "ビンゴ会場", Col: 9, Row: 9, Ready: true},
 		{Key: "prof", Img: "prof", Alt: "プロフィール", Col: 14, Row: 11, Ready: false},
 	}
 }

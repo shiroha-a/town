@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/shiroha-a/town/internal/building"
+	"github.com/shiroha-a/town/internal/condition"
 	"github.com/shiroha-a/town/internal/content"
 	"github.com/shiroha-a/town/internal/effects"
 	"github.com/shiroha-a/town/internal/player"
@@ -596,8 +597,20 @@ type simulateReq struct {
 			Value int `json:"value"`
 			Max   int `json:"max"`
 		} `json:"params"`
+		// 体格・病状(add_weight_g/add_height_cm/add_disease の試算用)。
+		// 未指定なら simulateDefault* を使う。
+		WeightG      *int `json:"weight_g,omitempty"`
+		HeightCm     *int `json:"height_cm,omitempty"`
+		DiseaseIndex *int `json:"disease_index,omitempty"`
 	} `json:"state"`
 }
+
+// 試算で体格・病状が省略されたときの既定値(平均的な健康体)。
+const (
+	simulateDefaultWeightG      = 55000
+	simulateDefaultHeightCm     = 160
+	simulateDefaultDiseaseIndex = 50
+)
 
 // simulate dry-runs an effect against a hypothetical state and returns the plan
 // plus economy warnings, without persisting anything.
@@ -610,7 +623,23 @@ func (s *Server) simulate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	state := effects.State{Money: req.State.Money, Params: map[string]effects.ParamState{}}
+	state := effects.State{
+		Money:        req.State.Money,
+		Params:       map[string]effects.ParamState{},
+		WeightG:      simulateDefaultWeightG,
+		HeightCm:     simulateDefaultHeightCm,
+		DiseaseIndex: simulateDefaultDiseaseIndex,
+	}
+	if req.State.WeightG != nil {
+		state.WeightG = *req.State.WeightG
+	}
+	if req.State.HeightCm != nil {
+		state.HeightCm = *req.State.HeightCm
+	}
+	if req.State.DiseaseIndex != nil {
+		state.DiseaseIndex = *req.State.DiseaseIndex
+	}
+	state.DiseaseName = condition.DiseaseName(state.DiseaseIndex)
 	for name, p := range req.State.Params {
 		state.Params[name] = effects.ParamState{Value: p.Value, Max: p.Max}
 	}

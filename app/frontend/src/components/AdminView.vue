@@ -3,6 +3,7 @@ import { ref, reactive, computed, onMounted } from 'vue';
 import {
   api,
   assetUrl,
+  DISEASE_OPTIONS,
   type Player,
   type EffectOp,
   type Condition,
@@ -27,7 +28,7 @@ const emit = defineEmits<{ back: [] }>();
 const isAdmin = computed(() => props.player.roles.includes('admin'));
 
 // 各セクションの開閉。既定は折りたたみ(false)。
-const open = reactive({ item: false, job: false, user: false, settings: false, towns: false, map: false, events: false });
+const open = reactive({ item: false, job: false, user: false, settings: false, towns: false, map: false, events: false, serials: false, bingo: false });
 
 // 効果/条件で対象にできるパラメータ。
 const PARAM_OPTIONS = [
@@ -116,6 +117,7 @@ async function refresh() {
     uploadedAssets.value = await api.adminListAssets(props.player.id);
     facPresets.value = await api.adminFacilityPresets(props.player.id);
     adminEvents.value = await api.adminListEvents(props.player.id);
+    serials.value = await api.adminSerials(props.player.id);
     townList.value = await api.towns();
     syncTownDraft();
     selectedIdx.value = null;
@@ -148,6 +150,10 @@ const KEY_PRESETS: { key: string; label: string }[] = [
   { key: 'keiba', label: '競馬場(準備中)' },
   { key: 'kentiku', label: '建設会社' },
   { key: 'casino', label: 'ゲームセンター' },
+  { key: 'tsuri', label: '釣りゲーム' },
+  { key: 'gifutoya', label: 'ギフト屋' },
+  { key: 'tokuten', label: '特典交換所' },
+  { key: 'bingo', label: 'ビンゴ会場' },
   { key: 'prof', label: 'プロフィール(準備中)' },
   { key: 'mail', label: 'メール(準備中)' },
   { key: 'doukyo', label: 'キャラ作成(準備中)' },
@@ -160,7 +166,7 @@ const KEY_PRESETS: { key: string; label: string }[] = [
 const MOVE_KEYS = ['walk', 'bus'];
 // 施設用に用意されているgif(public/img)。
 const IMG_PRESETS = [
-  'depart', 'bank', 'syokudou', 'gym', 'onsen', 'hospital', 'work', 'yakuba', 'kabu', 'keiba', 'kentiku', 'game', 'prof', 'mail', 'mati_link', 'bus', 'akiti',
+  'depart', 'bank', 'syokudou', 'gym', 'onsen', 'hospital', 'work', 'yakuba', 'kabu', 'keiba', 'kentiku', 'game', 'tsuri', 'gifutoya', 'tokuten', 'bingo', 'prof', 'mail', 'mati_link', 'bus', 'akiti',
 ];
 
 // 施設レイヤーで編集中の街(0..4)。施設はマルチ街化済み。
@@ -253,6 +259,10 @@ const STD_FAC_BASE: FacilityPreset[] = [
   { key: 'casino', img: 'game', alt: 'ゲームセンター', dest: 0 },
   { key: 'hanbai', img: 'hanbai', alt: '自動販売機', dest: 0 },
   { key: 'yakuba', img: 'yakuba', alt: '役場（住民名鑑）', dest: 0 },
+  { key: 'tsuri', img: 'tsuri', alt: '釣りゲーム', dest: 0 },
+  { key: 'gifutoya', img: 'gifutoya', alt: 'ギフト屋', dest: 0 },
+  { key: 'tokuten', img: 'tokuten', alt: '特典交換所', dest: 0 },
+  { key: 'bingo', img: 'bingo', alt: 'ビンゴ会場', dest: 0 },
   { key: 'prof', img: 'prof', alt: 'プロフィール', dest: 0 },
   { key: 'akichi', img: 'akiti', alt: '空き地', dest: 0 },
 ];
@@ -566,6 +576,92 @@ function onBgDrop(col: number, rowIdx: number) {
   assets.value.push(moved);
 }
 
+// ビンゴ大会の開催(街全体の共有イベント。開始すると新しい抽選番号が確定する)。
+const bingoCfg = reactive({ max_number: 60, per_day: 20, days: 3, lines_to_win: 2 });
+async function startBingo() {
+  if (!window.confirm('新しいビンゴ大会を開始します。よろしいですか?')) return;
+  busy.value = true;
+  try {
+    await api.adminStartBingo(props.player.id, bingoCfg);
+    message.value = 'ビンゴ大会を開始しました。';
+    kind.value = 'ok';
+  } catch (e) {
+    fail(e);
+  } finally {
+    busy.value = false;
+  }
+}
+
+// シリアルコード管理(特典の発行/編集/削除と使用者の確認)。
+const serials = ref<import('../api').SerialCode[]>([]);
+const blankSerial = () => ({
+  id: 0, code: '', label: '', message: '', effect: '[]',
+  reward_item_id: null as number | null, reward_item_name: '', reward_item_uses: 0,
+  max_uses: 1, used_count: 0, starts_at: null as string | null, ends_at: null as string | null,
+  enabled: true, created_at: '',
+});
+const serialForm = reactive(blankSerial());
+// 効果はopの配列として編集し、保存時にJSON文字列へ直す。
+const serialOps = ref<EffectOp[]>([]);
+const serialUses = ref<import('../api').SerialUse[]>([]);
+const serialUsesFor = ref(0);
+
+async function loadSerials() {
+  try {
+    serials.value = await api.adminSerials(props.player.id);
+  } catch (e) {
+    fail(e);
+  }
+}
+function editSerial(c: import('../api').SerialCode) {
+  Object.assign(serialForm, c);
+  try {
+    serialOps.value = JSON.parse(c.effect || '[]');
+  } catch {
+    serialOps.value = [];
+  }
+}
+function resetSerial() {
+  Object.assign(serialForm, blankSerial());
+  serialOps.value = [];
+}
+async function saveSerial() {
+  busy.value = true;
+  try {
+    const payload = { ...serialForm, effect: JSON.stringify(serialOps.value) };
+    if (serialForm.id > 0) await api.adminUpdateSerial(props.player.id, payload);
+    else await api.adminCreateSerial(props.player.id, payload);
+    resetSerial();
+    await loadSerials();
+    message.value = '保存しました。';
+    kind.value = 'ok';
+  } catch (e) {
+    fail(e);
+  } finally {
+    busy.value = false;
+  }
+}
+async function deleteSerial(sid: number) {
+  busy.value = true;
+  try {
+    await api.adminDeleteSerial(props.player.id, sid);
+    if (serialForm.id === sid) resetSerial();
+    await loadSerials();
+  } catch (e) {
+    fail(e);
+  } finally {
+    busy.value = false;
+  }
+}
+async function showSerialUses(sid: number) {
+  try {
+    serialUsesFor.value = sid;
+    serialUses.value = await api.adminSerialUses(props.player.id, sid);
+  } catch (e) {
+    fail(e);
+  }
+}
+
 // カスタムイベント管理(ランダムイベントの追加/編集/削除)。
 const adminEvents = ref<import('../api').AdminEvent[]>([]);
 const EV_PARAM_OPTIONS = [
@@ -623,6 +719,7 @@ async function evSave() {
     if (payload.id > 0) await api.adminUpdateEvent(props.player.id, payload);
     else await api.adminCreateEvent(props.player.id, payload);
     adminEvents.value = await api.adminListEvents(props.player.id);
+    serials.value = await api.adminSerials(props.player.id);
     evReset();
     message.value = 'イベントを保存しました。';
     kind.value = 'ok';
@@ -639,6 +736,7 @@ async function evDelete() {
   try {
     await api.adminDeleteEvent(props.player.id, evForm.value.id);
     adminEvents.value = await api.adminListEvents(props.player.id);
+    serials.value = await api.adminSerials(props.player.id);
     evReset();
     message.value = 'イベントを削除しました。';
     kind.value = 'ok';
@@ -1027,9 +1125,16 @@ async function deleteEdit() {
                   <select v-model="op.op">
                     <option value="add_param">パラメータ</option>
                     <option value="add_money">お金</option>
+                    <option value="add_weight_g">体重(g)</option>
+                    <option value="add_height_cm">身長(cm)</option>
+                    <option value="add_disease">病気指数</option>
                   </select>
                   <select v-if="op.op === 'add_param'" v-model="op.param">
                     <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">{{ PARAM_FULL[p] ?? p }}</option>
+                  </select>
+                  <select v-else-if="op.op === 'add_disease'" v-model="op.disease" title="空=万能(どの病気にも効く)">
+                    <option value="">万能</option>
+                    <option v-for="d in DISEASE_OPTIONS" :key="d" :value="d">{{ d }}のみ</option>
                   </select>
                   <input type="number" v-model.number="op.amount" />
                   <button class="btn mini" @click="item.effect.splice(i, 1)">×</button>
@@ -1102,9 +1207,16 @@ async function deleteEdit() {
                   <select v-model="op.op">
                     <option value="add_param">パラメータ</option>
                     <option value="add_money">お金</option>
+                    <option value="add_weight_g">体重(g)</option>
+                    <option value="add_height_cm">身長(cm)</option>
+                    <option value="add_disease">病気指数</option>
                   </select>
                   <select v-if="op.op === 'add_param'" v-model="op.param">
                     <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">{{ PARAM_FULL[p] ?? p }}</option>
+                  </select>
+                  <select v-else-if="op.op === 'add_disease'" v-model="op.disease" title="空=万能(どの病気にも効く)">
+                    <option value="">万能</option>
+                    <option v-for="d in DISEASE_OPTIONS" :key="d" :value="d">{{ d }}のみ</option>
                   </select>
                   <input type="number" v-model.number="op.amount" />
                   <button class="btn mini" @click="job.effect.splice(i, 1)">×</button>
@@ -1223,6 +1335,121 @@ async function deleteEdit() {
                     <tr v-if="!adminEvents.length"><td colspan="6" class="muted">まだカスタムイベントがありません。</td></tr>
                   </tbody>
                 </table>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <!-- ビンゴ大会 -->
+        <section class="fold">
+          <button class="fold-head" @click="open.bingo = !open.bingo">
+            <span class="caret">{{ open.bingo ? '▼' : '▶' }}</span> ビンゴ大会
+          </button>
+          <div v-if="open.bingo" class="fold-body">
+            <section class="panel">
+              <h3>
+                大会を開始
+                <span class="hint"> ※街全体の共有イベント。開始すると抽選番号が確定し、日ごとに公開されます</span>
+              </h3>
+              <label>数字の範囲(1〜)<input type="number" v-model.number="bingoCfg.max_number" min="25" max="99" /></label>
+              <label>1日に公開する個数<input type="number" v-model.number="bingoCfg.per_day" min="1" /></label>
+              <label>開催日数<input type="number" v-model.number="bingoCfg.days" min="1" /></label>
+              <label>成立ライン数<input type="number" v-model.number="bingoCfg.lines_to_win" min="1" max="12" /></label>
+              <span class="hint">※既定はレガシーと同じ 60個 / 20個ずつ / 3日 / 2ライン</span>
+              <div class="actions">
+                <button class="btn primary" :disabled="busy" data-test="bingo-start" @click="startBingo">開始する</button>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <!-- シリアルコード(特典) -->
+        <section class="fold">
+          <button class="fold-head" @click="open.serials = !open.serials">
+            <span class="caret">{{ open.serials ? '▼' : '▶' }}</span> シリアルコード（{{ serials.length }}）
+          </button>
+          <div v-if="open.serials" class="fold-body">
+            <section class="panel">
+              <h3>
+                {{ serialForm.id > 0 ? `コード編集 #${serialForm.id}` : 'コード発行' }}
+                <span class="hint"> ※特典交換所でプレイヤーが入力します。1つのコードにつき1人1回まで</span>
+              </h3>
+              <label>コード<input v-model="serialForm.code" class="mono" placeholder="空にすると自動発行" data-test="serial-code-input" /></label>
+              <label>用途メモ<input v-model="serialForm.label" class="wide" placeholder="例: 建築許可証の配布" /></label>
+              <label>受け取り時の文言<input v-model="serialForm.message" class="wide" placeholder="例: 建築許可証をお届けします" /></label>
+              <label>使える回数<input type="number" v-model.number="serialForm.max_uses" min="0" /></label>
+              <span class="hint">※0で無制限。1人1回の制限は回数と別に常に効きます</span>
+              <label>開始日時<input type="datetime-local" v-model="serialForm.starts_at" /></label>
+              <label>終了日時<input type="datetime-local" v-model="serialForm.ends_at" /></label>
+              <span class="hint">※空なら期間の制限なし</span>
+              <label>景品アイテム
+                <select v-model="serialForm.reward_item_id">
+                  <option :value="null">なし</option>
+                  <option v-for="it in items" :key="it.id" :value="it.id">{{ it.name }}</option>
+                </select>
+              </label>
+              <label>景品の個数(耐久)<input type="number" v-model.number="serialForm.reward_item_uses" min="0" /></label>
+              <div class="ops">
+                <div class="ops-head">ステータス等の効果</div>
+                <div v-for="(op, i) in serialOps" :key="i" class="op-row">
+                  <select v-model="op.op">
+                    <option value="add_param">パラメータ</option>
+                    <option value="add_money">お金</option>
+                    <option value="add_weight_g">体重(g)</option>
+                    <option value="add_height_cm">身長(cm)</option>
+                    <option value="add_disease">病気指数</option>
+                  </select>
+                  <select v-if="op.op === 'add_param'" v-model="op.param">
+                    <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">{{ PARAM_FULL[p] ?? p }}</option>
+                  </select>
+                  <select v-else-if="op.op === 'add_disease'" v-model="op.disease" title="空=万能(どの病気にも効く)">
+                    <option value="">万能</option>
+                    <option v-for="d in DISEASE_OPTIONS" :key="d" :value="d">{{ d }}のみ</option>
+                  </select>
+                  <input type="number" v-model.number="op.amount" />
+                  <button class="btn mini" @click="serialOps.splice(i, 1)">×</button>
+                </div>
+                <button class="btn mini" @click="addOp(serialOps)">＋効果を追加</button>
+              </div>
+              <label class="chk"><input type="checkbox" v-model="serialForm.enabled" /> 有効</label>
+              <div class="actions">
+                <button class="btn primary" :disabled="busy" data-test="serial-save" @click="saveSerial">
+                  {{ serialForm.id > 0 ? '更新' : '発行' }}
+                </button>
+                <button v-if="serialForm.id > 0" class="btn" @click="resetSerial">新規に戻す</button>
+              </div>
+            </section>
+
+            <section class="panel">
+              <h3>発行済みコード</h3>
+              <div class="table-scroll">
+                <table class="admin-table" data-test="serial-table">
+                  <thead>
+                    <tr><th>コード</th><th>用途</th><th>景品</th><th>使用</th><th>有効</th><th></th></tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="c in serials" :key="c.id">
+                      <td class="mono">{{ c.code }}</td>
+                      <td>{{ c.label }}</td>
+                      <td>{{ c.reward_item_name ? `${c.reward_item_name}×${c.reward_item_uses}` : '-' }}</td>
+                      <td class="r">{{ c.used_count }}{{ c.max_uses > 0 ? ` / ${c.max_uses}` : '' }}</td>
+                      <td :class="{ off: !c.enabled }">{{ c.enabled ? '○' : '×' }}</td>
+                      <td>
+                        <button class="btn mini" @click="editSerial(c)">編集</button>
+                        <button class="btn mini" @click="showSerialUses(c.id)">使用者</button>
+                        <button class="btn mini danger" :disabled="busy" @click="deleteSerial(c.id)">削除</button>
+                      </td>
+                    </tr>
+                    <tr v-if="!serials.length"><td colspan="6" class="muted">まだコードがありません。</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div v-if="serialUsesFor" class="uses" data-test="serial-uses">
+                <div class="ops-head">コード #{{ serialUsesFor }} を使った人（{{ serialUses.length }}）</div>
+                <div v-if="!serialUses.length" class="muted">まだ誰も使っていません。</div>
+                <div v-for="u in serialUses" :key="u.player_id" class="use-row">
+                  {{ u.player_name }}（ID {{ u.player_id }}）— {{ new Date(u.used_at).toLocaleString('ja-JP') }}
+                </div>
               </div>
             </section>
           </div>
@@ -1604,9 +1831,16 @@ async function deleteEdit() {
             <select v-model="op.op">
               <option value="add_param">パラメータ</option>
               <option value="add_money">お金</option>
+              <option value="add_weight_g">体重(g)</option>
+              <option value="add_height_cm">身長(cm)</option>
+              <option value="add_disease">病気指数</option>
             </select>
             <select v-if="op.op === 'add_param'" v-model="op.param">
               <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">{{ PARAM_FULL[p] ?? p }}</option>
+            </select>
+            <select v-else-if="op.op === 'add_disease'" v-model="op.disease" title="空=万能(どの病気にも効く)">
+              <option value="">万能</option>
+              <option v-for="d in DISEASE_OPTIONS" :key="d" :value="d">{{ d }}のみ</option>
             </select>
             <input type="number" v-model.number="op.amount" />
             <button class="btn mini" @click="editing.effect.splice(i, 1)">×</button>
@@ -1655,9 +1889,16 @@ async function deleteEdit() {
             <select v-model="op.op">
               <option value="add_param">パラメータ</option>
               <option value="add_money">お金</option>
+              <option value="add_weight_g">体重(g)</option>
+              <option value="add_height_cm">身長(cm)</option>
+              <option value="add_disease">病気指数</option>
             </select>
             <select v-if="op.op === 'add_param'" v-model="op.param">
               <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">{{ PARAM_FULL[p] ?? p }}</option>
+            </select>
+            <select v-else-if="op.op === 'add_disease'" v-model="op.disease" title="空=万能(どの病気にも効く)">
+              <option value="">万能</option>
+              <option v-for="d in DISEASE_OPTIONS" :key="d" :value="d">{{ d }}のみ</option>
             </select>
             <input type="number" v-model.number="op.amount" />
             <button class="btn mini" @click="editingJob.effect.splice(i, 1)">×</button>
@@ -2382,5 +2623,17 @@ async function deleteEdit() {
 }
 .param-edit label input {
   width: 70px;
+}
+.mono {
+  font-family: ui-monospace, monospace;
+  letter-spacing: 1px;
+}
+.uses {
+  margin-top: 10px;
+}
+.use-row {
+  font-size: 12px;
+  padding: 2px 4px;
+  border-bottom: 1px solid #eee;
 }
 </style>

@@ -15,6 +15,13 @@ const kind = ref<'ok' | 'error'>('ok');
 const busy = ref(false);
 const { toast, showToast, closeToast } = useToast();
 
+// 支払い方法。クレジットはカード類(enables_credit)を持っているときだけ選べ、
+// 普通口座から引き落とす(レガシー depart.cgi の支払い方法セレクト)。
+const payMethod = ref<'cash' | 'credit'>('cash');
+const hasCreditCard = computed(() =>
+  props.player.items.some((it) => it.enables_credit && it.remaining_uses > 0),
+);
+
 onMounted(async () => {
   try {
     items.value = await api.shopItems();
@@ -42,12 +49,12 @@ async function buy(it: ShopItem) {
   message.value = '';
   const before = props.player;
   try {
-    const after = await api.buy(props.player.id, it.id);
+    const after = await api.buy(props.player.id, it.id, '', payMethod.value);
     emit('update', after);
     items.value = await api.shopItems(); // 購入後の在庫数を反映する
     showToast({
       variant: 'item',
-      title: `${it.name}を購入した`,
+      title: `${it.name}を購入した${payMethod.value === 'credit' ? '（クレジット）' : ''}`,
       lines: buildEffectLines(before, after),
       icon: 'item',
     });
@@ -74,6 +81,13 @@ async function buy(it: ShopItem) {
         デパートです。品揃えは毎日変わります。種類は豊富ですが値段は高めです。<br />
         また一度に持てる所有物の限度は{{ player.item_kind_limit > 0 ? `${player.item_kind_limit}品目` : '無制限' }}です。<br />
         ●{{ player.display_name }}さんの所持金：<span class="money">{{ yen(player.money) }}円</span>
+        <span class="pay">
+          支払い
+          <select v-model="payMethod" data-test="pay-method">
+            <option value="cash">現金</option>
+            <option value="credit" :disabled="!hasCreditCard">クレジット（普通口座）</option>
+          </select>
+        </span>
       </div>
       <div class="title">デパート</div>
     </div>
@@ -101,12 +115,15 @@ async function buy(it: ShopItem) {
               <tr class="cat-row">
                 <td :colspan="PARAM_COLUMNS.length + 7">●{{ cat }}</td>
               </tr>
-              <tr v-for="it in list" :key="it.id" :data-test="`shop-${it.id}`">
-                <td class="l">{{ it.name }}</td>
-                <td class="stock" :class="{ soldout: it.stock === 0 }">
+              <template v-for="it in list" :key="it.id">
+              <tr :data-test="`shop-${it.id}`">
+                <!-- 効果行がある品は、品名/在庫/買うを2行にまたがせてどの品の効果か分かるようにする
+                     (レガシー depart.cgi の rowspan=2 と同じ)。 -->
+                <td class="l" :rowspan="it.special ? 2 : 1">{{ it.name }}</td>
+                <td class="stock" :class="{ soldout: it.stock === 0 }" :rowspan="it.special ? 2 : 1">
                   {{ it.stock < 0 ? '-' : it.stock === 0 ? '売切' : it.stock }}
                 </td>
-                <td class="buy">
+                <td class="buy" :rowspan="it.special ? 2 : 1">
                   <button class="btn" :disabled="busy || it.stock === 0" @click="buy(it)">
                     {{ it.stock === 0 ? '売切' : '買う' }}
                   </button>
@@ -122,6 +139,12 @@ async function buy(it: ShopItem) {
                 </td>
                 <td class="interval">{{ intervalLabel(it.interval_min) }}</td>
               </tr>
+              <!-- 特殊効果(体重/身長/病気)は列に収まらないので1行下にcolspanで出す
+                   (レガシー depart.cgi の備考行と同じ方式)。 -->
+              <tr v-if="it.special" class="special-row" :data-test="`special-${it.id}`">
+                <td :colspan="PARAM_COLUMNS.length + 4">【 効果 】{{ it.special }}</td>
+              </tr>
+              </template>
             </tbody>
           </template>
         </table>
@@ -147,6 +170,10 @@ async function buy(it: ShopItem) {
   display: flex;
   align-items: stretch;
   margin-bottom: 8px;
+}
+.depart-header .pay {
+  margin-left: 12px;
+  white-space: nowrap;
 }
 .depart-header .lead {
   flex: 1 1 auto;
@@ -217,6 +244,15 @@ async function buy(it: ShopItem) {
   color: #cc3300;
   font-weight: bold;
   text-align: right;
+}
+.depart-table tr.special-row td {
+  background: #fff6e0;
+  color: #995500;
+  text-align: left;
+  /* 本行(11px)より一段小さくし、行間も詰めて注記として従属させる */
+  font-size: 10px;
+  line-height: 1.25;
+  padding: 0 8px 1px;
 }
 .depart-table tr.cat-row td {
   background: #ccff99;

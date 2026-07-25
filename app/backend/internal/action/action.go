@@ -1943,11 +1943,11 @@ func (s *Service) loadOnsenBath(ctx context.Context, bathID int64) (price int64,
 // enforces the shop stock, the per-item ownership cap (max_sets), charges the
 // total price out of circulation and adds the durability to the inventory.
 // remaining_uses accumulates durability×sets ('use'なら残回数, 'day'なら残日数)。
-func (s *Service) DoBuy(ctx context.Context, playerID int64, facility string, itemID int64, sets int, idempotencyKey string) (*player.Player, error) {
+func (s *Service) DoBuy(ctx context.Context, playerID int64, facility string, itemID int64, sets int, payMethod, idempotencyKey string) (*player.Player, error) {
 	if sets <= 0 {
 		sets = 1
 	}
-	price, durability, maxSets, err := s.loadItemBuy(ctx, facility, itemID)
+	price, durability, maxSets, isGift, err := s.loadItemBuy(ctx, facility, itemID)
 	if err != nil {
 		return nil, err
 	}
@@ -1957,8 +1957,29 @@ func (s *Service) DoBuy(ctx context.Context, playerID int64, facility string, it
 	total := price * int64(sets)
 	add := durability * sets
 	return s.runAction(ctx, playerID, "buy", idempotencyKey, func(ctx context.Context, tx pgx.Tx, state effects.State) error {
-		if state.Money < total {
-			return &ConditionError{Message: "お金が足りません。"}
+		// 支払い元(現金 or クレジット=普通口座)。残高不足はここで弾かれる。
+		payer, err := s.payerAccount(ctx, tx, playerID, payMethod, total, state.Money)
+		if err != nil {
+			return err
+		}
+		// 贈答専用商品(レガシーの効果列「ギフト」)は持ち物ではなくギフト箱へ入る。
+		// 自分では使えないので所持種類の上限にも数えない。
+		if isGift {
+			if err := s.consumeStock(ctx, tx, facility, itemID, sets); err != nil {
+				return err
+			}
+			if err := s.ledger.PostTx(ctx, tx, "buy", "", []ledger.Entry{
+				{Account: payer, Delta: -total},
+				{Account: ledger.SystemAccount("shop_sink"), Delta: total},
+			}); err != nil {
+				return fmt.Errorf("pay: %w", err)
+			}
+			if _, err := tx.Exec(ctx,
+				`INSERT INTO player_gifts (owner_id, item_id, uses) VALUES ($1, $2, $3)`,
+				playerID, itemID, add); err != nil {
+				return fmt.Errorf("grant gift: %w", err)
+			}
+			return nil
 		}
 		// 所持上限: 追加後の残量が max_sets×durability を超えないこと。
 		var current int
@@ -1987,7 +2008,7 @@ func (s *Service) DoBuy(ctx context.Context, playerID int64, facility string, it
 			return err
 		}
 		if err := s.ledger.PostTx(ctx, tx, "buy", "", []ledger.Entry{
-			{Account: ledger.PlayerAccount(playerID), Delta: -total},
+			{Account: payer, Delta: -total},
 			{Account: ledger.SystemAccount("shop_sink"), Delta: total},
 		}); err != nil {
 			return fmt.Errorf("pay: %w", err)
@@ -2144,7 +2165,7 @@ func (s *Service) loadFood(ctx context.Context, foodID int64) (int64, effects.Ef
 // it enforces a per-(player,facility) cooldown, checks power, charges the price,
 // applies the effect (param上昇 + power消費), and advances the cooldown by the
 // menu item's interval.
-func (s *Service) DoFacilityAction(ctx context.Context, playerID int64, facility string, menuID int64, idempotencyKey string) (*player.Player, error) {
+func (s *Service) DoFacilityAction(ctx context.Context, playerID int64, facility string, menuID int64, payMethod, idempotencyKey string) (*player.Player, error) {
 	price, eff, intervalMin, err := s.loadFacilityMenuItem(ctx, facility, menuID)
 	if err != nil {
 		return nil, err
@@ -2163,11 +2184,13 @@ func (s *Service) DoFacilityAction(ctx context.Context, playerID int64, facility
 		if param, short := eff.InsufficientParam(state); short {
 			return &ConditionError{Message: paramShortMessage(param)}
 		}
-		if state.Money < price {
-			return &ConditionError{Message: "お金が足りません。"}
+		// 支払い元(現金 or クレジット=普通口座)。
+		payer, err := s.payerAccount(ctx, tx, playerID, payMethod, price, state.Money)
+		if err != nil {
+			return err
 		}
 		if err := s.ledger.PostTx(ctx, tx, facility, "", []ledger.Entry{
-			{Account: ledger.PlayerAccount(playerID), Delta: -price},
+			{Account: payer, Delta: -price},
 			{Account: ledger.SystemAccount(facility + "_sink"), Delta: price},
 		}); err != nil {
 			return fmt.Errorf("pay: %w", err)
@@ -3159,19 +3182,19 @@ func (s *Service) loadJobEconomy(ctx context.Context, name string) (jobEconomy, 
 // loadItemBuy returns a purchasable department-store item's price, durability
 // and per-item ownership cap (max_sets). Only facility=” items are sellable at
 // the department store; 食堂(syokudou)は DoEat、ジム/温泉は DoFacilityAction 経由。
-func (s *Service) loadItemBuy(ctx context.Context, facility string, itemID int64) (price int64, durability, maxSets int, err error) {
+func (s *Service) loadItemBuy(ctx context.Context, facility string, itemID int64) (price int64, durability, maxSets int, isGift bool, err error) {
 	cond, extra := s.dailyMenuCond(facility, 3)
 	args := append([]any{itemID, facility}, extra...)
 	err = s.pool.QueryRow(ctx,
-		`SELECT price, durability, max_sets FROM content_items
-		 WHERE id = $1 AND enabled AND facility = $2`+cond, args...).Scan(&price, &durability, &maxSets)
+		`SELECT price, durability, max_sets, is_gift FROM content_items
+		 WHERE id = $1 AND enabled AND facility = $2`+cond, args...).Scan(&price, &durability, &maxSets, &isGift)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, 0, 0, ErrItemNotFound
+		return 0, 0, 0, false, ErrItemNotFound
 	}
 	if err != nil {
-		return 0, 0, 0, fmt.Errorf("load item buy: %w", err)
+		return 0, 0, 0, false, fmt.Errorf("load item buy: %w", err)
 	}
-	return price, durability, maxSets, nil
+	return price, durability, maxSets, isGift, nil
 }
 
 // loadItemUse returns an item's use-effect, its use interval (minutes), whether
@@ -3238,17 +3261,20 @@ func (s *Service) readState(ctx context.Context, tx pgx.Tx, playerID int64) (eff
 		kokugo, suugaku, rika, syakai, eigo, ongaku, bijutsu        int
 		looks, tairyoku, kenkou, speed, power, wanryoku, kyakuryoku int
 		love, omoshirosa                                            int
+		weightG, heightCm, diseaseIndex                             int
 	)
 	err := tx.QueryRow(ctx,
 		`SELECT energy, energy_max, nou_energy, nou_energy_max, satiety,
 		        kokugo, suugaku, rika, syakai, eigo, ongaku, bijutsu,
 		        looks, tairyoku, kenkou, speed, power, wanryoku, kyakuryoku,
-		        love, omoshirosa
+		        love, omoshirosa,
+		        weight_g, height_cm, disease_index
 		 FROM player_status WHERE player_id = $1`, playerID).
 		Scan(&energy, &energyMax, &nou, &nouMax, &satiety,
 			&kokugo, &suugaku, &rika, &syakai, &eigo, &ongaku, &bijutsu,
 			&looks, &tairyoku, &kenkou, &speed, &power, &wanryoku, &kyakuryoku,
-			&love, &omoshirosa)
+			&love, &omoshirosa,
+			&weightG, &heightCm, &diseaseIndex)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return effects.State{}, player.ErrNotFound
 	}
@@ -3265,7 +3291,11 @@ func (s *Service) readState(ctx context.Context, tx pgx.Tx, playerID int64) (eff
 
 	m := detailedParamMax
 	return effects.State{
-		Money: money,
+		Money:        money,
+		WeightG:      weightG,
+		HeightCm:     heightCm,
+		DiseaseIndex: diseaseIndex,
+		DiseaseName:  condition.DiseaseName(diseaseIndex),
 		Params: map[string]effects.ParamState{
 			"energy":     {Value: energy, Max: energyMax},
 			"nou_energy": {Value: nou, Max: nouMax},
@@ -3314,6 +3344,33 @@ func (s *Service) applyEffect(ctx context.Context, tx pgx.Tx, playerID int64, ac
 	if len(plan.Params) > 0 {
 		if err := player.RefreshPowerMax(ctx, tx, playerID); err != nil {
 			return err
+		}
+	}
+
+	// 体重・身長・病気指数(レガシーの特殊効果 ウエイトアップ/ダイエット/身長/縮み/万能/風邪薬など)。
+	scalars := []struct {
+		change *effects.ValueChange
+		col    string
+		field  string
+	}{
+		{plan.Weight, "weight_g", "weight_g"},
+		{plan.Height, "height_cm", "height_cm"},
+		{plan.Disease, "disease_index", "disease_index"},
+	}
+	for _, sc := range scalars {
+		if sc.change == nil || sc.change.OldValue == sc.change.NewValue {
+			continue
+		}
+		if _, err := tx.Exec(ctx,
+			`UPDATE player_status SET `+sc.col+` = $1, updated_at = now() WHERE player_id = $2`,
+			sc.change.NewValue, playerID); err != nil {
+			return fmt.Errorf("update %s: %w", sc.col, err)
+		}
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO status_history (player_id, field, old_value, new_value, reason)
+			 VALUES ($1, $2, $3, $4, $5)`,
+			playerID, sc.field, strconv.Itoa(sc.change.OldValue), strconv.Itoa(sc.change.NewValue), actionType); err != nil {
+			return fmt.Errorf("insert status_history: %w", err)
 		}
 	}
 

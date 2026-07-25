@@ -13,6 +13,8 @@ export interface ItemStack {
   params: Record<string, number>;
   interval_min: number;
   calorie_g: number; // 摂取カロリー(食べると体重+calorie_g g)
+  special: string; // 特殊効果の説明(体重/身長/病気。無ければ空)
+  enables_credit: boolean; // 所持しているとクレジット払いができる(カード類)
   // クールタイム中の再使用可能時刻(ISO8601)。使用可能ならnull。
   next_available_at: string | null;
 }
@@ -104,6 +106,7 @@ export interface ShopItem {
   durability_unit: string; // 'use'(回) or 'day'(日)
   power_multiplier: number; // 温泉の回復速度倍率(0=温泉ではない)
   calorie_g: number; // 摂取カロリー(食べると体重+calorie_g g)
+  special: string; // 特殊効果の説明(体重/身長/病気。無ければ空)
   stock: number; // 本日の店頭在庫(-1=無制限)
 }
 
@@ -160,6 +163,106 @@ export interface PublicProfile {
   created_at: string;
   status: Player['status'];
   params: Params;
+}
+
+// 釣りゲーム。
+export interface FishingBait {
+  item_id: number;
+  name: string;
+  uses: number;
+}
+export interface FishingState {
+  active: boolean;
+  cards: number;
+  baits: FishingBait[];
+  at_limit: boolean;
+}
+export interface FishingResult {
+  outcome: 'win' | 'continue' | 'lose';
+  fish: string;
+  cards: number;
+}
+export interface FishingPickResp {
+  player: Player;
+  result: FishingResult;
+}
+
+// ビンゴ大会。
+export interface BingoCard {
+  id: number;
+  numbers: number[];
+  marks: boolean[];
+  lines: number;
+  rank: number | null;
+  prize: number;
+  can_win: boolean;
+}
+export interface BingoState {
+  active: boolean;
+  event_id: number;
+  drawn: number[];
+  total: number;
+  day: number;
+  days: number;
+  lines_to_win: number;
+  cards: BingoCard[];
+  max_cards: number;
+  finished_count: number;
+  next_prize: number;
+}
+export interface BingoClaimResp {
+  player: Player;
+  result: { rank: number; prize: number };
+}
+
+// シリアルコード(特典)。
+export interface SerialCode {
+  id: number;
+  code: string;
+  label: string;
+  message: string;
+  effect: string; // 効果op配列のJSON文字列
+  reward_item_id: number | null;
+  reward_item_name: string;
+  reward_item_uses: number;
+  max_uses: number; // 0=無制限
+  used_count: number;
+  starts_at: string | null;
+  ends_at: string | null;
+  enabled: boolean;
+  created_at: string;
+}
+export interface SerialUse {
+  player_id: number;
+  player_name: string;
+  used_at: string;
+}
+export interface SerialRedeemResult {
+  message: string;
+  item_name: string;
+  item_uses: number;
+}
+export interface SerialRedeemResp {
+  player: Player;
+  result: SerialRedeemResult;
+}
+
+// ギフト屋。
+export interface Gift {
+  id: number;
+  item_id: number;
+  name: string;
+  uses: number;
+}
+export interface GiftConvertible {
+  item_id: number;
+  name: string;
+  uses: number;
+}
+export interface GiftShopState {
+  fee: number;
+  gifts: Gift[];
+  convertibles: GiftConvertible[];
 }
 
 // 役場: 街のニュース/住民の出来事の1件。
@@ -304,10 +407,14 @@ export interface LoanQuote {
 
 // 効果エンジンのop(add_param / add_money)。
 export interface EffectOp {
-  op: 'add_param' | 'add_money';
+  op: 'add_param' | 'add_money' | 'add_weight_g' | 'add_height_cm' | 'add_disease';
   param?: string;
   amount: number;
+  // add_disease限定: 指定するとその病気のときだけ効く(空=万能)。
+  disease?: string;
 }
+// add_diseaseで指定できる病名(バックエンドのeffects.AllDiseasesと対応)。
+export const DISEASE_OPTIONS = ['風邪', '下痢', '肺炎', '結核', '脳腫瘍', '癌'];
 // 条件(param_gte)。
 export interface Condition {
   pred: 'param_gte';
@@ -570,6 +677,7 @@ export interface MailMessage {
   sent_at: string;
   saved: boolean;
   unread: boolean;
+  gift_item_name: string; // 添付された贈り物(無ければ空)
 }
 export interface MailContact {
   id: number;
@@ -778,6 +886,7 @@ export interface HouseShopItem {
   money: number;
   params: Record<string, number>;
   calorie_g: number;
+  special: string;
   durability: number;
   durability_unit: string; // 'use'(回)/'day'(日)
   interval_min: number;
@@ -822,6 +931,7 @@ export interface YamiItem {
   money: number;
   params: Record<string, number>;
   calorie_g: number;
+  special: string;
   durability_unit: string;
   interval_min: number;
   body_cost: number;
@@ -947,6 +1057,49 @@ export const api = {
   // 役場: 街のニュース(街全体)と住民ごとの出来事。
   townNews: (limit = 100) => request<NewsEntry[]>('GET', `/news?limit=${limit}`),
   playerNews: (id: number, limit = 50) => request<NewsEntry[]>('GET', `/players/${id}/news?limit=${limit}`),
+  fishing: (id: number) => request<FishingState>('GET', `/players/${id}/fishing`),
+  fishingStart: (id: number, itemId: number) =>
+    request<Player>('POST', `/players/${id}/fishing/start`, {
+      item_id: itemId,
+      idempotency_key: newIdempotencyKey(),
+    }),
+  fishingPick: (id: number, card: number) =>
+    request<FishingPickResp>('POST', `/players/${id}/fishing/pick`, {
+      card,
+      idempotency_key: newIdempotencyKey(),
+    }),
+  bingo: (id: number) => request<BingoState>('GET', `/players/${id}/bingo`),
+  bingoTakeCard: (id: number) =>
+    request<Player>('POST', `/players/${id}/bingo/card`, { idempotency_key: newIdempotencyKey() }),
+  bingoClaim: (id: number, cardId: number) =>
+    request<BingoClaimResp>('POST', `/players/${id}/bingo/claim`, {
+      card_id: cardId,
+      idempotency_key: newIdempotencyKey(),
+    }),
+  adminStartBingo: (actingId: number, cfg: { max_number: number; per_day: number; days: number; lines_to_win: number }) =>
+    request<{ started: boolean }>('POST', '/admin/bingo', cfg, adminHeaders(actingId)),
+  redeemSerial: (id: number, code: string) =>
+    request<SerialRedeemResp>('POST', `/players/${id}/serial/redeem`, {
+      code,
+      idempotency_key: newIdempotencyKey(),
+    }),
+  giftShop: (id: number) => request<GiftShopState>('GET', `/players/${id}/gifts`),
+  giftConvert: (id: number, itemId: number, uses: number) =>
+    request<Player>('POST', `/players/${id}/gifts/convert`, {
+      item_id: itemId,
+      uses,
+      idempotency_key: newIdempotencyKey(),
+    }),
+  adminSerials: (actingId: number) =>
+    request<SerialCode[]>('GET', '/admin/serials', undefined, adminHeaders(actingId)),
+  adminCreateSerial: (actingId: number, c: Partial<SerialCode>) =>
+    request<SerialCode>('POST', '/admin/serials', c, adminHeaders(actingId)),
+  adminUpdateSerial: (actingId: number, c: SerialCode) =>
+    request<SerialCode>('PUT', `/admin/serials/${c.id}`, c, adminHeaders(actingId)),
+  adminDeleteSerial: (actingId: number, sid: number) =>
+    request<{ deleted: boolean }>('DELETE', `/admin/serials/${sid}`, undefined, adminHeaders(actingId)),
+  adminSerialUses: (actingId: number, sid: number) =>
+    request<SerialUse[]>('GET', `/admin/serials/${sid}/uses`, undefined, adminHeaders(actingId)),
   rankingKeys: () => request<RankingKey[]>('GET', '/ranking/keys'),
   ranking: (key: string, self: number) => request<RankingResult>('GET', `/ranking?key=${key}&self=${self}`),
   townMap: () => request<TownFacility[]>('GET', '/townmap'),
@@ -987,8 +1140,12 @@ export const api = {
     }),
   getMail: (id: number) => request<Mailbox>('GET', `/players/${id}/mail`),
   getMailUnread: (id: number) => request<{ unread: number }>('GET', `/players/${id}/mail/unread`),
-  mailSend: (id: number, recipientId: number, body: string) =>
-    request<{ ok: boolean }>('POST', `/players/${id}/mail/send`, { recipient_id: recipientId, body }),
+  mailSend: (id: number, recipientId: number, body: string, giftId = 0) =>
+    request<{ ok: boolean }>('POST', `/players/${id}/mail/send`, {
+      recipient_id: recipientId,
+      body,
+      gift_id: giftId,
+    }),
   mailDelete: (id: number, msgId: number) =>
     request<{ ok: boolean }>('DELETE', `/players/${id}/mail/${msgId}`),
   mailSave: (id: number, msgId: number, saved: boolean) =>
@@ -1040,9 +1197,10 @@ export const api = {
       course_id: courseId,
       idempotency_key: newIdempotencyKey(),
     }),
-  facilityUse: (id: number, facility: string, menuId: number) =>
+  facilityUse: (id: number, facility: string, menuId: number, payMethod: 'cash' | 'credit' = 'cash') =>
     request<Player>('POST', `/players/${id}/facilities/${facility}/use`, {
       menu_id: menuId,
+      pay_method: payMethod,
       idempotency_key: newIdempotencyKey(),
     }),
   jobs: () => request<JobOption[]>('GET', '/jobs'),
@@ -1053,10 +1211,11 @@ export const api = {
     }),
   work: (id: number) =>
     request<WorkResponse>('POST', `/players/${id}/work`, { idempotency_key: newIdempotencyKey() }),
-  buy: (id: number, itemId: number, facility = '') =>
+  buy: (id: number, itemId: number, facility = '', payMethod: 'cash' | 'credit' = 'cash') =>
     request<Player>('POST', `/players/${id}/buy`, {
       item_id: itemId,
       facility,
+      pay_method: payMethod,
       idempotency_key: newIdempotencyKey(),
     }),
   use: (id: number, itemId: number) =>

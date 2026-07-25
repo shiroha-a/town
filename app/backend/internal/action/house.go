@@ -511,16 +511,41 @@ func hasCreditCard(ctx context.Context, tx pgx.Tx, playerID int64) (bool, error)
 	if err := tx.QueryRow(ctx,
 		`SELECT EXISTS(
 		   SELECT 1 FROM player_items pi JOIN content_items ci ON ci.id = pi.item_id
-		   WHERE pi.player_id = $1 AND pi.remaining_uses > 0 AND ci.name = ANY($2))`,
-		playerID, creditCardNames).Scan(&hasCard); err != nil {
+		   WHERE pi.player_id = $1 AND pi.remaining_uses > 0 AND ci.enables_credit)`,
+		playerID).Scan(&hasCard); err != nil {
 		return false, fmt.Errorf("check credit card: %w", err)
 	}
 	return hasCard, nil
 }
 
-// creditCardNames are the items that enable credit (bank) payment at shops
-// (レガシーのクレジット系アイテム)。
-var creditCardNames = []string{"クレジットカード", "ゴールドクレジットカード", "スペシャルクレジットカード"}
+// payerAccount resolves which account a purchase is debited from. "credit"
+// requires holding a card item and draws on the 普通口座 (レガシーはクレジット
+// 払いを $bank から引いていた); anything else is cash from the player account.
+func (s *Service) payerAccount(ctx context.Context, tx pgx.Tx, playerID int64, payMethod string, amount, cashMoney int64) (string, error) {
+	if payMethod != "credit" {
+		if cashMoney < amount {
+			return "", &ConditionError{Message: "お金が足りません。"}
+		}
+		return ledger.PlayerAccount(playerID), nil
+	}
+	hasCard, err := hasCreditCard(ctx, tx, playerID)
+	if err != nil {
+		return "", err
+	}
+	if !hasCard {
+		return "", &ConditionError{Message: "クレジットカードを持っていません。"}
+	}
+	var savings int64
+	if err := tx.QueryRow(ctx,
+		`SELECT COALESCE(SUM(delta), 0) FROM ledger_entry WHERE account = $1`,
+		ledger.SavingsAccount(playerID)).Scan(&savings); err != nil {
+		return "", fmt.Errorf("read savings: %w", err)
+	}
+	if savings < amount {
+		return "", &ConditionError{Message: "普通口座の残高が足りません。"}
+	}
+	return ledger.SavingsAccount(playerID), nil
+}
 
 // HouseBuyResult summarizes a shop purchase for the result toast.
 type HouseBuyResult struct {

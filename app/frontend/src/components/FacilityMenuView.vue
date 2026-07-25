@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { api, type Player, type ShopItem } from '../api';
 import { PARAM_COLUMNS } from '../params';
 import Toast from './Toast.vue';
@@ -22,6 +22,13 @@ const kind = ref<'ok' | 'error'>('ok');
 const busy = ref(false);
 const { toast, showToast, closeToast } = useToast();
 
+// 支払い方法。クレジットはカード類(enables_credit)を持っているときだけ選べ、
+// 普通口座から引き落とす(レガシー kyushitu.cgi の支払い方法セレクト)。
+const payMethod = ref<'cash' | 'credit'>('cash');
+const hasCreditCard = computed(() =>
+  props.player.items.some((it) => it.enables_credit && it.remaining_uses > 0),
+);
+
 const intervalLabel = (m: number) => (m > 0 ? `${m}分` : '-');
 
 onMounted(async () => {
@@ -37,7 +44,7 @@ async function use(item: ShopItem) {
   busy.value = true;
   const before = props.player;
   try {
-    const after = await api.facilityUse(props.player.id, props.facility, item.id);
+    const after = await api.facilityUse(props.player.id, props.facility, item.id, payMethod.value);
     emit('update', after);
     showToast({
       variant: 'item',
@@ -68,6 +75,13 @@ async function use(item: ShopItem) {
         {{ lead }}<br />
         ●{{ player.display_name }}さんの所持金：<span class="money">{{ yen(player.money) }}円</span>
         ／ 身体パワー：{{ player.status.energy }} / {{ player.status.energy_max }}
+        <span class="pay">
+          支払い
+          <select v-model="payMethod" data-test="pay-method">
+            <option value="cash">現金</option>
+            <option value="credit" :disabled="!hasCreditCard">クレジット（普通口座）</option>
+          </select>
+        </span>
       </div>
       <div class="title">{{ title }}</div>
     </div>
@@ -122,6 +136,10 @@ async function use(item: ShopItem) {
 .fac-header {
   display: flex;
   margin-bottom: 8px;
+}
+.fac-header .pay {
+  margin-left: 12px;
+  white-space: nowrap;
 }
 .fac-header .lead {
   flex: 1 1 auto;
