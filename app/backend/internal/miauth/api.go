@@ -41,24 +41,30 @@ func (c *Client) ShowUser(ctx context.Context, host, token, userID string) (*Use
 	return &u, nil
 }
 
-// ResolveUser asks the viewer's own instance to look up a remote account by its
-// ActivityPub URI, returning the id that instance knows it by. Needed because a
-// follow must be issued on the viewer's instance with that instance's ids.
+// ShowUserByAcct looks an account up on the *viewer's* instance by
+// username@host, returning the id that instance knows it by along with the
+// viewer's relation to it (isFollowing). A follow must be issued on the
+// viewer's instance with that instance's ids, so this is the resolution step.
 //
-// ap/show requires read:account and is rate limited to 30 calls per hour, so
-// callers must cache the result.
-func (c *Client) ResolveUser(ctx context.Context, viewerHost, token, uri string) (*UserDetailed, error) {
-	var res struct {
-		Type   string       `json:"type"`
-		Object UserDetailed `json:"object"`
+// users/show resolves unknown remote accounts itself (RemoteUserResolveService)
+// and carries no rate limit, unlike ap/show which costs one of 30 calls per
+// hour and needs read:account. Passing the token is required: instances with
+// ugcVisibilityForVisitor=local refuse the lookup for anonymous callers.
+//
+// remoteHost is empty when the account is local to the viewer's instance.
+func (c *Client) ShowUserByAcct(ctx context.Context, viewerHost, token, username, remoteHost string) (*UserDetailed, error) {
+	body := map[string]any{"username": username, "host": nil}
+	if remoteHost != "" && remoteHost != viewerHost {
+		body["host"] = remoteHost
 	}
-	if err := c.postJSON(ctx, viewerHost, "/api/ap/show", token, map[string]any{"uri": uri}, &res); err != nil {
+	var u UserDetailed
+	if err := c.postJSON(ctx, viewerHost, "/api/users/show", token, body, &u); err != nil {
 		return nil, err
 	}
-	if res.Type != "User" || res.Object.ID == "" {
+	if u.ID == "" {
 		return nil, fmt.Errorf("相手のアカウントを解決できませんでした。")
 	}
-	return &res.Object, nil
+	return &u, nil
 }
 
 // Follow follows userID on the viewer's own instance. Requires write:following.
@@ -69,11 +75,6 @@ func (c *Client) Follow(ctx context.Context, viewerHost, token, userID string) e
 // Unfollow undoes Follow.
 func (c *Client) Unfollow(ctx context.Context, viewerHost, token, userID string) error {
 	return c.postJSON(ctx, viewerHost, "/api/following/delete", token, map[string]any{"userId": userID}, nil)
-}
-
-// APURI is the ActivityPub URI of a user, as ap/show expects it.
-func APURI(host, userID string) string {
-	return "https://" + host + "/users/" + userID
 }
 
 // ProfileURL is the human-facing page of an account.

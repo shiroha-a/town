@@ -15,9 +15,10 @@ import (
 )
 
 // miauthPermissions are the scopes we ask the instance for.
-// read:account はプロフィール表示と ap/show(リモートフォローの解決)に、
-// write:following はゲーム内からのフォローに要る。
-var miauthPermissions = []string{"read:account", "write:following"}
+// ゲーム内からのフォローに使う write:following だけを求める。プロフィールの
+// 取得(users/show)は requireCredential:false なのでスコープが要らず、相手の
+// 解決も users/show で足りるため read:account は要求しない。
+var miauthPermissions = []string{"write:following"}
 
 // callbackPath is where the SPA handles the return from the instance.
 const callbackPath = "/auth/callback"

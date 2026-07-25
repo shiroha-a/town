@@ -15,9 +15,9 @@ import (
 // FollowState is the viewer's relation to the profile being shown.
 type FollowState struct {
 	Self bool `json:"self"`
-	// Known is false when the relation could not be checked cheaply (a remote
-	// account we have not resolved yet). The button is still offered — the
-	// follow call itself reports "already following".
+	// Known is false when the viewer's instance could not be asked (it does not
+	// know the account yet, or the call failed). The button is still offered —
+	// the follow itself resolves the account and reports "already following".
 	Known     bool `json:"known"`
 	Following bool `json:"following"`
 	Pending   bool `json:"pending"`
@@ -36,9 +36,10 @@ type FollowResult struct {
 	FallbackURL string `json:"fallback_url"`
 }
 
-// State reports whether the viewer already follows the target. It never spends
-// an ap/show call (30/hour): a remote account that has not been resolved yet is
-// reported as Known:false instead.
+// State reports whether the viewer already follows the target, asking the
+// viewer's own instance (users/show has no rate limit, so this can run on every
+// profile view). The lookup doubles as the resolution step: the id it returns is
+// the one a follow needs, so it is cached here.
 func (s *Service) State(ctx context.Context, viewerID, targetID int64) (*FollowState, error) {
 	st := &FollowState{Self: viewerID == targetID}
 	if st.Self || viewerID == 0 {
@@ -56,13 +57,10 @@ func (s *Service) State(ctx context.Context, viewerID, targetID int64) (*FollowS
 	}
 	st.CanFollow = true
 
-	userID, ok, err := s.knownRemoteID(ctx, viewer, target, targetID)
-	if err != nil || !ok {
-		return st, nil
-	}
-	// 閲覧者のインスタンスに、閲覧者のトークンで聞くと関係が返る。
-	u, err := s.mi.ShowUser(ctx, viewer.InstanceHost, token, userID)
+	u, err := s.lookup(ctx, viewer, target, targetID, token)
 	if err != nil {
+		// 相手のインスタンスとまだ疎通が無い等。ボタンは出したまま、
+		// 「フォロー中」の判定だけ諦める(実行時に改めて判定される)。
 		return st, nil
 	}
 	st.Known = true
@@ -102,10 +100,11 @@ func (s *Service) follow(ctx context.Context, viewerID, targetID int64, undo boo
 		}, nil
 	}
 
-	userID, err := s.resolveRemoteID(ctx, viewer, target, targetID, token)
+	u, err := s.lookup(ctx, viewer, target, targetID, token)
 	if err != nil {
 		return &FollowResult{Message: followErrMessage(err), FallbackURL: fallback}, nil
 	}
+	userID := u.ID
 
 	if undo {
 		if err := s.mi.Unfollow(ctx, viewer.InstanceHost, token, userID); err != nil {
@@ -145,42 +144,35 @@ func (s *Service) pair(ctx context.Context, viewerID, targetID int64) (viewer, t
 	return viewer, target, nil
 }
 
-// knownRemoteID returns the target's id on the viewer's instance without making
-// a network call: identical for same-instance residents, otherwise whatever a
-// previous ap/show cached.
-func (s *Service) knownRemoteID(ctx context.Context, viewer, target *player.Player, targetID int64) (string, bool, error) {
+// lookup asks the viewer's instance about the target, returning that instance's
+// id for the account plus the viewer's relation to it. Residents of the same
+// instance are looked up by id directly; others by username@host, which makes
+// the instance resolve the account over ActivityPub if it does not know it yet.
+//
+// The resolved id is cached: it never changes, and having it lets a later call
+// skip the acct lookup entirely.
+func (s *Service) lookup(ctx context.Context, viewer, target *player.Player, targetID int64, token string) (*miauth.UserDetailed, error) {
 	if viewer.InstanceHost == target.InstanceHost {
-		return target.RemoteUserID, true, nil
+		return s.mi.ShowUser(ctx, viewer.InstanceHost, token, target.RemoteUserID)
 	}
-	var id string
-	err := s.pool.QueryRow(ctx,
-		`SELECT resolved_user_id FROM misskey_resolved_users
-		  WHERE viewer_host = $1 AND target_player_id = $2`,
-		viewer.InstanceHost, targetID).Scan(&id)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", false, nil
+	if id, ok, err := s.cachedRemoteID(ctx, viewer.InstanceHost, targetID); err == nil && ok {
+		if u, err := s.mi.ShowUser(ctx, viewer.InstanceHost, token, id); err == nil {
+			return u, nil
+		}
 	}
+	// username が要るので、プロフィールが未取得ならここで取る。
+	prof, ok, err := s.cached(ctx, targetID)
 	if err != nil {
-		return "", false, fmt.Errorf("read resolved user: %w", err)
+		return nil, err
 	}
-	return id, true, nil
-}
-
-// resolveRemoteID is knownRemoteID plus the expensive path: asking the viewer's
-// instance to look the account up over ActivityPub. The result is cached
-// because ap/show allows only 30 calls per hour.
-func (s *Service) resolveRemoteID(ctx context.Context, viewer, target *player.Player, targetID int64, token string) (string, error) {
-	id, ok, err := s.knownRemoteID(ctx, viewer, target, targetID)
+	if !ok {
+		if prof, err = s.fetch(ctx, targetID); err != nil {
+			return nil, err
+		}
+	}
+	u, err := s.mi.ShowUserByAcct(ctx, viewer.InstanceHost, token, prof.Username, target.InstanceHost)
 	if err != nil {
-		return "", err
-	}
-	if ok {
-		return id, nil
-	}
-	u, err := s.mi.ResolveUser(ctx, viewer.InstanceHost, token,
-		miauth.APURI(target.InstanceHost, target.RemoteUserID))
-	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if _, err := s.pool.Exec(ctx,
 		`INSERT INTO misskey_resolved_users (viewer_host, target_player_id, resolved_user_id, resolved_at)
@@ -188,9 +180,26 @@ func (s *Service) resolveRemoteID(ctx context.Context, viewer, target *player.Pl
 		 ON CONFLICT (viewer_host, target_player_id)
 		 DO UPDATE SET resolved_user_id = EXCLUDED.resolved_user_id, resolved_at = now()`,
 		viewer.InstanceHost, targetID, u.ID); err != nil {
-		return "", fmt.Errorf("cache resolved user: %w", err)
+		return nil, fmt.Errorf("cache resolved user: %w", err)
 	}
-	return u.ID, nil
+	return u, nil
+}
+
+// cachedRemoteID returns a previously resolved id for the target on the viewer's
+// instance.
+func (s *Service) cachedRemoteID(ctx context.Context, viewerHost string, targetID int64) (string, bool, error) {
+	var id string
+	err := s.pool.QueryRow(ctx,
+		`SELECT resolved_user_id FROM misskey_resolved_users
+		  WHERE viewer_host = $1 AND target_player_id = $2`,
+		viewerHost, targetID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("read resolved user: %w", err)
+	}
+	return id, true, nil
 }
 
 // fallbackURL builds the viewer's remote-follow page for the target account.
