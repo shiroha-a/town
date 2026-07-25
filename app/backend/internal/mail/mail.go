@@ -40,6 +40,7 @@ type Message struct {
 	SentAt          time.Time `json:"sent_at"`
 	Saved           bool      `json:"saved"`
 	Unread          bool      `json:"unread"`
+	GiftItemName    string    `json:"gift_item_name"` // 添付された贈り物(無ければ空)
 }
 
 // Contact is an address-book entry (a recent counterpart).
@@ -83,7 +84,7 @@ func (s *Service) GetMailbox(ctx context.Context, playerID int64) (Mailbox, erro
 		return mb, err
 	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, direction, counterpart_id, counterpart_name, body, saved, sent_at
+		`SELECT id, direction, counterpart_id, counterpart_name, body, saved, sent_at, gift_item_name
 		 FROM messages WHERE owner_id = $1 ORDER BY sent_at DESC, id DESC`, playerID)
 	if err != nil {
 		return mb, fmt.Errorf("query mailbox: %w", err)
@@ -92,7 +93,7 @@ func (s *Service) GetMailbox(ctx context.Context, playerID int64) (Mailbox, erro
 	mb.Received, mb.Sent = []Message{}, []Message{}
 	for rows.Next() {
 		var m Message
-		if err := rows.Scan(&m.ID, &m.Direction, &m.CounterpartID, &m.CounterpartName, &m.Body, &m.Saved, &m.SentAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.Direction, &m.CounterpartID, &m.CounterpartName, &m.Body, &m.Saved, &m.SentAt, &m.GiftItemName); err != nil {
 			return mb, err
 		}
 		if m.Direction == "received" {
@@ -173,7 +174,14 @@ func (s *Service) MarkChecked(ctx context.Context, playerID int64) error {
 // Send delivers a plain-text message to a recipient, storing a received copy in
 // the recipient's box and a sent copy in the sender's, trimming both to
 // SaveLimit. Enforces non-empty body, no self-send, and the daily send limit.
-func (s *Service) Send(ctx context.Context, senderID, recipientID int64, body string) error {
+// giftGranter hands one unit of a held gift to the recipient. Injected by the
+// caller so mail does not need to know about items/inventory.
+type giftGranter func(ctx context.Context, tx pgx.Tx, senderID, recipientID, giftID int64) (string, error)
+
+// Send delivers a message. giftID > 0 attaches one unit of the sender's gift,
+// which grantGift moves into the recipient's inventory (レガシー command.pl の
+// gift_souhu)。grantGift may be nil when no gift support is wired up.
+func (s *Service) Send(ctx context.Context, senderID, recipientID int64, body string, giftID int64, grantGift giftGranter) error {
 	body = strings.TrimSpace(body)
 	if body == "" {
 		return &ErrValidation{Message: "メッセージが入力されていません。"}
@@ -204,15 +212,26 @@ func (s *Service) Send(ctx context.Context, senderID, recipientID int64, body st
 		if sent >= DailySendLimit {
 			return &ErrValidation{Message: fmt.Sprintf("本日の送信数(%d通)を超えました。", DailySendLimit)}
 		}
+		// 贈り物の添付。相手の持ち物へ移してから、両方の行に品名を残す。
+		var giftName string
+		if giftID > 0 {
+			if grantGift == nil {
+				return &ErrValidation{Message: "贈り物は送れません。"}
+			}
+			var err error
+			if giftName, err = grantGift(ctx, tx, senderID, recipientID, giftID); err != nil {
+				return err
+			}
+		}
 		// 受信側と送信側に同時刻で複製保存。
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO messages (owner_id, direction, counterpart_id, counterpart_name, body)
-			 VALUES ($1, 'received', $2, $3, $4)`, recipientID, senderID, senderName, body); err != nil {
+			`INSERT INTO messages (owner_id, direction, counterpart_id, counterpart_name, body, gift_item_name)
+			 VALUES ($1, 'received', $2, $3, $4, $5)`, recipientID, senderID, senderName, body, giftName); err != nil {
 			return fmt.Errorf("insert received: %w", err)
 		}
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO messages (owner_id, direction, counterpart_id, counterpart_name, body)
-			 VALUES ($1, 'sent', $2, $3, $4)`, senderID, recipientID, recipientName, body); err != nil {
+			`INSERT INTO messages (owner_id, direction, counterpart_id, counterpart_name, body, gift_item_name)
+			 VALUES ($1, 'sent', $2, $3, $4, $5)`, senderID, recipientID, recipientName, body, giftName); err != nil {
 			return fmt.Errorf("insert sent: %w", err)
 		}
 		if err := trim(ctx, tx, recipientID); err != nil {

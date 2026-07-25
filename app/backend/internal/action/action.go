@@ -1947,7 +1947,7 @@ func (s *Service) DoBuy(ctx context.Context, playerID int64, facility string, it
 	if sets <= 0 {
 		sets = 1
 	}
-	price, durability, maxSets, err := s.loadItemBuy(ctx, facility, itemID)
+	price, durability, maxSets, isGift, err := s.loadItemBuy(ctx, facility, itemID)
 	if err != nil {
 		return nil, err
 	}
@@ -1961,6 +1961,25 @@ func (s *Service) DoBuy(ctx context.Context, playerID int64, facility string, it
 		payer, err := s.payerAccount(ctx, tx, playerID, payMethod, total, state.Money)
 		if err != nil {
 			return err
+		}
+		// 贈答専用商品(レガシーの効果列「ギフト」)は持ち物ではなくギフト箱へ入る。
+		// 自分では使えないので所持種類の上限にも数えない。
+		if isGift {
+			if err := s.consumeStock(ctx, tx, facility, itemID, sets); err != nil {
+				return err
+			}
+			if err := s.ledger.PostTx(ctx, tx, "buy", "", []ledger.Entry{
+				{Account: payer, Delta: -total},
+				{Account: ledger.SystemAccount("shop_sink"), Delta: total},
+			}); err != nil {
+				return fmt.Errorf("pay: %w", err)
+			}
+			if _, err := tx.Exec(ctx,
+				`INSERT INTO player_gifts (owner_id, item_id, uses) VALUES ($1, $2, $3)`,
+				playerID, itemID, add); err != nil {
+				return fmt.Errorf("grant gift: %w", err)
+			}
+			return nil
 		}
 		// 所持上限: 追加後の残量が max_sets×durability を超えないこと。
 		var current int
@@ -3163,19 +3182,19 @@ func (s *Service) loadJobEconomy(ctx context.Context, name string) (jobEconomy, 
 // loadItemBuy returns a purchasable department-store item's price, durability
 // and per-item ownership cap (max_sets). Only facility=” items are sellable at
 // the department store; 食堂(syokudou)は DoEat、ジム/温泉は DoFacilityAction 経由。
-func (s *Service) loadItemBuy(ctx context.Context, facility string, itemID int64) (price int64, durability, maxSets int, err error) {
+func (s *Service) loadItemBuy(ctx context.Context, facility string, itemID int64) (price int64, durability, maxSets int, isGift bool, err error) {
 	cond, extra := s.dailyMenuCond(facility, 3)
 	args := append([]any{itemID, facility}, extra...)
 	err = s.pool.QueryRow(ctx,
-		`SELECT price, durability, max_sets FROM content_items
-		 WHERE id = $1 AND enabled AND facility = $2`+cond, args...).Scan(&price, &durability, &maxSets)
+		`SELECT price, durability, max_sets, is_gift FROM content_items
+		 WHERE id = $1 AND enabled AND facility = $2`+cond, args...).Scan(&price, &durability, &maxSets, &isGift)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, 0, 0, ErrItemNotFound
+		return 0, 0, 0, false, ErrItemNotFound
 	}
 	if err != nil {
-		return 0, 0, 0, fmt.Errorf("load item buy: %w", err)
+		return 0, 0, 0, false, fmt.Errorf("load item buy: %w", err)
 	}
-	return price, durability, maxSets, nil
+	return price, durability, maxSets, isGift, nil
 }
 
 // loadItemUse returns an item's use-effect, its use interval (minutes), whether

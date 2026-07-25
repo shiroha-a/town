@@ -149,6 +149,8 @@ const KEY_PRESETS: { key: string; label: string }[] = [
   { key: 'keiba', label: '競馬場(準備中)' },
   { key: 'kentiku', label: '建設会社' },
   { key: 'casino', label: 'ゲームセンター' },
+  { key: 'tsuri', label: '釣りゲーム' },
+  { key: 'gifutoya', label: 'ギフト屋' },
   { key: 'prof', label: 'プロフィール(準備中)' },
   { key: 'mail', label: 'メール(準備中)' },
   { key: 'doukyo', label: 'キャラ作成(準備中)' },
@@ -161,7 +163,7 @@ const KEY_PRESETS: { key: string; label: string }[] = [
 const MOVE_KEYS = ['walk', 'bus'];
 // 施設用に用意されているgif(public/img)。
 const IMG_PRESETS = [
-  'depart', 'bank', 'syokudou', 'gym', 'onsen', 'hospital', 'work', 'yakuba', 'kabu', 'keiba', 'kentiku', 'game', 'prof', 'mail', 'mati_link', 'bus', 'akiti',
+  'depart', 'bank', 'syokudou', 'gym', 'onsen', 'hospital', 'work', 'yakuba', 'kabu', 'keiba', 'kentiku', 'game', 'tsuri', 'gifutoya', 'prof', 'mail', 'mati_link', 'bus', 'akiti',
 ];
 
 // 施設レイヤーで編集中の街(0..4)。施設はマルチ街化済み。
@@ -254,6 +256,8 @@ const STD_FAC_BASE: FacilityPreset[] = [
   { key: 'casino', img: 'game', alt: 'ゲームセンター', dest: 0 },
   { key: 'hanbai', img: 'hanbai', alt: '自動販売機', dest: 0 },
   { key: 'yakuba', img: 'yakuba', alt: '役場（住民名鑑）', dest: 0 },
+  { key: 'tsuri', img: 'tsuri', alt: '釣りゲーム', dest: 0 },
+  { key: 'gifutoya', img: 'gifutoya', alt: 'ギフト屋', dest: 0 },
   { key: 'prof', img: 'prof', alt: 'プロフィール', dest: 0 },
   { key: 'akichi', img: 'akiti', alt: '空き地', dest: 0 },
 ];

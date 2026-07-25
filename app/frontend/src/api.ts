@@ -165,6 +165,46 @@ export interface PublicProfile {
   params: Params;
 }
 
+// 釣りゲーム。
+export interface FishingBait {
+  item_id: number;
+  name: string;
+  uses: number;
+}
+export interface FishingState {
+  active: boolean;
+  cards: number;
+  baits: FishingBait[];
+  at_limit: boolean;
+}
+export interface FishingResult {
+  outcome: 'win' | 'continue' | 'lose';
+  fish: string;
+  cards: number;
+}
+export interface FishingPickResp {
+  player: Player;
+  result: FishingResult;
+}
+
+// ギフト屋。
+export interface Gift {
+  id: number;
+  item_id: number;
+  name: string;
+  uses: number;
+}
+export interface GiftConvertible {
+  item_id: number;
+  name: string;
+  uses: number;
+}
+export interface GiftShopState {
+  fee: number;
+  gifts: Gift[];
+  convertibles: GiftConvertible[];
+}
+
 // 役場: 街のニュース/住民の出来事の1件。
 export interface NewsEntry {
   id: number;
@@ -577,6 +617,7 @@ export interface MailMessage {
   sent_at: string;
   saved: boolean;
   unread: boolean;
+  gift_item_name: string; // 添付された贈り物(無ければ空)
 }
 export interface MailContact {
   id: number;
@@ -956,6 +997,24 @@ export const api = {
   // 役場: 街のニュース(街全体)と住民ごとの出来事。
   townNews: (limit = 100) => request<NewsEntry[]>('GET', `/news?limit=${limit}`),
   playerNews: (id: number, limit = 50) => request<NewsEntry[]>('GET', `/players/${id}/news?limit=${limit}`),
+  fishing: (id: number) => request<FishingState>('GET', `/players/${id}/fishing`),
+  fishingStart: (id: number, itemId: number) =>
+    request<Player>('POST', `/players/${id}/fishing/start`, {
+      item_id: itemId,
+      idempotency_key: newIdempotencyKey(),
+    }),
+  fishingPick: (id: number, card: number) =>
+    request<FishingPickResp>('POST', `/players/${id}/fishing/pick`, {
+      card,
+      idempotency_key: newIdempotencyKey(),
+    }),
+  giftShop: (id: number) => request<GiftShopState>('GET', `/players/${id}/gifts`),
+  giftConvert: (id: number, itemId: number, uses: number) =>
+    request<Player>('POST', `/players/${id}/gifts/convert`, {
+      item_id: itemId,
+      uses,
+      idempotency_key: newIdempotencyKey(),
+    }),
   rankingKeys: () => request<RankingKey[]>('GET', '/ranking/keys'),
   ranking: (key: string, self: number) => request<RankingResult>('GET', `/ranking?key=${key}&self=${self}`),
   townMap: () => request<TownFacility[]>('GET', '/townmap'),
@@ -996,8 +1055,12 @@ export const api = {
     }),
   getMail: (id: number) => request<Mailbox>('GET', `/players/${id}/mail`),
   getMailUnread: (id: number) => request<{ unread: number }>('GET', `/players/${id}/mail/unread`),
-  mailSend: (id: number, recipientId: number, body: string) =>
-    request<{ ok: boolean }>('POST', `/players/${id}/mail/send`, { recipient_id: recipientId, body }),
+  mailSend: (id: number, recipientId: number, body: string, giftId = 0) =>
+    request<{ ok: boolean }>('POST', `/players/${id}/mail/send`, {
+      recipient_id: recipientId,
+      body,
+      gift_id: giftId,
+    }),
   mailDelete: (id: number, msgId: number) =>
     request<{ ok: boolean }>('DELETE', `/players/${id}/mail/${msgId}`),
   mailSave: (id: number, msgId: number, saved: boolean) =>
