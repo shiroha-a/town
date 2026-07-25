@@ -315,9 +315,13 @@ const doSeizou = async () => {
       <div class="bbs-col">
         <div class="bbs-head">■メッセージ来訪者</div>
         <textarea v-model="openBody" rows="4" class="bbs-area"></textarea>
-        <button class="btn emoji-btn" @click="emojiFor = 'open'"><CommandIcon name="emoji" />絵文字</button>
         <label v-if="!view.own && !view.officer" class="chk"><input v-model="openJoin" type="checkbox" />●入会希望</label>
-        <div><button class="btn" :disabled="busy" @click="postOpen">OK</button></div>
+        <div class="btn-row">
+          <button class="btn" :disabled="busy" @click="postOpen">OK</button>
+          <button class="btn emoji-btn" title="絵文字を入れる" @click="emojiFor = 'open'">
+            <CommandIcon name="emoji" />
+          </button>
+        </div>
         <div class="bbs-head2">来訪者掲示板</div>
         <div v-for="p in view.bbs_open" :key="p.id" class="bbs-post">
           <div class="bbs-meta">
@@ -336,9 +340,13 @@ const doSeizou = async () => {
       <div v-if="view.own || view.officer" class="bbs-col">
         <div class="bbs-head">■メッセージメンバー</div>
         <textarea v-model="memberBody" rows="4" class="bbs-area"></textarea>
-        <button class="btn emoji-btn" @click="emojiFor = 'member'"><CommandIcon name="emoji" />絵文字</button>
         <label v-if="!view.own" class="chk"><input v-model="memberLeave" type="checkbox" />●退会希望</label>
-        <div><button class="btn" :disabled="busy" @click="postMember">OK</button></div>
+        <div class="btn-row">
+          <button class="btn" :disabled="busy" @click="postMember">OK</button>
+          <button class="btn emoji-btn" title="絵文字を入れる" @click="emojiFor = 'member'">
+            <CommandIcon name="emoji" />
+          </button>
+        </div>
         <div class="bbs-head2">メンバー掲示板</div>
         <div v-for="p in view.bbs_member" :key="p.id" class="bbs-post">
           <div class="bbs-meta">
@@ -393,15 +401,22 @@ const doSeizou = async () => {
 </template>
 
 <style scoped>
+/* 絵文字ボタン。アイコンのみで、隣のテキストボタンと高さを揃えるために
+   align-items: stretch の行に入れる(文字の行高に依存させない)。 */
+.btn-row {
+  display: inline-flex;
+  gap: 6px;
+  align-items: stretch;
+}
 .emoji-btn {
-  margin-left: 6px;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  padding: 2px 8px;
 }
 .emoji-btn :deep(.cmd-icon) {
-  width: 14px;
-  height: 14px;
+  width: 15px;
+  height: 15px;
 }
 .company {
   max-width: 820px;

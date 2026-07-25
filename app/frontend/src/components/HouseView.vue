@@ -372,9 +372,11 @@ async function doDeleteBbs(kind: string, opts: { articleNo?: number; threadNo?: 
           <div v-if="current.comment" class="bbs-lead">{{ current.comment }}</div>
           <div class="bbs-form">
             <textarea v-model="bbsBody" rows="4" class="bbs-area"></textarea>
-            <div>
+            <div class="btn-row">
               <button class="btn" :disabled="busy" @click="doPostBbs(bbsBody)">新規投稿</button>
-              <button class="btn emoji-btn" @click="emojiFor = 'bbs'"><CommandIcon name="emoji" />絵文字</button>
+              <button class="btn emoji-btn" title="絵文字を入れる" @click="emojiFor = 'bbs'">
+                <CommandIcon name="emoji" />
+              </button>
             </div>
           </div>
           <div class="bbs-posts">
@@ -387,8 +389,16 @@ async function doDeleteBbs(kind: string, opts: { articleNo?: number; threadNo?: 
               </div>
               <div class="reply-form">
                 <textarea v-model="replyBodies[t.parent.thread_no]" rows="2" class="reply-area"></textarea>
-                <button class="btn emoji-btn" @click="emojiFor = `reply:${t.parent.thread_no}`"><CommandIcon name="emoji" />絵文字</button>
-                <button class="btn" :disabled="busy" @click="doPostBbs(replyBodies[t.parent.thread_no] ?? '', t.parent.thread_no)">レス</button>
+                <span class="btn-row">
+                  <button
+                    class="btn emoji-btn"
+                    title="絵文字を入れる"
+                    @click="emojiFor = `reply:${t.parent.thread_no}`"
+                  >
+                    <CommandIcon name="emoji" />
+                  </button>
+                  <button class="btn" :disabled="busy" @click="doPostBbs(replyBodies[t.parent.thread_no] ?? '', t.parent.thread_no)">レス</button>
+                </span>
               </div>
               <div v-for="p in t.replies" :key="p.id" class="bbs-reply">
                 <span class="bbs-author">{{ p.author_name }}<span v-if="p.author_job" class="bbs-job">（{{ p.author_job }}）</span></span>：<span class="bbs-body-inline"><RichText :text="p.body" /></span>（{{ fmtDate(p.created_at) }}）<span class="bbs-no">記事no.{{ p.id }}</span>
@@ -541,15 +551,22 @@ async function doDeleteBbs(kind: string, opts: { articleNo?: number; threadNo?: 
 </template>
 
 <style scoped>
+/* 絵文字ボタン。アイコンのみで、隣のテキストボタンと高さを揃えるために
+   align-items: stretch の行に入れる(文字の行高に依存させない)。 */
+.btn-row {
+  display: inline-flex;
+  gap: 6px;
+  align-items: stretch;
+}
 .emoji-btn {
-  margin-left: 6px;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  padding: 2px 8px;
 }
 .emoji-btn :deep(.cmd-icon) {
-  width: 14px;
-  height: 14px;
+  width: 15px;
+  height: 15px;
 }
 /* bodyのmargin(5px)を打ち消し、レガシーのbody背景色のように全面を塗る。 */
 .house-page {
