@@ -14,7 +14,7 @@ import (
 )
 
 // UserAgent identifies this app to the instance.
-const UserAgent = "TOWN/1.0 (+https://github.com/shiroha-a/town-rewrite)"
+const UserAgent = "TOWN/1.0 (+https://github.com/shiroha-a/town)"
 
 // Limits for outbound calls to a user-supplied instance.
 const (

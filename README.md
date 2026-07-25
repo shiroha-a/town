@@ -1,4 +1,4 @@
-# town-rewrite
+# town
 
 2000年代のCGIゲーム「TOWN ver.1.40」を Go + Vue 3 + PostgreSQL + Redis で作り直したものです。
 

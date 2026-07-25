@@ -1,3 +1,5 @@
+# プロジェクト名はボリューム名(town-rewrite_pgdata 等)の接頭辞になる。変えると
+# 既存環境のDBが別物になってしまうため、リポジトリ名を town に変えた後も据え置く。
 name: town-rewrite
 
 services:
