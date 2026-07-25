@@ -34,7 +34,15 @@ func (s *Server) emojiList(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"host": host, "emojis": items})
+	// 既に判定済みのものはピッカー側で印を付けられるよう一緒に返す。
+	verdicts, err := s.emojis.Verdicts(r.Context(), host)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"host": host, "emojis": items, "verdicts": verdicts,
+	})
 }
 
 type emojiResolveReq struct {

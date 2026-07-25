@@ -20,6 +20,25 @@ const query = ref('');
 const loading = ref(false);
 const message = ref('');
 const busyName = ref('');
+// 判定済みの絵文字。'ok' か拒否理由が入る。使えないものに印を付けるために持つ。
+const verdicts = ref<Record<string, string>>({});
+
+const REASON_LABEL: Record<string, string> = {
+  no_license: 'ライセンスの表記がありません',
+  sensitive: 'センシティブ指定です',
+  local_only: '連合しない設定です',
+  not_found: '見つかりませんでした',
+};
+
+function rejectedReason(name: string): string | null {
+  const v = verdicts.value[name];
+  return v && v !== 'ok' ? v : null;
+}
+
+function tip(name: string): string {
+  const r = rejectedReason(name);
+  return r ? `:${name}: — 使えません（${REASON_LABEL[r] ?? r}）` : `:${name}:`;
+}
 
 const categories = computed(() => {
   const set = new Set<string>();
@@ -47,6 +66,7 @@ async function load(h?: string) {
     host.value = res.host;
     hostInput.value = res.host;
     items.value = res.emojis;
+    verdicts.value = res.verdicts ?? {};
     category.value = '';
   } catch (e) {
     message.value = e instanceof Error ? e.message : String(e);
@@ -64,8 +84,11 @@ async function pick(e: PickerEmoji) {
     const res = await api.resolveEmoji(host.value, e.name);
     if (!res.allowed) {
       message.value = res.message ?? 'この絵文字は使えません。';
+      // その場で印を付ける。押すまで分からないままにしない。
+      verdicts.value = { ...verdicts.value, [e.name]: res.reason ?? 'no_license' };
       return;
     }
+    verdicts.value = { ...verdicts.value, [e.name]: 'ok' };
     if (res.emoji) rememberEmoji(res.emoji);
     emit('pick', res.shortcode ?? `:${e.name}@${host.value}:`);
   } catch (err) {
@@ -112,8 +135,8 @@ onMounted(() => load());
             v-for="e in shown"
             :key="e.name"
             class="ep-item"
-            :class="{ busy: busyName === e.name }"
-            :title="`:${e.name}:`"
+            :class="{ busy: busyName === e.name, unusable: !!rejectedReason(e.name) }"
+            :title="tip(e.name)"
             @click="pick(e)"
           >
             <img :src="e.url" :alt="e.name" loading="lazy" />
@@ -224,6 +247,27 @@ onMounted(() => load());
 }
 .ep-item.busy {
   opacity: 0.4;
+}
+/* 使えないと判定済みの絵文字。灰色にして斜線を引く。押すと理由が出る
+   (拒否キャッシュが切れていれば再判定されて印が消える)。 */
+.ep-item.unusable {
+  position: relative;
+}
+.ep-item.unusable img {
+  filter: grayscale(1);
+  opacity: 0.35;
+}
+.ep-item.unusable::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  background: linear-gradient(
+    to bottom right,
+    transparent calc(50% - 1px),
+    #c33 calc(50% - 1px),
+    #c33 calc(50% + 1px),
+    transparent calc(50% + 1px)
+  );
 }
 .ep-item img {
   width: 30px;

@@ -1143,7 +1143,7 @@ export const api = {
   getPlayer: (id: number) => request<Player>('GET', `/players/${id}`),
   listPlayers: () => request<PublicSummary[]>('GET', '/players'),
   emojiList: (host?: string) =>
-    request<{ host: string; emojis: PickerEmoji[] }>(
+    request<{ host: string; emojis: PickerEmoji[]; verdicts: Record<string, string> }>(
       'GET',
       `/emojis${host ? `?host=${encodeURIComponent(host)}` : ''}`,
     ),

@@ -277,6 +277,50 @@ func (s *Service) reject(ctx context.Context, host, name, reason string) error {
 	return err
 }
 
+// VerdictOK marks an emoji already known to be usable.
+const VerdictOK = "ok"
+
+// Verdicts returns what we already know about one instance's emoji: VerdictOK
+// for approved ones, the refusal reason for refused ones, nothing for the ones
+// never picked. ピッカーで「使えない絵文字」に印を付けるために使う。
+//
+// A refusal is reported however old it is: the mark is more useful than being
+// strictly current, and picking one anyway re-checks it once the reject cache
+// has expired.
+func (s *Service) Verdicts(ctx context.Context, host string) (map[string]string, error) {
+	out := map[string]string{}
+	rows, err := s.pool.Query(ctx,
+		`SELECT name, reason FROM misskey_emoji_rejects WHERE host = $1`, host)
+	if err != nil {
+		return nil, fmt.Errorf("list emoji rejects: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name, reason string
+		if err := rows.Scan(&name, &reason); err != nil {
+			return nil, err
+		}
+		out[name] = reason
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	okRows, err := s.pool.Query(ctx, `SELECT name FROM misskey_emojis WHERE host = $1`, host)
+	if err != nil {
+		return nil, fmt.Errorf("list emoji verdicts: %w", err)
+	}
+	defer okRows.Close()
+	for okRows.Next() {
+		var name string
+		if err := okRows.Scan(&name); err != nil {
+			return nil, err
+		}
+		out[name] = VerdictOK
+	}
+	return out, okRows.Err()
+}
+
 // Used returns every emoji approved so far, for the client to render posts with.
 // Only ever-used emoji land in this table, so it stays small; rendering never
 // triggers an external fetch — an unknown shortcode stays as text.
