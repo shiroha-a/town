@@ -67,6 +67,7 @@ func Default() []Facility {
 		{Key: "yakuba", Img: "yakuba", Alt: "役場（住民名鑑）", Col: 6, Row: 7, Ready: true},
 		{Key: "tsuri", Img: "tsuri", Alt: "釣りゲーム", Col: 2, Row: 9, Ready: true},
 		{Key: "gifutoya", Img: "gifutoya", Alt: "ギフト屋", Col: 12, Row: 9, Ready: true},
+		{Key: "tokuten", Img: "tokuten", Alt: "特典交換所", Col: 6, Row: 9, Ready: true},
 		{Key: "prof", Img: "prof", Alt: "プロフィール", Col: 14, Row: 11, Ready: false},
 	}
 }

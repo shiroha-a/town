@@ -34,6 +34,7 @@ import (
 	"github.com/shiroha-a/town/internal/player"
 	"github.com/shiroha-a/town/internal/ranking"
 	"github.com/shiroha-a/town/internal/rng"
+	"github.com/shiroha-a/town/internal/serial"
 	"github.com/shiroha-a/town/internal/settings"
 	"github.com/shiroha-a/town/internal/stock"
 	"github.com/shiroha-a/town/internal/townmap"
@@ -146,7 +147,7 @@ func setup(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 		pool.Close()
 		t.Fatalf("townmap set: %v", err)
 	}
-	srv := httptest.NewServer(httpapi.NewServer(svc, actions, contentSvc, st, tmap, stock.New(pool), keiba.New(pool, rng.New(7)), mail.New(pool, time.UTC, 5), greeting.New(pool), attendance.New(pool, time.UTC, 5), cleague.New(pool), news.New(pool), ranking.New(pool)))
+	srv := httptest.NewServer(httpapi.NewServer(svc, actions, contentSvc, st, tmap, stock.New(pool), keiba.New(pool, rng.New(7)), mail.New(pool, time.UTC, 5), greeting.New(pool), attendance.New(pool, time.UTC, 5), cleague.New(pool), news.New(pool), ranking.New(pool), serial.New(pool, rng.New(3))))
 	t.Cleanup(func() {
 		srv.Close()
 		pool.Close()

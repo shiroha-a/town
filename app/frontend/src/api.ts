@@ -187,6 +187,38 @@ export interface FishingPickResp {
   result: FishingResult;
 }
 
+// シリアルコード(特典)。
+export interface SerialCode {
+  id: number;
+  code: string;
+  label: string;
+  message: string;
+  effect: string; // 効果op配列のJSON文字列
+  reward_item_id: number | null;
+  reward_item_name: string;
+  reward_item_uses: number;
+  max_uses: number; // 0=無制限
+  used_count: number;
+  starts_at: string | null;
+  ends_at: string | null;
+  enabled: boolean;
+  created_at: string;
+}
+export interface SerialUse {
+  player_id: number;
+  player_name: string;
+  used_at: string;
+}
+export interface SerialRedeemResult {
+  message: string;
+  item_name: string;
+  item_uses: number;
+}
+export interface SerialRedeemResp {
+  player: Player;
+  result: SerialRedeemResult;
+}
+
 // ギフト屋。
 export interface Gift {
   id: number;
@@ -1008,6 +1040,11 @@ export const api = {
       card,
       idempotency_key: newIdempotencyKey(),
     }),
+  redeemSerial: (id: number, code: string) =>
+    request<SerialRedeemResp>('POST', `/players/${id}/serial/redeem`, {
+      code,
+      idempotency_key: newIdempotencyKey(),
+    }),
   giftShop: (id: number) => request<GiftShopState>('GET', `/players/${id}/gifts`),
   giftConvert: (id: number, itemId: number, uses: number) =>
     request<Player>('POST', `/players/${id}/gifts/convert`, {
@@ -1015,6 +1052,16 @@ export const api = {
       uses,
       idempotency_key: newIdempotencyKey(),
     }),
+  adminSerials: (actingId: number) =>
+    request<SerialCode[]>('GET', '/admin/serials', undefined, adminHeaders(actingId)),
+  adminCreateSerial: (actingId: number, c: Partial<SerialCode>) =>
+    request<SerialCode>('POST', '/admin/serials', c, adminHeaders(actingId)),
+  adminUpdateSerial: (actingId: number, c: SerialCode) =>
+    request<SerialCode>('PUT', `/admin/serials/${c.id}`, c, adminHeaders(actingId)),
+  adminDeleteSerial: (actingId: number, sid: number) =>
+    request<{ deleted: boolean }>('DELETE', `/admin/serials/${sid}`, undefined, adminHeaders(actingId)),
+  adminSerialUses: (actingId: number, sid: number) =>
+    request<SerialUse[]>('GET', `/admin/serials/${sid}/uses`, undefined, adminHeaders(actingId)),
   rankingKeys: () => request<RankingKey[]>('GET', '/ranking/keys'),
   ranking: (key: string, self: number) => request<RankingResult>('GET', `/ranking?key=${key}&self=${self}`),
   townMap: () => request<TownFacility[]>('GET', '/townmap'),
