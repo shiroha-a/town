@@ -8,7 +8,7 @@ playwright-report/
 blob-report/
 
 # SVGアセット確認用のローカルテストページ(本番には含めない)
-app/frontend/public/svg-preview.html
+frontend/public/svg-preview.html
 
 # E2Eテスト用に自動生成されるゲームインスタンス(scripts/reset_test_data.shで再生成)
 town_test/
