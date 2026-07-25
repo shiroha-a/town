@@ -1,9 +1,15 @@
-// Package config loads the backend configuration from a YAML file
-// (default.yml) with environment-variable overrides for containers.
+// Package config loads the backend infrastructure configuration: the DB and
+// Redis addresses, the listen address and the public base URL. ゲームの設定は
+// ここではなくDBにあり、管理画面から編集する(internal/settings)。
+//
+// 設定ファイル(既定 default.yml)は任意で、環境変数だけでも起動できる。
+// リポジトリには default.yml.example だけを置き、実ファイルは環境ごとに作る。
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"strings"
 	"time"
@@ -104,14 +110,20 @@ func Load() (*Config, error) {
 	if path == "" {
 		path = "default.yml"
 	}
+	var c Config
 	b, err := os.ReadFile(path)
-	if err != nil {
+	switch {
+	case err == nil:
+		if err := yaml.Unmarshal(b, &c); err != nil {
+			return nil, fmt.Errorf("parse config: %w", err)
+		}
+	case errors.Is(err, fs.ErrNotExist) && os.Getenv("TOWN_CONFIG") == "":
+		// 設定ファイルは任意。コンテナのように環境変数だけで動かす場合は置かない。
+		// TOWN_CONFIG で明示されたパスが無い場合だけはエラーにする(打ち間違い対策)。
+	default:
 		return nil, fmt.Errorf("read config %s: %w", path, err)
 	}
-	var c Config
-	if err := yaml.Unmarshal(b, &c); err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
-	}
+	applyDefaults(&c)
 	if v := os.Getenv("TOWN_HTTP_ADDR"); v != "" {
 		c.Server.HTTPAddr = v
 	}
@@ -134,4 +146,27 @@ func Load() (*Config, error) {
 		c.Server.AppName = "TOWN"
 	}
 	return &c, nil
+}
+
+// applyDefaults fills the values a bare environment needs to boot. 設定ファイルを
+// 置かずに環境変数だけで動かせるよう、ここに開発用の既定を持つ。
+func applyDefaults(c *Config) {
+	if c.Server.HTTPAddr == "" {
+		c.Server.HTTPAddr = ":8090"
+	}
+	if c.Server.BaseURL == "" {
+		c.Server.BaseURL = "http://localhost:5173"
+	}
+	if c.Database.URL == "" {
+		c.Database.URL = "postgres://town:town@localhost:55432/town?sslmode=disable"
+	}
+	if c.Redis.Addr == "" {
+		c.Redis.Addr = "localhost:56379"
+	}
+	if c.Worker.TickInterval.Std() == 0 {
+		c.Worker.TickInterval = Duration(10 * time.Second)
+	}
+	if c.Worker.LeaderLockTTL.Std() == 0 {
+		c.Worker.LeaderLockTTL = Duration(30 * time.Second)
+	}
 }

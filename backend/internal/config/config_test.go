@@ -77,3 +77,35 @@ func TestAllowedOrigins(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadWithoutFileUsesDefaults(t *testing.T) {
+	// 設定ファイルを置かない環境(コンテナ)でも起動できること。
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv("TOWN_CONFIG", "")
+
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load() without a config file: %v", err)
+	}
+	if c.Server.HTTPAddr != ":8090" {
+		t.Errorf("HTTPAddr = %q", c.Server.HTTPAddr)
+	}
+	if c.Database.URL == "" || c.Redis.Addr == "" {
+		t.Error("DB/Redisの既定が空")
+	}
+	if c.Worker.TickInterval.Std() == 0 || c.Worker.LeaderLockTTL.Std() == 0 {
+		t.Error("workerの既定が0")
+	}
+	if c.Server.AppName != "TOWN" {
+		t.Errorf("AppName = %q", c.Server.AppName)
+	}
+}
+
+func TestLoadMissingExplicitConfigIsAnError(t *testing.T) {
+	// TOWN_CONFIG で指定したパスが無い場合は、打ち間違いに気づけるようエラーにする。
+	t.Setenv("TOWN_CONFIG", filepath.Join(t.TempDir(), "no-such.yml"))
+	if _, err := Load(); err == nil {
+		t.Error("Load() = nil, want error")
+	}
+}

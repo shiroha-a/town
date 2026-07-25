@@ -22,3 +22,4 @@ town_test/
 
 # 環境ごとの設定(公開アドレス・暗号鍵など)。example をコピーして使う。
 deploy/compose.override.yaml
+backend/default.yml

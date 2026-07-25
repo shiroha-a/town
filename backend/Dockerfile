@@ -10,5 +10,5 @@ FROM alpine:3.20
 RUN apk add --no-cache tzdata ca-certificates
 WORKDIR /app
 COPY --from=build /out/town /app/town
-COPY default.yml /app/default.yml
+# 設定ファイルは同梱しない。コンテナは環境変数(TOWN_DATABASE_URL 等)で設定する。
 ENTRYPOINT ["/app/town"]

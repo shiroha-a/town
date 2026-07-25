@@ -45,7 +45,8 @@ UIも当時の雰囲気を保っています。一方、以下は現代的な作
 ## 動かす
 
 ```sh
-docker compose -f deploy/compose.yaml up -d --build
+cp deploy/compose.override.yaml.example deploy/compose.override.yaml   # 公開アドレスと鍵を書く
+docker compose -f deploy/compose.yaml -f deploy/compose.override.yaml up -d --build
 ```
 
 | URL | 内容 |
@@ -61,6 +62,7 @@ DBのマイグレーションはwebの起動時に自動で適用されます。
 ```sh
 docker compose -f deploy/compose.yaml up -d postgres redis
 cd backend
+cp default.yml.example default.yml   # 設定ファイルは任意(環境変数だけでも動く)
 go run ./cmd/town web      # REST API
 go run ./cmd/town worker   # 時間進行(別ターミナル)
 ```
