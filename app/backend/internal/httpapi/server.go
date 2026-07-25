@@ -11,6 +11,7 @@ import (
 	"github.com/shiroha-a/town/internal/attendance"
 	"github.com/shiroha-a/town/internal/cleague"
 	"github.com/shiroha-a/town/internal/content"
+	"github.com/shiroha-a/town/internal/emoji"
 	"github.com/shiroha-a/town/internal/greeting"
 	"github.com/shiroha-a/town/internal/keiba"
 	"github.com/shiroha-a/town/internal/mail"
@@ -50,6 +51,7 @@ type Server struct {
 	instanceRules  *miauth.Rules
 	sessions       *session.Store
 	profiles       *profile.Service
+	emojis         *emoji.Service
 	appName        string
 	allowedOrigins []string
 }
@@ -70,6 +72,7 @@ type AuthDeps struct {
 	InstanceRules  *miauth.Rules
 	Sessions       *session.Store
 	Profiles       *profile.Service
+	Emojis         *emoji.Service
 	AppName        string
 	AllowedOrigins []string
 }
@@ -78,7 +81,7 @@ type AuthDeps struct {
 func NewServer(players *player.Service, actions *action.Service, contentSvc *content.Service, st *settings.Store, tmap *townmap.Store, stockSvc *stock.Service, keibaSvc *keiba.Service, mailSvc *mail.Service, greetingSvc *greeting.Service, attendanceSvc *attendance.Service, cleagueSvc *cleague.Service, newsSvc *news.Service, rankingSvc *ranking.Service, serialSvc *serial.Service, auth AuthDeps) http.Handler {
 	s := &Server{players: players, actions: actions, content: contentSvc, settings: st, townmap: tmap, stock: stockSvc, keiba: keibaSvc, mail: mailSvc, greeting: greetingSvc, attendance: attendanceSvc, cleague: cleagueSvc, news: newsSvc, ranking: rankingSvc, serial: serialSvc, greetHub: newGreetHub(),
 		pool: auth.Pool, miauth: auth.MiAuth, instanceRules: auth.InstanceRules,
-		sessions: auth.Sessions, profiles: auth.Profiles,
+		sessions: auth.Sessions, profiles: auth.Profiles, emojis: auth.Emojis,
 		appName: auth.AppName, allowedOrigins: auth.AllowedOrigins}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", s.health)
@@ -215,6 +218,11 @@ func NewServer(players *player.Service, actions *action.Service, contentSvc *con
 	mux.HandleFunc("GET /api/v1/players/{id}/misskey", s.misskeyProfile)
 	mux.HandleFunc("POST /api/v1/misskey/follow", s.misskeyFollow)
 	mux.HandleFunc("POST /api/v1/misskey/unfollow", s.misskeyUnfollow)
+
+	// カスタム絵文字。使われた絵文字の辞書は投稿の描画に要るので公開GET。
+	mux.HandleFunc("GET /api/v1/emojis", s.emojiList)
+	mux.HandleFunc("POST /api/v1/emojis/resolve", s.emojiResolve)
+	mux.HandleFunc("GET /api/v1/emojis/used", s.emojiUsed)
 
 	// 管理者API(認可はauthGuardで一括: セッション + adminロール)
 	mux.HandleFunc("POST /api/v1/admin/items", s.createItem)

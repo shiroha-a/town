@@ -26,6 +26,7 @@ import (
 	"github.com/shiroha-a/town/internal/cleague"
 	"github.com/shiroha-a/town/internal/content"
 	"github.com/shiroha-a/town/internal/db"
+	"github.com/shiroha-a/town/internal/emoji"
 	"github.com/shiroha-a/town/internal/gametime"
 	"github.com/shiroha-a/town/internal/greeting"
 	"github.com/shiroha-a/town/internal/httpapi"
@@ -167,6 +168,7 @@ func setup(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 			InstanceRules:  miauth.NewRules(pool),
 			Sessions:       sessions,
 			Profiles:       profile.New(pool, miauth.NewClient(), svc),
+			Emojis:         emoji.New(pool, miauth.NewClient()),
 			AppName:        "TOWN",
 			AllowedOrigins: []string{"all"},
 		}))

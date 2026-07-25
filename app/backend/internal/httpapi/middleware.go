@@ -42,6 +42,10 @@ var residentViewPatterns = map[string]bool{
 var loginRequiredPatterns = map[string]bool{
 	"POST /api/v1/misskey/follow":   true,
 	"POST /api/v1/misskey/unfollow": true,
+	// 絵文字ピッカーと、その選択の検証。相手インスタンスへ問い合わせが飛ぶので
+	// 未ログインには開けない(描画用の辞書 /emojis/used は公開GET)。
+	"GET /api/v1/emojis":          true,
+	"POST /api/v1/emojis/resolve": true,
 }
 
 // pathPlayerID pulls the {id} out of /api/v1/players/{id}/... .

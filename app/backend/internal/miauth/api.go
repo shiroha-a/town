@@ -97,3 +97,54 @@ func Acct(username, host, ownHost string) string {
 	}
 	return "@" + username + "@" + host
 }
+
+// EmojiSimple is one entry of /api/emojis. Note localOnly and isSensitive are
+// declared optional there, so an instance may omit them — never treat a missing
+// flag as false. license is not included at all; /api/emoji has it.
+type EmojiSimple struct {
+	Name     string   `json:"name"`
+	Category string   `json:"category"`
+	URL      string   `json:"url"`
+	Aliases  []string `json:"aliases"`
+	// Pointers so "absent" is distinguishable from "false".
+	LocalOnly   *bool `json:"localOnly"`
+	IsSensitive *bool `json:"isSensitive"`
+}
+
+// EmojiDetailed is /api/emoji?name=X, where the three fields we gate on are all
+// guaranteed to be present.
+type EmojiDetailed struct {
+	Name        string   `json:"name"`
+	Category    string   `json:"category"`
+	URL         string   `json:"url"`
+	Aliases     []string `json:"aliases"`
+	License     string   `json:"license"`
+	Host        string   `json:"host"`
+	LocalOnly   bool     `json:"localOnly"`
+	IsSensitive bool     `json:"isSensitive"`
+}
+
+// Emojis lists an instance's own custom emoji. Both emoji endpoints query
+// `where: { host: IsNull() }`, so an instance only ever returns its own — the
+// host we ask is the emoji's origin. requireCredential:false, cached 1h upstream.
+func (c *Client) Emojis(ctx context.Context, host string) ([]EmojiSimple, error) {
+	var res struct {
+		Emojis []EmojiSimple `json:"emojis"`
+	}
+	if err := c.postJSON(ctx, host, "/api/emojis", "", nil, &res); err != nil {
+		return nil, err
+	}
+	return res.Emojis, nil
+}
+
+// Emoji fetches one emoji in full, including the license we require.
+func (c *Client) Emoji(ctx context.Context, host, name string) (*EmojiDetailed, error) {
+	var e EmojiDetailed
+	if err := c.postJSON(ctx, host, "/api/emoji", "", map[string]any{"name": name}, &e); err != nil {
+		return nil, err
+	}
+	if e.Name == "" {
+		return nil, fmt.Errorf("その絵文字は見つかりません。")
+	}
+	return &e, nil
+}

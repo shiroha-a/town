@@ -16,6 +16,7 @@ import (
 	"github.com/shiroha-a/town/internal/config"
 	"github.com/shiroha-a/town/internal/content"
 	"github.com/shiroha-a/town/internal/db"
+	"github.com/shiroha-a/town/internal/emoji"
 	"github.com/shiroha-a/town/internal/greeting"
 	"github.com/shiroha-a/town/internal/httpapi"
 	"github.com/shiroha-a/town/internal/keiba"
@@ -126,12 +127,14 @@ func Run(ctx context.Context, mode string, cfg *config.Config) error {
 	}
 
 	profiles := profile.New(pool, miauthClient, players)
+	emojis := emoji.New(pool, miauthClient)
 	authDeps := httpapi.AuthDeps{
 		Pool:           pool,
 		MiAuth:         miauthClient,
 		InstanceRules:  instanceRules,
 		Sessions:       sessions,
 		Profiles:       profiles,
+		Emojis:         emojis,
 		AppName:        cfg.Server.AppName,
 		AllowedOrigins: cfg.Server.AllowedOrigins,
 	}
