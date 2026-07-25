@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { api, type Player } from '../api';
 
 // MiAuthログイン。自分のMisskeyインスタンスを入力すると、そのインスタンスの
 // 承認画面へ飛び、戻ってくるとログインが完了する(アプリの事前登録は不要)。
+const props = defineProps<{ loggedOut?: boolean; loggedOutHost?: string }>();
 const emit = defineEmits<{ login: [player: Player] }>();
 
 const STORAGE_KEY = 'town.instance';
@@ -34,6 +35,12 @@ onMounted(async () => {
   } finally {
     exchanging.value = false;
   }
+});
+
+// ログアウト直後は、残ったアクセストークンを消せる場所を案内する。
+const tokenSettingsURL = computed(() => {
+  const host = props.loggedOutHost?.trim() || instance.value.trim();
+  return host ? `https://${host}/settings/apps` : '';
 });
 
 async function login() {
@@ -82,9 +89,18 @@ async function login() {
           {{ busy ? '接続中…' : 'ログイン' }}
         </button>
       </div>
+      <p v-if="props.loggedOut" class="logged-out">
+        ログアウトしました。<br />
+        使わなくなったアクセストークンは
+        <a v-if="tokenSettingsURL" :href="tokenSettingsURL" target="_blank" rel="noopener noreferrer">
+          Misskeyの設定
+        </a>
+        <span v-else>Misskeyの設定</span>
+        から削除できます（設定 → アプリ）。
+      </p>
       <p class="note">
         ※初めての方はこの操作でそのまま登録されます。<br />
-        ※アカウント情報の閲覧と、ゲーム内からのフォローの許可をお願いしています。
+        ※ゲーム内から他の住民をフォローするための許可だけをお願いしています。
       </p>
     </template>
 
@@ -125,6 +141,15 @@ h2 {
   flex: 1 1 200px;
   font-size: 15px;
   padding: 4px 6px;
+}
+.logged-out {
+  background: #f4f8ee;
+  border: 1px solid #cfd9bd;
+  font-size: 12px;
+  line-height: 1.7;
+  color: #445;
+  padding: 8px 10px;
+  margin: 12px 0 0;
 }
 .note {
   font-size: 11px;

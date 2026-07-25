@@ -55,7 +55,23 @@ function onLogin(p: Player) {
 function onUpdate(p: Player) {
   player.value = p;
 }
+// ログアウト直後だけログイン画面に後始末の案内を出す。ホストは直前の
+// プレイヤーから取る(このブラウザでログインしていないと入力欄は空のため)。
+const loggedOut = ref(false);
+const loggedOutHost = ref('');
+
 async function onLogout() {
+  // MiAuthはログインのたびにMisskey側で新しいアクセストークンを発行する。
+  // i/revoke-token は secure:true でアクセストークンから呼べないため、
+  // こちらから古いトークンを消せない。無駄なログアウトを減らすために断りを入れる。
+  const ok = window.confirm(
+    'ログアウトしますか？\n\n' +
+      '次にログインすると、Misskey側で新しいアクセストークンが発行されます。' +
+      'Misskeyの仕様で古いトークンをこちらから削除できないため、使わないトークンが残ります。\n\n' +
+      'このブラウザを閉じるだけならログアウトは不要です（30日間はそのまま入れます）。',
+  );
+  if (!ok) return;
+  loggedOutHost.value = player.value?.instance_host ?? '';
   try {
     await api.authLogout();
   } catch {
@@ -63,6 +79,7 @@ async function onLogout() {
   }
   player.value = null;
   view.value = 'town';
+  loggedOut.value = true;
 }
 // 家訪問(view='house')で開く家のID。街の家クリックからnavigate経由で渡される。
 const houseId = ref<number | null>(null);
@@ -124,7 +141,7 @@ const facilityTitles: Record<string, string> = {
   </template>
   <template v-else-if="!player">
     <h1 class="town-title">Ｔｏｗｎ</h1>
-    <LoginView @login="onLogin" />
+    <LoginView :logged-out="loggedOut" :logged-out-host="loggedOutHost" @login="onLogin" />
   </template>
   <template v-else>
     <TownView v-if="view === 'town'" :player="player" @navigate="navigate" @reload="reload" @logout="onLogout" />
