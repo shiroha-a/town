@@ -1105,6 +1105,8 @@ export type MisskeyProfile = {
   is_locked: boolean;
   fetched_at: string;
   profile_url: string;
+  /** 名前・自己紹介で使われている絵文字の shortcode->url。 */
+  emojis: Record<string, string>;
   /** 相手インスタンスに繋がらずキャッシュを表示している。 */
   stale: boolean;
 };

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import { api, type Player, type PublicSummary, type MisskeyProfileResp } from '../api';
+import RichText from './RichText.vue';
 
 // prof施設。役場の住民名鑑がゲーム内ステータスを見る場所なのに対し、ここは
 // 住民のMisskey側の顔を見る場所。ゲーム内からリモートフォローもできる。
@@ -134,7 +135,7 @@ onMounted(async () => {
             <img v-if="prof.avatar_url" class="avatar" :src="prof.avatar_url" alt="" />
             <div class="names">
               <div class="dname">
-                {{ shownName }}
+                <RichText :text="shownName" :emojis="prof.emojis" />
                 <span class="badge" v-if="prof.is_bot">Bot</span>
                 <span class="badge" v-if="prof.is_locked">承認制</span>
               </div>
@@ -144,7 +145,9 @@ onMounted(async () => {
           </div>
 
           <!-- MFMは描画せずそのまま文字として出す(表示崩れとXSSを避ける) -->
-          <div class="desc" v-if="prof.description">{{ prof.description }}</div>
+          <div class="desc" v-if="prof.description">
+            <RichText :text="prof.description" :emojis="prof.emojis" />
+          </div>
           <div class="desc empty" v-else>自己紹介はありません。</div>
 
           <div class="counts">

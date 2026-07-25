@@ -167,7 +167,7 @@ func setup(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 			MiAuth:         miauth.NewClient(),
 			InstanceRules:  miauth.NewRules(pool),
 			Sessions:       sessions,
-			Profiles:       profile.New(pool, miauth.NewClient(), svc),
+			Profiles:       profile.New(pool, miauth.NewClient(), svc, emoji.New(pool, miauth.NewClient())),
 			Emojis:         emoji.New(pool, miauth.NewClient()),
 			AppName:        "TOWN",
 			AllowedOrigins: []string{"all"},

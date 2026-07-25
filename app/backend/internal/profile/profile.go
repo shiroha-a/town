@@ -14,11 +14,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/shiroha-a/town/internal/emoji"
 	"github.com/shiroha-a/town/internal/miauth"
 	"github.com/shiroha-a/town/internal/player"
 )
@@ -36,11 +38,13 @@ type Service struct {
 	pool    *pgxpool.Pool
 	mi      *miauth.Client
 	players *player.Service
+	emojis  *emoji.Service
 }
 
-// New builds the service.
-func New(pool *pgxpool.Pool, mi *miauth.Client, players *player.Service) *Service {
-	return &Service{pool: pool, mi: mi, players: players}
+// New builds the service. emojis may be nil, in which case profile text keeps
+// its shortcodes as plain text.
+func New(pool *pgxpool.Pool, mi *miauth.Client, players *player.Service, emojis *emoji.Service) *Service {
+	return &Service{pool: pool, mi: mi, players: players, emojis: emojis}
 }
 
 // Profile is a resident's Misskey account as the game shows it.
@@ -61,6 +65,10 @@ type Profile struct {
 	IsLocked       bool      `json:"is_locked"`
 	FetchedAt      time.Time `json:"fetched_at"`
 	ProfileURL     string    `json:"profile_url"`
+	// Emojis maps the shortcodes in Name/Description to their image URL. これは
+	// 相手インスタンスが自分の利用者を描画するために配っているもので、住民が
+	// 投稿に使う絵文字(ライセンス必須)とは別枠で扱う。
+	Emojis map[string]string `json:"emojis"`
 	// Stale marks a profile served from cache because the instance could not be
 	// reached. The UI says so rather than pretending the counts are current.
 	Stale bool `json:"stale"`
@@ -101,11 +109,11 @@ func (s *Service) cached(ctx context.Context, playerID int64) (*Profile, bool, e
 	err := s.pool.QueryRow(ctx,
 		`SELECT username, host, name, avatar_url, banner_url, description,
 		        followers_count, following_count, notes_count,
-		        is_bot, is_cat, is_locked, fetched_at
+		        is_bot, is_cat, is_locked, fetched_at, emojis
 		   FROM misskey_profiles WHERE player_id = $1`, playerID).
 		Scan(&p.Username, &host, &p.Name, &p.AvatarURL, &p.BannerURL, &p.Description,
 			&p.FollowersCount, &p.FollowingCount, &p.NotesCount,
-			&p.IsBot, &p.IsCat, &p.IsLocked, &p.FetchedAt)
+			&p.IsBot, &p.IsCat, &p.IsLocked, &p.FetchedAt, &p.Emojis)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, false, nil
 	}
@@ -147,20 +155,22 @@ func (s *Service) fetch(ctx context.Context, playerID int64) (*Profile, error) {
 	if err != nil {
 		return nil, err
 	}
+	emojis := s.profileEmojis(ctx, home.InstanceHost, u)
 	if _, err := s.pool.Exec(ctx,
 		`INSERT INTO misskey_profiles (player_id, username, host, name, avatar_url, banner_url,
-		     description, followers_count, following_count, notes_count, is_bot, is_cat, is_locked, fetched_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, now())
+		     description, followers_count, following_count, notes_count, is_bot, is_cat, is_locked,
+		     emojis, fetched_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, now())
 		 ON CONFLICT (player_id) DO UPDATE SET
 		     username = EXCLUDED.username, host = EXCLUDED.host, name = EXCLUDED.name,
 		     avatar_url = EXCLUDED.avatar_url, banner_url = EXCLUDED.banner_url,
 		     description = EXCLUDED.description, followers_count = EXCLUDED.followers_count,
 		     following_count = EXCLUDED.following_count, notes_count = EXCLUDED.notes_count,
 		     is_bot = EXCLUDED.is_bot, is_cat = EXCLUDED.is_cat, is_locked = EXCLUDED.is_locked,
-		     fetched_at = now()`,
+		     emojis = EXCLUDED.emojis, fetched_at = now()`,
 		playerID, u.Username, nullable(u.Host), u.Name, u.AvatarURL, u.BannerURL,
 		u.Description, u.FollowersCount, u.FollowingCount, u.NotesCount,
-		u.IsBot, u.IsCat, u.IsLocked); err != nil {
+		u.IsBot, u.IsCat, u.IsLocked, emojis); err != nil {
 		return nil, fmt.Errorf("save profile: %w", err)
 	}
 	p := &Profile{
@@ -168,10 +178,49 @@ func (s *Service) fetch(ctx context.Context, playerID int64) (*Profile, error) {
 		AvatarURL: u.AvatarURL, BannerURL: u.BannerURL, Description: u.Description,
 		FollowersCount: u.FollowersCount, FollowingCount: u.FollowingCount,
 		NotesCount: u.NotesCount, IsBot: u.IsBot, IsCat: u.IsCat, IsLocked: u.IsLocked,
-		FetchedAt: time.Now(),
+		FetchedAt: time.Now(), Emojis: emojis,
 	}
 	s.decorate(ctx, p, playerID)
 	return p, nil
+}
+
+// maxProfileEmojiLookups bounds how many emoji one profile may cost us.
+const maxProfileEmojiLookups = 10
+
+// bareShortcode matches :name: as it appears in a profile — no host, because
+// the emoji belong to the account's own instance.
+var bareShortcode = regexp.MustCompile(`:([a-zA-Z0-9_+-]+):`)
+
+// profileEmojis builds the shortcode->url map for the name and description.
+// インスタンスが返す emojis は user.emojis 列が空だと空になるので、足りない分は
+// そのインスタンスの絵文字一覧(ピッカーと共用・1時間キャッシュ)で補う。
+func (s *Service) profileEmojis(ctx context.Context, host string, u *miauth.UserDetailed) map[string]string {
+	out := map[string]string{}
+	for k, v := range u.Emojis {
+		out[k] = v
+	}
+	missing := map[string]bool{}
+	for _, m := range bareShortcode.FindAllStringSubmatch(u.Name+"\n"+u.Description, -1) {
+		if _, ok := out[m[1]]; !ok {
+			missing[m[1]] = true
+		}
+	}
+	if s.emojis == nil {
+		return out
+	}
+	// 一覧はインスタンスによっては数MBあるので、足りない分だけ1件ずつ引く。
+	// 引いた結果はプロフィールと一緒にキャッシュされるので、6時間は再取得しない。
+	n := 0
+	for name := range missing {
+		if n >= maxProfileEmojiLookups {
+			break
+		}
+		n++
+		if url, ok := s.emojis.URLOf(ctx, host, name); ok {
+			out[name] = url
+		}
+	}
+	return out
 }
 
 func nullable(s string) any {

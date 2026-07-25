@@ -22,6 +22,10 @@ type UserDetailed struct {
 	IsBot          bool   `json:"isBot"`
 	IsCat          bool   `json:"isCat"`
 	IsLocked       bool   `json:"isLocked"`
+	// Emojis maps the shortcodes used in name/description to their URL. The
+	// instance fills it from its own record of which emoji the user uses, so it
+	// can be empty even when the name clearly contains shortcodes.
+	Emojis map[string]string `json:"emojis"`
 	// Relations, only present when the call carried a token.
 	IsFollowing                    bool `json:"isFollowing"`
 	HasPendingFollowRequestFromYou bool `json:"hasPendingFollowRequestFromYou"`
@@ -131,7 +135,7 @@ func (c *Client) Emojis(ctx context.Context, host string) ([]EmojiSimple, error)
 	var res struct {
 		Emojis []EmojiSimple `json:"emojis"`
 	}
-	if err := c.postJSON(ctx, host, "/api/emojis", "", nil, &res); err != nil {
+	if err := c.postJSONLimited(ctx, host, "/api/emojis", "", nil, &res, maxEmojiListSize); err != nil {
 		return nil, err
 	}
 	return res.Emojis, nil

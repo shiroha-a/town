@@ -21,7 +21,10 @@ const (
 	dialTimeout     = 5 * time.Second
 	requestTimeout  = 10 * time.Second
 	maxResponseSize = 1 << 20 // 1MiB
-	maxRedirects    = 3
+	// maxEmojiListSize is for /api/emojis only: 大きなインスタンスの絵文字一覧は
+	// 数MBある(misskey.io で約3.2MB)。
+	maxEmojiListSize = 8 << 20 // 8MiB
+	maxRedirects     = 3
 )
 
 // Client talks to a Misskey instance. All connections are checked against
@@ -84,6 +87,11 @@ func NewClient() *Client {
 // postJSON sends a JSON POST to https://{host}{path} and decodes the response.
 // token is the caller's Misskey access token, or "" for endpoints that need none.
 func (c *Client) postJSON(ctx context.Context, host, path, token string, body, out any) error {
+	return c.postJSONLimited(ctx, host, path, token, body, out, maxResponseSize)
+}
+
+// postJSONLimited is postJSON with an explicit response size cap.
+func (c *Client) postJSONLimited(ctx context.Context, host, path, token string, body, out any, limit int64) error {
 	// Misskey(Fastify)は Content-Type: application/json で空ボディだと
 	// FST_ERR_CTP_EMPTY_JSON_BODY で拒否する。パラメータの無いエンドポイント
 	// (miauth check など)にも必ず空オブジェクトを送る。
@@ -130,7 +138,7 @@ func (c *Client) postJSON(ctx context.Context, host, path, token string, body, o
 		return fmt.Errorf("%s がエラーを返しました (HTTP %d) %s",
 			host, resp.StatusCode, strings.TrimSpace(string(snippet)))
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, limit))
 	if err != nil {
 		return fmt.Errorf("read response: %w", err)
 	}

@@ -126,8 +126,8 @@ func Run(ctx context.Context, mode string, cfg *config.Config) error {
 		logger.Warn("TOWN_TOKEN_KEY が未設定のため、Misskeyのアクセストークンは保存されません")
 	}
 
-	profiles := profile.New(pool, miauthClient, players)
 	emojis := emoji.New(pool, miauthClient)
+	profiles := profile.New(pool, miauthClient, players, emojis)
 	authDeps := httpapi.AuthDeps{
 		Pool:           pool,
 		MiAuth:         miauthClient,

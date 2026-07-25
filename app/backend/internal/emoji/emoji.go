@@ -321,6 +321,17 @@ func (s *Service) Verdicts(ctx context.Context, host string) (map[string]string,
 	return out, okRows.Err()
 }
 
+// URLOf returns just the image URL of one emoji, with none of the usage rules
+// applied. プロフィールの名前・自己紹介を描画するためだけのもので、住民が投稿に
+// 使う絵文字(ライセンス必須)には Resolve を使うこと。
+func (s *Service) URLOf(ctx context.Context, host, name string) (string, bool) {
+	d, err := s.mi.Emoji(ctx, strings.ToLower(host), name)
+	if err != nil || d.URL == "" {
+		return "", false
+	}
+	return d.URL, true
+}
+
 // Used returns every emoji approved so far, for the client to render posts with.
 // Only ever-used emoji land in this table, so it stays small; rendering never
 // triggers an external fetch — an unknown shortcode stays as text.

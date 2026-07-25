@@ -46,15 +46,21 @@ export { dict as emojiDict };
 export type Token =
   | { kind: 'text'; v: string }
   | { kind: 'link'; v: string }
-  | { kind: 'emoji'; v: string; emoji: UsedEmoji };
+  | { kind: 'emoji'; v: string; url: string; license?: string };
 
-const pattern = /(https?:\/\/[\w.~\-/?&+=:@%;#]+)|:([a-zA-Z0-9_+-]+)@([a-zA-Z0-9.-]+):/g;
+// :name@host: は投稿本文用(街の辞書を引く)、:name: はプロフィール用
+// (その相手のインスタンスの辞書を渡してもらう)。
+const pattern =
+  /(https?:\/\/[\w.~\-/?&+=:@%;#]+)|:([a-zA-Z0-9_+-]+)@([a-zA-Z0-9.-]+):|:([a-zA-Z0-9_+-]+):/g;
 
 /**
  * Splits text into plain runs, links and custom emoji. An emoji we have no url
  * for stays text, so nothing disappears from a post.
+ *
+ * @param local shortcode->url for text that carries its own dictionary
+ *   (a Misskey profile's name/description), where shortcodes have no host.
  */
-export function tokenize(text: string): Token[] {
+export function tokenize(text: string, local?: Record<string, string>): Token[] {
   const out: Token[] = [];
   let last = 0;
   for (const m of text.matchAll(pattern)) {
@@ -62,9 +68,13 @@ export function tokenize(text: string): Token[] {
     if (at > last) out.push({ kind: 'text', v: text.slice(last, at) });
     if (m[1]) {
       out.push({ kind: 'link', v: m[1] });
-    } else {
+    } else if (m[2]) {
       const e = lookupEmoji(m[2], m[3]);
-      if (e) out.push({ kind: 'emoji', v: m[0], emoji: e });
+      if (e) out.push({ kind: 'emoji', v: m[0], url: e.url, license: e.license });
+      else out.push({ kind: 'text', v: m[0] });
+    } else {
+      const url = local?.[m[4]];
+      if (url) out.push({ kind: 'emoji', v: m[0], url });
       else out.push({ kind: 'text', v: m[0] });
     }
     last = at + m[0].length;
