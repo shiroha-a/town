@@ -21,13 +21,34 @@ type Config struct {
 
 type ServerConfig struct {
 	HTTPAddr string `yaml:"http_addr"`
-	// AllowedOrigins lists the origins the SPA may be served from. MiAuth の
-	// コールバックURLはここに載っているオリジンからしか組み立てない(そうしないと
-	// Hostを詐称されてコールバックを攻撃者のサイトへ向けられ、session を奪われる)。
-	// 特別値 "all" は全許可。**テスト環境専用**で、本番では必ず列挙すること。
-	AllowedOrigins []string `yaml:"allowed_origins"`
+	// BaseURL is the public address of the site (例 https://town.example.com)。
+	// MiAuth のコールバックURLはここから組み立てる。
+	BaseURL string `yaml:"base_url"`
+	// ExtraOrigins lists additional origins the SPA may be served from, for
+	// access paths that are not the base URL (Tailscale や localhost など、
+	// テスト用の経路)。特別値 "all" は全許可で**テスト環境専用**。
+	//
+	// コールバックURLは許可されたオリジンからしか組み立てない。そうしないと
+	// Hostを詐称してコールバックを攻撃者のサイトへ向けられ、MiAuthのsessionを
+	// 奪われる。
+	ExtraOrigins []string `yaml:"extra_origins"`
 	// AppName は MiAuth の同意画面に出るアプリ名。
 	AppName string `yaml:"app_name"`
+}
+
+// AllowedOrigins returns the origins a login may come from: the base URL plus
+// any extras. 空の項目は落とす。
+func (c ServerConfig) AllowedOrigins() []string {
+	out := make([]string, 0, len(c.ExtraOrigins)+1)
+	if o := strings.TrimSuffix(strings.TrimSpace(c.BaseURL), "/"); o != "" {
+		out = append(out, o)
+	}
+	for _, e := range c.ExtraOrigins {
+		if o := strings.TrimSuffix(strings.TrimSpace(e), "/"); o != "" {
+			out = append(out, o)
+		}
+	}
+	return out
 }
 
 type DatabaseConfig struct {
@@ -100,8 +121,11 @@ func Load() (*Config, error) {
 	if v := os.Getenv("TOWN_REDIS_ADDR"); v != "" {
 		c.Redis.Addr = v
 	}
-	if v := os.Getenv("TOWN_ALLOWED_ORIGINS"); v != "" {
-		c.Server.AllowedOrigins = splitList(v)
+	if v := os.Getenv("TOWN_BASE_URL"); v != "" {
+		c.Server.BaseURL = v
+	}
+	if v := os.Getenv("TOWN_EXTRA_ORIGINS"); v != "" {
+		c.Server.ExtraOrigins = splitList(v)
 	}
 	if v := os.Getenv("TOWN_APP_NAME"); v != "" {
 		c.Server.AppName = v

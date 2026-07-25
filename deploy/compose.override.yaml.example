@@ -1,0 +1,47 @@
+# 環境ごとの設定のひな形。`compose.override.yaml` にコピーして使う
+# (compose.override.yaml は環境固有の値と秘密を含むためコミットしない)。
+#
+#   cp deploy/compose.override.yaml.example deploy/compose.override.yaml
+#   docker compose -f deploy/compose.yaml up -d --build
+#
+# ここに書くのはインフラと公開アドレスだけ。ゲームの設定(初期所持金・回復間隔・
+# クールタイムなど)はDBに入っていて、ゲーム内の管理者メニューから変更する。
+services:
+  web:
+    environment:
+      # 公開アドレス。MiAuthのコールバックURLはここから組み立てる。
+      # 実際にブラウザで開くURLと一致していないとログインできない。
+      TOWN_BASE_URL: "https://town.example.com"
+
+      # base_url 以外の経路からもアクセスする場合だけ設定する(カンマ区切り)。
+      # 例: 開発機のTailscale経由・localhost。本番だけなら空でよい。
+      # 特別値 "all" は全許可。**テスト環境専用**。
+      # TOWN_EXTRA_ORIGINS: "http://localhost:5173,http://box.tailnet.ts.net:5173"
+
+      # Misskeyの同意画面に出るアプリ名。
+      TOWN_APP_NAME: "TOWN"
+
+      # Misskeyアクセストークンの暗号鍵。未設定だとトークンを保存しないため、
+      # ゲーム内からのフォローが使えなくなる。
+      # 生成例: openssl rand -base64 32
+      TOWN_TOKEN_KEY: "CHANGE_ME"
+
+      # HTTPSでのみ公開するなら 1。素のHTTP(Tailscale等)でも開く環境では
+      # cookieが送られなくなるので 0 のままにする。
+      TOWN_COOKIE_SECURE: "0"
+
+  # 別のポートで動かしたいとき(同じホストで2環境立てる場合など)。
+  # ports は既定だと「追記」マージで元のポートも残るため、!override で置き換える。
+  #
+  # postgres:
+  #   ports: !override
+  #     - "55433:5432"
+  # redis:
+  #   ports: !override
+  #     - "56380:6379"
+  # web:
+  #   ports: !override
+  #     - "8091:8090"
+  # frontend:
+  #   ports: !override
+  #     - "5174:5173"

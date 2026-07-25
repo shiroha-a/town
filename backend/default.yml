@@ -2,6 +2,14 @@
 # DBに持ち、ゲーム内の管理者メニューから変更する。
 server:
   http_addr: ":8090"
+  # 公開アドレス。MiAuthのコールバックURLはここから組み立てる。
+  # 本番では TOWN_BASE_URL で実際のURLを指定する。
+  base_url: "http://localhost:5173"
+  # base_url 以外からもアクセスする場合に足す(Tailscale・別ホスト名など)。
+  # 特別値 "all" は全許可。テスト環境専用。
+  extra_origins: []
+  # MiAuthの同意画面に出るアプリ名。
+  app_name: "TOWN"
 
 database:
   # ホストから直接動かす場合のデフォルト。コンテナでは TOWN_DATABASE_URL で上書き。

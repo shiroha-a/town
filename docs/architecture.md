@@ -185,7 +185,8 @@ Vue 3 + TypeScript のSPAです。ルーターは使わず、`App.vue` が `view
 
 | どこ | 何を持つか | 変更方法 |
 | --- | --- | --- |
-| `backend/default.yml` | インフラのみ(DB/Redis/待ち受けポート/worker周期) | ファイル + 環境変数。反映は再起動 |
+| `backend/default.yml` | インフラのみ(DB/Redis/待ち受けポート/公開アドレス/worker周期) | ファイル + 環境変数。反映は再起動 |
+| `deploy/compose.override.yaml` | 環境ごとの値と秘密(公開アドレス・暗号鍵・ポート) | `.example` をコピーして編集。コミットしない |
 | DB `app_settings` | ゲームの設定すべて(初期所持金・回復間隔・クールタイム・街の一覧など) | **ゲーム内の管理者メニュー**。基本は即時反映 |
 
 ゲームの値を設定ファイルに置かないのは、運営中に触りたくなるのはほぼゲーム側で、
@@ -202,7 +203,8 @@ Vue 3 + TypeScript のSPAです。ルーターは使わず、`App.vue` が `view
 | `TOWN_HTTP_ADDR` | APIの待ち受けアドレス |
 | `TOWN_DATABASE_URL` | PostgreSQLの接続先 |
 | `TOWN_REDIS_ADDR` | Redisの接続先 |
-| `TOWN_ALLOWED_ORIGINS` | MiAuthのコールバックで許可するオリジン |
+| `TOWN_BASE_URL` | 公開アドレス。MiAuthのコールバックURLをここから組み立てる |
+| `TOWN_EXTRA_ORIGINS` | base_url以外の経路(Tailscale等)を足す。`all` で全許可(テスト専用) |
 | `TOWN_APP_NAME` | Misskeyの承認画面に出るアプリ名 |
 | `TOWN_TOKEN_KEY` | Misskeyアクセストークンの暗号化キー(未設定ならトークンを保存しない) |
 | `TOWN_COOKIE_SECURE` | `1` でcookieにSecure属性を付ける(HTTPS運用時) |
