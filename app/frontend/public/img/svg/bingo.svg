@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <ellipse cx="16" cy="30" rx="11.5" ry="1.5" fill="#000" opacity="0.12"/>
+  <!-- カード -->
+  <rect x="4" y="5" width="24" height="24" rx="1.5" fill="#ffffff" stroke="#c0392b" stroke-width="1.4"/>
+  <!-- 見出し帯 -->
+  <rect x="4" y="5" width="24" height="5" rx="1.5" fill="#c0392b"/>
+  <rect x="4" y="8.5" width="24" height="1.5" fill="#c0392b"/>
+  <!-- マス目(4x4相当の格子) -->
+  <g stroke="#e0b4b0" stroke-width="0.8">
+    <path d="M9.6 11v17M15.2 11v17M20.8 11v17M26.4 11v0" fill="none"/>
+    <path d="M4 15.2h24M4 19.4h24M4 23.6h24" fill="none"/>
+  </g>
+  <!-- 開いたマス(青丸) -->
+  <g fill="#3d7fd1">
+    <circle cx="6.8" cy="13.1" r="1.6"/>
+    <circle cx="18" cy="17.3" r="1.6"/>
+    <circle cx="12.4" cy="21.5" r="1.6"/>
+    <circle cx="23.6" cy="25.7" r="1.6"/>
+  </g>
+  <!-- 斜めライン成立 -->
+  <path d="M6.8 13.1 23.6 25.7" stroke="#ffd452" stroke-width="1.8" stroke-linecap="round" opacity="0.9" fill="none"/>
+</svg>

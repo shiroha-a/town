@@ -28,7 +28,7 @@ const emit = defineEmits<{ back: [] }>();
 const isAdmin = computed(() => props.player.roles.includes('admin'));
 
 // 各セクションの開閉。既定は折りたたみ(false)。
-const open = reactive({ item: false, job: false, user: false, settings: false, towns: false, map: false, events: false, serials: false });
+const open = reactive({ item: false, job: false, user: false, settings: false, towns: false, map: false, events: false, serials: false, bingo: false });
 
 // 効果/条件で対象にできるパラメータ。
 const PARAM_OPTIONS = [
@@ -153,6 +153,7 @@ const KEY_PRESETS: { key: string; label: string }[] = [
   { key: 'tsuri', label: '釣りゲーム' },
   { key: 'gifutoya', label: 'ギフト屋' },
   { key: 'tokuten', label: '特典交換所' },
+  { key: 'bingo', label: 'ビンゴ会場' },
   { key: 'prof', label: 'プロフィール(準備中)' },
   { key: 'mail', label: 'メール(準備中)' },
   { key: 'doukyo', label: 'キャラ作成(準備中)' },
@@ -165,7 +166,7 @@ const KEY_PRESETS: { key: string; label: string }[] = [
 const MOVE_KEYS = ['walk', 'bus'];
 // 施設用に用意されているgif(public/img)。
 const IMG_PRESETS = [
-  'depart', 'bank', 'syokudou', 'gym', 'onsen', 'hospital', 'work', 'yakuba', 'kabu', 'keiba', 'kentiku', 'game', 'tsuri', 'gifutoya', 'tokuten', 'prof', 'mail', 'mati_link', 'bus', 'akiti',
+  'depart', 'bank', 'syokudou', 'gym', 'onsen', 'hospital', 'work', 'yakuba', 'kabu', 'keiba', 'kentiku', 'game', 'tsuri', 'gifutoya', 'tokuten', 'bingo', 'prof', 'mail', 'mati_link', 'bus', 'akiti',
 ];
 
 // 施設レイヤーで編集中の街(0..4)。施設はマルチ街化済み。
@@ -261,6 +262,7 @@ const STD_FAC_BASE: FacilityPreset[] = [
   { key: 'tsuri', img: 'tsuri', alt: '釣りゲーム', dest: 0 },
   { key: 'gifutoya', img: 'gifutoya', alt: 'ギフト屋', dest: 0 },
   { key: 'tokuten', img: 'tokuten', alt: '特典交換所', dest: 0 },
+  { key: 'bingo', img: 'bingo', alt: 'ビンゴ会場', dest: 0 },
   { key: 'prof', img: 'prof', alt: 'プロフィール', dest: 0 },
   { key: 'akichi', img: 'akiti', alt: '空き地', dest: 0 },
 ];
@@ -572,6 +574,22 @@ function onBgDrop(col: number, rowIdx: number) {
   moved.col = col;
   moved.row = rowIdx;
   assets.value.push(moved);
+}
+
+// ビンゴ大会の開催(街全体の共有イベント。開始すると新しい抽選番号が確定する)。
+const bingoCfg = reactive({ max_number: 60, per_day: 20, days: 3, lines_to_win: 2 });
+async function startBingo() {
+  if (!window.confirm('新しいビンゴ大会を開始します。よろしいですか?')) return;
+  busy.value = true;
+  try {
+    await api.adminStartBingo(props.player.id, bingoCfg);
+    message.value = 'ビンゴ大会を開始しました。';
+    kind.value = 'ok';
+  } catch (e) {
+    fail(e);
+  } finally {
+    busy.value = false;
+  }
 }
 
 // シリアルコード管理(特典の発行/編集/削除と使用者の確認)。
@@ -1317,6 +1335,29 @@ async function deleteEdit() {
                     <tr v-if="!adminEvents.length"><td colspan="6" class="muted">まだカスタムイベントがありません。</td></tr>
                   </tbody>
                 </table>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <!-- ビンゴ大会 -->
+        <section class="fold">
+          <button class="fold-head" @click="open.bingo = !open.bingo">
+            <span class="caret">{{ open.bingo ? '▼' : '▶' }}</span> ビンゴ大会
+          </button>
+          <div v-if="open.bingo" class="fold-body">
+            <section class="panel">
+              <h3>
+                大会を開始
+                <span class="hint"> ※街全体の共有イベント。開始すると抽選番号が確定し、日ごとに公開されます</span>
+              </h3>
+              <label>数字の範囲(1〜)<input type="number" v-model.number="bingoCfg.max_number" min="25" max="99" /></label>
+              <label>1日に公開する個数<input type="number" v-model.number="bingoCfg.per_day" min="1" /></label>
+              <label>開催日数<input type="number" v-model.number="bingoCfg.days" min="1" /></label>
+              <label>成立ライン数<input type="number" v-model.number="bingoCfg.lines_to_win" min="1" max="12" /></label>
+              <span class="hint">※既定はレガシーと同じ 60個 / 20個ずつ / 3日 / 2ライン</span>
+              <div class="actions">
+                <button class="btn primary" :disabled="busy" data-test="bingo-start" @click="startBingo">開始する</button>
               </div>
             </section>
           </div>

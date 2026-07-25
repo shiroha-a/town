@@ -187,6 +187,34 @@ export interface FishingPickResp {
   result: FishingResult;
 }
 
+// ビンゴ大会。
+export interface BingoCard {
+  id: number;
+  numbers: number[];
+  marks: boolean[];
+  lines: number;
+  rank: number | null;
+  prize: number;
+  can_win: boolean;
+}
+export interface BingoState {
+  active: boolean;
+  event_id: number;
+  drawn: number[];
+  total: number;
+  day: number;
+  days: number;
+  lines_to_win: number;
+  cards: BingoCard[];
+  max_cards: number;
+  finished_count: number;
+  next_prize: number;
+}
+export interface BingoClaimResp {
+  player: Player;
+  result: { rank: number; prize: number };
+}
+
 // シリアルコード(特典)。
 export interface SerialCode {
   id: number;
@@ -1040,6 +1068,16 @@ export const api = {
       card,
       idempotency_key: newIdempotencyKey(),
     }),
+  bingo: (id: number) => request<BingoState>('GET', `/players/${id}/bingo`),
+  bingoTakeCard: (id: number) =>
+    request<Player>('POST', `/players/${id}/bingo/card`, { idempotency_key: newIdempotencyKey() }),
+  bingoClaim: (id: number, cardId: number) =>
+    request<BingoClaimResp>('POST', `/players/${id}/bingo/claim`, {
+      card_id: cardId,
+      idempotency_key: newIdempotencyKey(),
+    }),
+  adminStartBingo: (actingId: number, cfg: { max_number: number; per_day: number; days: number; lines_to_win: number }) =>
+    request<{ started: boolean }>('POST', '/admin/bingo', cfg, adminHeaders(actingId)),
   redeemSerial: (id: number, code: string) =>
     request<SerialRedeemResp>('POST', `/players/${id}/serial/redeem`, {
       code,
