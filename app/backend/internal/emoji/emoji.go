@@ -186,6 +186,17 @@ func (s *Service) Resolve(ctx context.Context, host, name string) (*Emoji, error
 	return e, nil
 }
 
+// importNote matches the bookkeeping line Misskey's emoji importer leaves in
+// the license field ("import from misskey.io").
+var importNote = regexp.MustCompile(`(?im)^[ \t]*import(ed)?[ \t]+from\b.*$`)
+
+// LicenseStatement is the license text with import bookkeeping removed. どこから
+// 取り込んだかはライセンス表明ではないので、それしか書かれていないものは
+// 「未設定」と同じ扱いにする。
+func LicenseStatement(license string) string {
+	return strings.TrimSpace(importNote.ReplaceAllString(license, ""))
+}
+
 // verdict returns the reason an emoji may not be used, or "" when it may.
 // 作者のインスタンス外へ持ち出して表示する以上、ライセンス表明のあるものに限る。
 func verdict(d *miauth.EmojiDetailed) string {
@@ -194,7 +205,7 @@ func verdict(d *miauth.EmojiDetailed) string {
 		return ReasonLocalOnly
 	case d.IsSensitive:
 		return ReasonSensitive
-	case strings.TrimSpace(d.License) == "":
+	case LicenseStatement(d.License) == "":
 		return ReasonNoLicense
 	}
 	return ""
@@ -204,7 +215,7 @@ func verdict(d *miauth.EmojiDetailed) string {
 func ReasonMessage(reason string) string {
 	switch reason {
 	case ReasonNoLicense:
-		return "この絵文字はライセンスが設定されていないため使えません。"
+		return "この絵文字はライセンスの表記がないため使えません（取り込み元の記載だけではライセンスになりません）。"
 	case ReasonSensitive:
 		return "この絵文字はセンシティブ指定のため使えません。"
 	case ReasonLocalOnly:

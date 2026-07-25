@@ -69,6 +69,21 @@ func TestVerdict(t *testing.T) {
 		{"usable", miauth.EmojiDetailed{License: "CC BY 4.0"}, ""},
 		{"no license", miauth.EmojiDetailed{License: ""}, ReasonNoLicense},
 		{"blank license", miauth.EmojiDetailed{License: "   "}, ReasonNoLicense},
+		{
+			"import bookkeeping is not a license",
+			miauth.EmojiDetailed{License: "import from misskey.io"},
+			ReasonNoLicense,
+		},
+		{
+			"imported from, other casing",
+			miauth.EmojiDetailed{License: "  Imported From  black.example  "},
+			ReasonNoLicense,
+		},
+		{
+			"a real license survives the import line",
+			miauth.EmojiDetailed{License: "CC BY-SA 4.0\nEmoji by https://misskey.io/@someone\n\nimport from misskey.io"},
+			"",
+		},
 		{"sensitive", miauth.EmojiDetailed{License: "CC0", IsSensitive: true}, ReasonSensitive},
 		{"local only", miauth.EmojiDetailed{License: "CC0", LocalOnly: true}, ReasonLocalOnly},
 		{
