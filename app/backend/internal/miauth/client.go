@@ -3,6 +3,7 @@ package miauth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -81,7 +82,8 @@ func NewClient() *Client {
 }
 
 // postJSON sends a JSON POST to https://{host}{path} and decodes the response.
-func (c *Client) postJSON(ctx context.Context, host, path string, body, out any) error {
+// token is the caller's Misskey access token, or "" for endpoints that need none.
+func (c *Client) postJSON(ctx context.Context, host, path, token string, body, out any) error {
 	// Misskey(Fastify)は Content-Type: application/json で空ボディだと
 	// FST_ERR_CTP_EMPTY_JSON_BODY で拒否する。パラメータの無いエンドポイント
 	// (miauth check など)にも必ず空オブジェクトを送る。
@@ -104,14 +106,27 @@ func (c *Client) postJSON(ctx context.Context, host, path string, body, out any)
 	// User-Agentを名乗る。既定の "Go-http-client/..." はCDN(Cloudflare等)に
 	// bot として弾かれることがある。
 	req.Header.Set("User-Agent", UserAgent)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("そのインスタンスに接続できません: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		// 応答の冒頭を添える。原因(未対応API/CDNの遮断/フォーク差異)の切り分けに要る。
-		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
+		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 600))
+		// MisskeyのAPIエラーは {"error":{"code":...}} で返る。呼び出し側が
+		// 「すでにフォロー済み」等を判別できるよう構造化して返す。
+		var body struct {
+			Error *APIError `json:"error"`
+		}
+		if json.Unmarshal(snippet, &body) == nil && body.Error != nil && body.Error.Code != "" {
+			body.Error.Status = resp.StatusCode
+			body.Error.Host = host
+			return body.Error
+		}
+		// 解釈できない応答は冒頭を添える。原因(未対応API/CDNの遮断/フォーク差異)の切り分けに要る。
 		return fmt.Errorf("%s がエラーを返しました (HTTP %d) %s",
 			host, resp.StatusCode, strings.TrimSpace(string(snippet)))
 	}
@@ -128,6 +143,42 @@ func (c *Client) postJSON(ctx context.Context, host, path string, body, out any)
 	return nil
 }
 
+// APIError is a structured Misskey API error, so callers can branch on the
+// code (already following, rate limited, permission missing) instead of
+// pattern-matching a message.
+type APIError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	ID      string `json:"id"`
+	Status  int    `json:"-"`
+	Host    string `json:"-"`
+}
+
+func (e *APIError) Error() string {
+	if e.Message != "" {
+		return fmt.Sprintf("%s (%s)", e.Message, e.Code)
+	}
+	return e.Code
+}
+
+// IsCode reports whether err is a Misskey API error with the given code.
+func IsCode(err error, code string) bool {
+	var apiErr *APIError
+	return errors.As(err, &apiErr) && apiErr.Code == code
+}
+
+// Misskey error codes we branch on.
+const (
+	CodeAlreadyFollowing  = "ALREADY_FOLLOWING"
+	CodeRateLimitExceeded = "RATE_LIMIT_EXCEEDED"
+	CodeNoSuchUser        = "NO_SUCH_USER"
+	CodeBlocked           = "BLOCKING"
+	CodeBlockee           = "BLOCKED"
+	CodePermissionDenied  = "PERMISSION_DENIED"
+	CodeAccessDenied      = "ACCESS_DENIED"
+	CodeAuthFailed        = "AUTHENTICATION_FAILED"
+)
+
 // Meta is the subset of /api/meta we use to confirm the host is a Misskey
 // instance and to show its name on the login screen.
 type Meta struct {
@@ -141,7 +192,7 @@ type Meta struct {
 // requireCredential:false) and returns its display info.
 func (c *Client) FetchMeta(ctx context.Context, host string) (*Meta, error) {
 	var m Meta
-	if err := c.postJSON(ctx, host, "/api/meta", map[string]any{"detail": false}, &m); err != nil {
+	if err := c.postJSON(ctx, host, "/api/meta", "", map[string]any{"detail": false}, &m); err != nil {
 		return nil, err
 	}
 	if m.Version == "" {
@@ -169,7 +220,7 @@ type CheckResult struct {
 // Check exchanges an approved MiAuth session for an access token.
 func (c *Client) Check(ctx context.Context, host, session string) (*CheckResult, error) {
 	var res CheckResult
-	if err := c.postJSON(ctx, host, "/api/miauth/"+session+"/check", nil, &res); err != nil {
+	if err := c.postJSON(ctx, host, "/api/miauth/"+session+"/check", "", nil, &res); err != nil {
 		return nil, err
 	}
 	if res.Token == "" || res.User == nil || res.User.ID == "" {

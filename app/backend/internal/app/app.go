@@ -24,6 +24,7 @@ import (
 	"github.com/shiroha-a/town/internal/miauth"
 	"github.com/shiroha-a/town/internal/news"
 	"github.com/shiroha-a/town/internal/player"
+	"github.com/shiroha-a/town/internal/profile"
 	"github.com/shiroha-a/town/internal/ranking"
 	"github.com/shiroha-a/town/internal/rediscli"
 	"github.com/shiroha-a/town/internal/rng"
@@ -124,11 +125,13 @@ func Run(ctx context.Context, mode string, cfg *config.Config) error {
 		logger.Warn("TOWN_TOKEN_KEY が未設定のため、Misskeyのアクセストークンは保存されません")
 	}
 
+	profiles := profile.New(pool, miauthClient, players)
 	authDeps := httpapi.AuthDeps{
 		Pool:           pool,
 		MiAuth:         miauthClient,
 		InstanceRules:  instanceRules,
 		Sessions:       sessions,
+		Profiles:       profiles,
 		AppName:        cfg.Server.AppName,
 		AllowedOrigins: cfg.Server.AllowedOrigins,
 	}

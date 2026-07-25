@@ -35,6 +35,7 @@ import (
 	"github.com/shiroha-a/town/internal/miauth"
 	"github.com/shiroha-a/town/internal/news"
 	"github.com/shiroha-a/town/internal/player"
+	"github.com/shiroha-a/town/internal/profile"
 	"github.com/shiroha-a/town/internal/ranking"
 	"github.com/shiroha-a/town/internal/rng"
 	"github.com/shiroha-a/town/internal/serial"
@@ -165,6 +166,7 @@ func setup(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 			MiAuth:         miauth.NewClient(),
 			InstanceRules:  miauth.NewRules(pool),
 			Sessions:       sessions,
+			Profiles:       profile.New(pool, miauth.NewClient(), svc),
 			AppName:        "TOWN",
 			AllowedOrigins: []string{"all"},
 		}))

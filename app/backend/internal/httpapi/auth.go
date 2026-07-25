@@ -171,6 +171,11 @@ func (s *Server) authCallback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// prof施設で見せるプロフィールを取り込んでおく。相手インスタンスの不調で
+	// ログインまで失敗させたくないので、失敗は無視する(表示時に再取得される)。
+	if s.profiles != nil {
+		_, _ = s.profiles.Refresh(r.Context(), p.ID)
+	}
 	token, err := s.sessions.Issue(r.Context(), p.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

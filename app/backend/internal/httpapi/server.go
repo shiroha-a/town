@@ -17,6 +17,7 @@ import (
 	"github.com/shiroha-a/town/internal/miauth"
 	"github.com/shiroha-a/town/internal/news"
 	"github.com/shiroha-a/town/internal/player"
+	"github.com/shiroha-a/town/internal/profile"
 	"github.com/shiroha-a/town/internal/ranking"
 	"github.com/shiroha-a/town/internal/serial"
 	"github.com/shiroha-a/town/internal/session"
@@ -48,6 +49,7 @@ type Server struct {
 	miauth         *miauth.Client
 	instanceRules  *miauth.Rules
 	sessions       *session.Store
+	profiles       *profile.Service
 	appName        string
 	allowedOrigins []string
 }
@@ -60,13 +62,14 @@ func (s *Server) instancePolicy(_ *http.Request) miauth.Policy {
 	return miauth.Blacklist
 }
 
-// AuthDeps bundles the login-related dependencies so NewServer's signature
+// AuthDeps bundles the MiAuth/Misskey dependencies so NewServer's signature
 // does not grow another six positional arguments.
 type AuthDeps struct {
 	Pool           *pgxpool.Pool
 	MiAuth         *miauth.Client
 	InstanceRules  *miauth.Rules
 	Sessions       *session.Store
+	Profiles       *profile.Service
 	AppName        string
 	AllowedOrigins []string
 }
@@ -75,7 +78,8 @@ type AuthDeps struct {
 func NewServer(players *player.Service, actions *action.Service, contentSvc *content.Service, st *settings.Store, tmap *townmap.Store, stockSvc *stock.Service, keibaSvc *keiba.Service, mailSvc *mail.Service, greetingSvc *greeting.Service, attendanceSvc *attendance.Service, cleagueSvc *cleague.Service, newsSvc *news.Service, rankingSvc *ranking.Service, serialSvc *serial.Service, auth AuthDeps) http.Handler {
 	s := &Server{players: players, actions: actions, content: contentSvc, settings: st, townmap: tmap, stock: stockSvc, keiba: keibaSvc, mail: mailSvc, greeting: greetingSvc, attendance: attendanceSvc, cleague: cleagueSvc, news: newsSvc, ranking: rankingSvc, serial: serialSvc, greetHub: newGreetHub(),
 		pool: auth.Pool, miauth: auth.MiAuth, instanceRules: auth.InstanceRules,
-		sessions: auth.Sessions, appName: auth.AppName, allowedOrigins: auth.AllowedOrigins}
+		sessions: auth.Sessions, profiles: auth.Profiles,
+		appName: auth.AppName, allowedOrigins: auth.AllowedOrigins}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", s.health)
 	mux.HandleFunc("GET /api/v1/players", s.listPlayers)
@@ -205,6 +209,12 @@ func NewServer(players *player.Service, actions *action.Service, contentSvc *con
 	mux.HandleFunc("GET /api/v1/players/{id}/bank/loan/quote", s.loanQuote)
 	mux.HandleFunc("POST /api/v1/players/{id}/bank/loan/borrow", s.loanBorrow)
 	mux.HandleFunc("POST /api/v1/players/{id}/bank/loan/repay", s.loanRepay)
+
+	// Misskey連携(prof施設)。プロフィール参照は対象の住民、フォローは
+	// セッションの本人が実行者なのでパスにIDを取らない。
+	mux.HandleFunc("GET /api/v1/players/{id}/misskey", s.misskeyProfile)
+	mux.HandleFunc("POST /api/v1/misskey/follow", s.misskeyFollow)
+	mux.HandleFunc("POST /api/v1/misskey/unfollow", s.misskeyUnfollow)
 
 	// 管理者API(認可はauthGuardで一括: セッション + adminロール)
 	mux.HandleFunc("POST /api/v1/admin/items", s.createItem)

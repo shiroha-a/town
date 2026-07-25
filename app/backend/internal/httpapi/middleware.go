@@ -30,6 +30,20 @@ var publicPlayerPatterns = map[string]bool{
 	"GET /api/v1/players/{id}/news":    true,
 }
 
+// residentViewPatterns are reads *about another resident* that any logged-in
+// player may make (prof画面のMisskeyプロフィール)。誰でも見られる公開GETとは
+// 分けている: 表示のたびに相手インスタンスへ問い合わせが飛ぶため。
+var residentViewPatterns = map[string]bool{
+	"GET /api/v1/players/{id}/misskey": true,
+}
+
+// loginRequiredPatterns need a session but are not scoped to a player id — the
+// acting player always comes from the session.
+var loginRequiredPatterns = map[string]bool{
+	"POST /api/v1/misskey/follow":   true,
+	"POST /api/v1/misskey/unfollow": true,
+}
+
 // pathPlayerID pulls the {id} out of /api/v1/players/{id}/... .
 func pathPlayerID(path string) (int64, bool) {
 	rest, ok := strings.CutPrefix(path, playerRoutePrefix)
@@ -85,6 +99,13 @@ func (s *Server) authGuard(mux *http.ServeMux) http.Handler {
 
 		case publicPlayerPatterns[pattern]:
 			// 他の住民について見るための公開GET。認証不要。
+
+		case residentViewPatterns[pattern], loginRequiredPatterns[pattern]:
+			// ログインは要るが、対象は自分でなくてよい経路。
+			if playerID == 0 {
+				writeError(w, http.StatusUnauthorized, "ログインしてください。")
+				return
+			}
 
 		case strings.Contains(pattern, playerRoutePrefix+"{id}"):
 			if playerID == 0 {
