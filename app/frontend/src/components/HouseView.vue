@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CommandIcon from './CommandIcon.vue';
 import EmojiPicker from './EmojiPicker.vue';
 import RichText from './RichText.vue';
 import { ref, computed, onMounted } from 'vue';
@@ -373,7 +374,7 @@ async function doDeleteBbs(kind: string, opts: { articleNo?: number; threadNo?: 
             <textarea v-model="bbsBody" rows="4" class="bbs-area"></textarea>
             <div>
               <button class="btn" :disabled="busy" @click="doPostBbs(bbsBody)">新規投稿</button>
-              <button class="btn emoji-btn" @click="emojiFor = 'bbs'">絵文字</button>
+              <button class="btn emoji-btn" @click="emojiFor = 'bbs'"><CommandIcon name="emoji" />絵文字</button>
             </div>
           </div>
           <div class="bbs-posts">
@@ -386,7 +387,7 @@ async function doDeleteBbs(kind: string, opts: { articleNo?: number; threadNo?: 
               </div>
               <div class="reply-form">
                 <textarea v-model="replyBodies[t.parent.thread_no]" rows="2" class="reply-area"></textarea>
-                <button class="btn emoji-btn" @click="emojiFor = `reply:${t.parent.thread_no}`">絵文字</button>
+                <button class="btn emoji-btn" @click="emojiFor = `reply:${t.parent.thread_no}`"><CommandIcon name="emoji" />絵文字</button>
                 <button class="btn" :disabled="busy" @click="doPostBbs(replyBodies[t.parent.thread_no] ?? '', t.parent.thread_no)">レス</button>
               </div>
               <div v-for="p in t.replies" :key="p.id" class="bbs-reply">
@@ -542,6 +543,13 @@ async function doDeleteBbs(kind: string, opts: { articleNo?: number; threadNo?: 
 <style scoped>
 .emoji-btn {
   margin-left: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.emoji-btn :deep(.cmd-icon) {
+  width: 14px;
+  height: 14px;
 }
 /* bodyのmargin(5px)を打ち消し、レガシーのbody背景色のように全面を塗る。 */
 .house-page {

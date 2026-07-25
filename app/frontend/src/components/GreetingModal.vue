@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CommandIcon from './CommandIcon.vue';
 import EmojiPicker from './EmojiPicker.vue';
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { api, type Player } from '../api';
@@ -124,7 +125,9 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
           <select v-model="janken" title="ジャンケン">
             <option v-for="j in JANKEN" :key="j.value" :value="j.value">{{ j.label }}</option>
           </select>
-          <button class="gm-emoji" title="絵文字" @click="emojiOpen = true">絵</button>
+          <button class="gm-emoji" title="絵文字を入れる" @click="emojiOpen = true">
+            <CommandIcon name="emoji" />
+          </button>
           <span class="gm-remain" :class="{ low: remain <= 10 }">{{ remain }}</span>
           <button class="gm-post" :disabled="busy || !body.trim()" @click="post">投稿</button>
         </div>
@@ -140,12 +143,25 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
 
 <style scoped>
 .gm-emoji {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
   border: 1px solid #997a44;
+  border-radius: 3px;
   background: #f0e6cf;
   color: #663300;
-  font-size: 12px;
-  padding: 2px 6px;
+  padding: 0;
   cursor: pointer;
+}
+.gm-emoji:hover {
+  background: #fff6e0;
+  color: #cc6600;
+}
+.gm-emoji :deep(.cmd-icon) {
+  width: 17px;
+  height: 17px;
 }
 .gm-overlay {
   position: fixed;

@@ -75,5 +75,12 @@ defineProps<{ name: string }>();
       <ellipse cx="16" cy="12.5" rx="2.4" ry="3.8" transform="rotate(15 16 12.5)" />
       <ellipse cx="17.4" cy="19.2" rx="1.2" ry="1.5" transform="rotate(15 17.4 19.2)" />
     </g>
+    <!-- 絵文字(スマイル) -->
+    <g v-else-if="name === 'emoji'">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M8.5 14.5a4.5 4.5 0 0 0 7 0" />
+      <line x1="9" y1="9.5" x2="9.01" y2="9.5" />
+      <line x1="15" y1="9.5" x2="15.01" y2="9.5" />
+    </g>
   </svg>
 </template>

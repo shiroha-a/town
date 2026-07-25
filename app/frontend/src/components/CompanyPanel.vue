@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CommandIcon from './CommandIcon.vue';
 import EmojiPicker from './EmojiPicker.vue';
 import RichText from './RichText.vue';
 import { ref, computed, onMounted } from 'vue';
@@ -314,7 +315,7 @@ const doSeizou = async () => {
       <div class="bbs-col">
         <div class="bbs-head">■メッセージ来訪者</div>
         <textarea v-model="openBody" rows="4" class="bbs-area"></textarea>
-        <button class="btn emoji-btn" @click="emojiFor = 'open'">絵文字</button>
+        <button class="btn emoji-btn" @click="emojiFor = 'open'"><CommandIcon name="emoji" />絵文字</button>
         <label v-if="!view.own && !view.officer" class="chk"><input v-model="openJoin" type="checkbox" />●入会希望</label>
         <div><button class="btn" :disabled="busy" @click="postOpen">OK</button></div>
         <div class="bbs-head2">来訪者掲示板</div>
@@ -335,7 +336,7 @@ const doSeizou = async () => {
       <div v-if="view.own || view.officer" class="bbs-col">
         <div class="bbs-head">■メッセージメンバー</div>
         <textarea v-model="memberBody" rows="4" class="bbs-area"></textarea>
-        <button class="btn emoji-btn" @click="emojiFor = 'member'">絵文字</button>
+        <button class="btn emoji-btn" @click="emojiFor = 'member'"><CommandIcon name="emoji" />絵文字</button>
         <label v-if="!view.own" class="chk"><input v-model="memberLeave" type="checkbox" />●退会希望</label>
         <div><button class="btn" :disabled="busy" @click="postMember">OK</button></div>
         <div class="bbs-head2">メンバー掲示板</div>
@@ -394,6 +395,13 @@ const doSeizou = async () => {
 <style scoped>
 .emoji-btn {
   margin-left: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.emoji-btn :deep(.cmd-icon) {
+  width: 14px;
+  height: 14px;
 }
 .company {
   max-width: 820px;
