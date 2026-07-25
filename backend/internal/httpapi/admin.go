@@ -65,7 +65,10 @@ func (s *Server) adminUpdateTowns(w http.ResponseWriter, r *http.Request) {
 	}
 	g := s.settings.Get()
 	g.Towns = tcs
-	if err := s.settings.Set(r.Context(), g); err != nil {
+	if err := s.settings.Set(r.Context(), g); errors.Is(err, settings.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	} else if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

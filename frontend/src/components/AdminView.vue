@@ -834,10 +834,12 @@ const SETTINGS_FIELDS: { key: keyof GameSettings; label: string; hint?: string }
   { key: 'work_interval_min', label: '仕事間隔', hint: '連続して働けるようになるまでの分数' },
   { key: 'depart_daily_count', label: 'デパート日次件数', hint: '0で全件(日次ローテ無効)' },
   { key: 'syokudou_daily_count', label: '食堂日次件数', hint: '0で全件(日次ローテ無効)' },
+  { key: 'hanbai_daily_count', label: '自販機日次件数', hint: '0で全件(日次ローテ無効)' },
   { key: 'item_kind_limit', label: '所持アイテム種類上限', hint: '0で無制限(旧TOWN 25品目)' },
   { key: 'stock_adjust', label: '店頭在庫倍率', hint: '実在庫=ceil(標準在庫÷倍率)。大きいほど品薄' },
   { key: 'move_walk_secs', label: '徒歩の移動時間', hint: '街移動(徒歩)にかかる秒数。0以下で既定10秒' },
   { key: 'move_bus_secs', label: 'バスの移動時間', hint: '街移動(バス)にかかる秒数。0以下で既定5秒' },
+  { key: 'day_boundary_hour', label: '日付の切り替わり', hint: '利息や日次リセットが走る時刻(時)。反映には再起動が必要' },
 ];
 async function saveSettings() {
   if (!settings.value) return;
@@ -1575,6 +1577,11 @@ async function deleteEdit() {
                   <span class="setting-label">{{ f.label }}</span>
                   <input type="number" v-model.number="settings[f.key] as number" />
                   <span v-if="f.hint" class="setting-hint">{{ f.hint }}</span>
+                </label>
+                <label class="setting">
+                  <span class="setting-label">タイムゾーン</span>
+                  <input type="text" v-model="settings.timezone" spellcheck="false" />
+                  <span class="setting-hint">例: Asia/Tokyo。反映には再起動が必要</span>
                 </label>
                 <label class="setting chk-setting">
                   <span class="setting-label">デバッグ: 間隔ゼロ</span>

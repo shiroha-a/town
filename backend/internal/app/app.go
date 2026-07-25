@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/shiroha-a/town/internal/action"
@@ -58,35 +59,22 @@ func Run(ctx context.Context, mode string, cfg *config.Config) error {
 	}
 	defer rdb.Close()
 
-	loc, err := time.LoadLocation(cfg.Game.Timezone)
-	if err != nil {
-		logger.Warn("invalid timezone, falling back to UTC", "timezone", cfg.Game.Timezone, "err", err)
-		loc = time.UTC
-	}
-
-	// 実行時に編集可能なゲーム設定(初回はdefault.ymlからシードしDBに永続化)。
-	st, err := settings.NewStore(ctx, pool, settings.Game{
-		InitialMoney:             cfg.Game.InitialMoney,
-		DailyInterestPermille:    cfg.Game.DailyInterestPermille,
-		EnergyRecoverySec:        cfg.Game.EnergyRecoverySec,
-		NouRecoverySec:           cfg.Game.NouRecoverySec,
-		SatietyDecaySec:          cfg.Game.SatietyDecaySec,
-		ConditionEvalIntervalMin: cfg.Game.ConditionEvalIntervalMin,
-		WorkIntervalMin:          cfg.Game.WorkIntervalMin,
-		DebugNoCooldown:          cfg.Game.DebugNoCooldown,
-		DepartDailyCount:         cfg.Game.DepartDailyCount,
-		SyokudouDailyCount:       cfg.Game.SyokudouDailyCount,
-		HanbaiDailyCount:         cfg.Game.HanbaiDailyCount,
-		ItemKindLimit:            cfg.Game.ItemKindLimit,
-		StockAdjust:              cfg.Game.StockAdjust,
-		MoveWalkSecs:             cfg.Game.MoveWalkSecs,
-		MoveBusSecs:              cfg.Game.MoveBusSecs,
-		Towns:                    defaultTownConfigs(),
-		InstancePolicy:           string(miauth.Blacklist),
-	})
+	// ゲーム設定はDBに持ち、管理画面から編集する。設定ファイルはインフラ
+	// (DB/Redis/ポート)だけを持ち、ゲームの値は持たない。初回起動時は
+	// settings.Defaults() をシードする。
+	defaults := settings.Defaults()
+	defaults.Towns = defaultTownConfigs()
+	defaults.InstancePolicy = string(miauth.Blacklist)
+	st, err := settings.NewStore(ctx, pool, defaults)
 	if err != nil {
 		return fmt.Errorf("load settings: %w", err)
 	}
+	game := st.Get()
+	loc, err := game.Location()
+	if err != nil {
+		logger.Warn("invalid timezone, falling back to UTC", "timezone", game.Timezone, "err", err)
+	}
+
 	// 街の一覧(名前・地価)を実行時キャッシュ(building)へ同期する。
 	syncTowns(st.Get().Towns)
 
@@ -97,15 +85,18 @@ func Run(ctx context.Context, mode string, cfg *config.Config) error {
 	}
 
 	led := ledger.New(pool)
-	rnd := rng.New(cfg.Game.RNGSeed)
+	// 乱数のシード。0(既定)は時刻ベース。決定的な再現が要るときだけ
+	// TOWN_RNG_SEED で固定する(開発・テスト用)。
+	seed, _ := strconv.ParseInt(os.Getenv("TOWN_RNG_SEED"), 10, 64)
+	rnd := rng.New(seed)
 	players := player.New(pool, led, rnd, st)
-	actions := action.New(pool, led, players, rnd, loc, cfg.Game.DayBoundaryHour, st)
-	contentSvc := content.New(pool, loc, cfg.Game.DayBoundaryHour, st)
+	actions := action.New(pool, led, players, rnd, loc, game.DayBoundaryHour, st)
+	contentSvc := content.New(pool, loc, game.DayBoundaryHour, st)
 	stockSvc := stock.New(pool)
 	keibaSvc := keiba.New(pool, rng.New(0)) // レース生成用に独立した(非決定的)乱数源
-	mailSvc := mail.New(pool, loc, cfg.Game.DayBoundaryHour)
+	mailSvc := mail.New(pool, loc, game.DayBoundaryHour)
 	greetingSvc := greeting.New(pool)
-	attendanceSvc := attendance.New(pool, loc, cfg.Game.DayBoundaryHour)
+	attendanceSvc := attendance.New(pool, loc, game.DayBoundaryHour)
 	cleagueSvc := cleague.New(pool)
 	newsSvc := news.New(pool)
 	rankingSvc := ranking.New(pool)

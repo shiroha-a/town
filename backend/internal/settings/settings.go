@@ -1,7 +1,8 @@
-// Package settings holds the runtime-tunable game settings. They are seeded from
-// default.yml at first boot, persisted in the DB, and editable by admins at
-// runtime. The web process updates its in-memory copy on Set; the worker process
-// (separate) calls Reload each tick to pick up changes.
+// Package settings holds the game settings. They are seeded from the defaults
+// below at first boot, persisted in the DB, and edited by admins from the
+// in-game admin screen — the config file holds only infrastructure (DB/Redis/
+// port), never gameplay values. The web process updates its in-memory copy on
+// Set; the worker process (separate) calls Reload each tick to pick up changes.
 package settings
 
 import (
@@ -10,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -17,6 +19,10 @@ import (
 
 // Game is the set of admin-editable game settings.
 type Game struct {
+	// Timezone / DayBoundaryHour decide when a "game day" rolls over (利息・日次処理)。
+	// 起動時に読むため、変更の反映には再起動が要る。
+	Timezone                 string       `json:"timezone"`
+	DayBoundaryHour          int          `json:"day_boundary_hour"`
 	InitialMoney             int64        `json:"initial_money"`
 	DailyInterestPermille    int          `json:"daily_interest_permille"`
 	EnergyRecoverySec        int          `json:"energy_recovery_sec"`
@@ -45,6 +51,61 @@ type TownConfig struct {
 	Name      string `json:"name"`
 	LandPrice int    `json:"land_price"`
 	Hidden    bool   `json:"hidden"`
+}
+
+// Defaults are the values a fresh install starts from. レガシー準拠の初期値で、
+// 以後の変更は管理画面から行う(設定ファイルには持たない)。
+func Defaults() Game {
+	return Game{
+		Timezone:                 "Asia/Tokyo",
+		DayBoundaryHour:          5,      // 日付の切り替わり(利息・日次処理)はAM5:00
+		InitialMoney:             500000, // 新規登録時の初期所持金(円)
+		DailyInterestPermille:    5,      // 貯金の日次利息(パーミル。5=0.5%、切り捨て)
+		EnergyRecoverySec:        60,     // 身体パワー1回復に必要な秒数
+		NouRecoverySec:           60,     // 頭脳パワー1回復に必要な秒数
+		SatietyDecaySec:          300,    // 空腹値が1減るのに必要な秒数
+		ConditionEvalIntervalMin: 10,     // 病気指数のコンディション評価間隔(分)
+		WorkIntervalMin:          3,      // 就労のクールタイム(分)
+		DebugNoCooldown:          false,  // 各種クールタイムを無視する(開発用)
+		DepartDailyCount:         100,    // デパートで毎日陳列する品数(0以下=全件)
+		SyokudouDailyCount:       9,      // 食堂で毎日陳列する品数(0以下=全件)
+		HanbaiDailyCount:         3,      // 自販機で毎日陳列する品数(0以下=全件)
+		ItemKindLimit:            25,     // 所持できるアイテムの種類上限(0以下=無制限)
+		StockAdjust:              2,      // 店頭在庫の割り算倍率
+		MoveMaigoEnabled:         false,  // 徒歩移動の迷子(レガシー既定OFF)
+		MoveWalkSecs:             10,     // 徒歩の街移動にかかる秒数
+		MoveBusSecs:              5,      // バスの街移動にかかる秒数
+	}
+}
+
+// Location resolves Timezone, falling back to UTC when it is unusable.
+func (g Game) Location() (*time.Location, error) {
+	loc, err := time.LoadLocation(g.Timezone)
+	if err != nil {
+		return time.UTC, err
+	}
+	return loc, nil
+}
+
+// ErrInvalid marks a rejected settings update (管理画面からの入力エラー)。
+var ErrInvalid = errors.New("invalid settings")
+
+// Validate rejects values that would break time handling. 管理画面から編集できる
+// ようになった以上、壊れた値がそのまま保存されないようにする。
+func (g Game) Validate() error {
+	if _, err := time.LoadLocation(g.Timezone); err != nil {
+		return fmt.Errorf("%w: タイムゾーン %q は解釈できません(例: Asia/Tokyo)", ErrInvalid, g.Timezone)
+	}
+	if g.DayBoundaryHour < 0 || g.DayBoundaryHour > 23 {
+		return fmt.Errorf("%w: 日付の切り替わりは0〜23時で指定してください", ErrInvalid)
+	}
+	return nil
+}
+
+// NewStatic returns a Store that holds the given settings in memory only. DBを
+// 必要としないので、設定値だけが要るテストや、単発の計算に使う。
+func NewStatic(g Game) *Store {
+	return &Store{g: g}
 }
 
 // Store is a thread-safe, DB-backed holder of the current game settings.
@@ -87,6 +148,9 @@ func (s *Store) Get() Game {
 
 // Set persists and applies new settings (used by the admin API).
 func (s *Store) Set(ctx context.Context, g Game) error {
+	if err := g.Validate(); err != nil {
+		return err
+	}
 	b, err := json.Marshal(g)
 	if err != nil {
 		return fmt.Errorf("encode settings: %w", err)

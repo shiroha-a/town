@@ -1,3 +1,5 @@
+# インフラの設定だけを置く。ゲームの設定(初期所持金・回復間隔・クールタイムなど)は
+# DBに持ち、ゲーム内の管理者メニューから変更する。
 server:
   http_addr: ":8090"
 
@@ -9,28 +11,6 @@ redis:
   # ホストから直接動かす場合のデフォルト。コンテナでは TOWN_REDIS_ADDR で上書き。
   addr: "localhost:56379"
   db: 0
-
-game:
-  timezone: "Asia/Tokyo"
-  day_boundary_hour: 5          # 日付の切り替わり(利息・日次処理)はAM5:00
-  initial_money: 500000         # 新規登録時の初期所持金(円)
-  money_max: 3000000000000000   # 所持金上限。超過分は切り捨て(レガシー準拠)
-  rng_seed: 0                   # 0=時刻ベース(非決定的) / 正数=固定シード(テスト用)
-  daily_interest_permille: 5    # 貯金の日次利息(パーミル。5=0.5%、切り捨て)
-  energy_recovery_sec: 60       # 身体パワー1回復に必要な秒数
-  nou_recovery_sec: 60          # 頭脳パワー1回復に必要な秒数
-  meal_interval_min: 20         # 食事のクールタイム(分)
-  satiety_decay_sec: 300        # 空腹値が1減るのに必要な秒数(5分で1)
-  condition_eval_interval_min: 10  # 病気指数のコンディション評価間隔(分)
-  work_interval_min: 3             # 就労のクールタイム(分。旧work_seigen_time)
-  debug_no_cooldown: true          # デバッグ: 仕事/アイテム/施設/食事の間隔をすべて無効化(本番はfalse)
-  depart_daily_count: 100          # デパートで毎日表示する品数(旧仕様。0以下=全件)
-  syokudou_daily_count: 9          # 食堂で毎日表示する品数(旧仕様。0以下=全件)
-  hanbai_daily_count: 3            # 自販機で毎日表示する品数(旧仕様。0以下=全件)
-  item_kind_limit: 25              # 所持できるアイテムの種類上限(旧TOWN 25品目。0以下=無制限)
-  stock_adjust: 2                  # 店頭在庫の割り算倍率(旧zaiko_tyousetuti。実在庫=ceil(標準在庫/倍率))
-  move_walk_secs: 10               # 徒歩の街移動にかかる秒数(旧matiidou_time)
-  move_bus_secs: 5                 # バスの街移動にかかる秒数
 
 worker:
   tick_interval: "10s"

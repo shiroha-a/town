@@ -44,10 +44,10 @@ type Worker struct {
 }
 
 func New(rdb *redis.Client, pool *pgxpool.Pool, led *ledger.Repo, cfg *config.Config, st *settings.Store, logger *slog.Logger) *Worker {
-	loc, err := time.LoadLocation(cfg.Game.Timezone)
+	// タイムゾーンと日付の切り替わり時刻はDBの設定(管理画面で編集)から取る。
+	loc, err := st.Get().Location()
 	if err != nil {
-		logger.Warn("invalid timezone, falling back to UTC", "timezone", cfg.Game.Timezone, "err", err)
-		loc = time.UTC
+		logger.Warn("invalid timezone, falling back to UTC", "timezone", st.Get().Timezone, "err", err)
 	}
 	return &Worker{rdb: rdb, pool: pool, ledger: led, cfg: cfg, settings: st, logger: logger, loc: loc, rng: rng.New(time.Now().UnixNano())}
 }
@@ -121,7 +121,7 @@ func (w *Worker) tick(ctx context.Context) {
 // day_boundary_hour local time (e.g. AM 5:00), matching typical social-game
 // reset behavior.
 func (w *Worker) gameDate(now time.Time) time.Time {
-	return gametime.Date(now, w.loc, w.cfg.Game.DayBoundaryHour)
+	return gametime.Date(now, w.loc, w.settings.Get().DayBoundaryHour)
 }
 
 // runDailyIfNeeded runs the daily job exactly once per game date. The

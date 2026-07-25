@@ -519,6 +519,10 @@ export interface AdminPlayerPayload {
 }
 
 export interface GameSettings {
+  /** タイムゾーン。反映には再起動が要る。 */
+  timezone: string;
+  /** 日付の切り替わり時刻(時)。反映には再起動が要る。 */
+  day_boundary_hour: number;
   initial_money: number;
   daily_interest_permille: number;
   energy_recovery_sec: number;
@@ -529,6 +533,7 @@ export interface GameSettings {
   debug_no_cooldown: boolean;
   depart_daily_count: number;
   syokudou_daily_count: number;
+  hanbai_daily_count: number;
   item_kind_limit: number;
   stock_adjust: number;
   move_maigo_enabled: boolean;

@@ -16,7 +16,6 @@ type Config struct {
 	Server   ServerConfig   `yaml:"server"`
 	Database DatabaseConfig `yaml:"database"`
 	Redis    RedisConfig    `yaml:"redis"`
-	Game     GameConfig     `yaml:"game"`
 	Worker   WorkerConfig   `yaml:"worker"`
 }
 
@@ -38,48 +37,6 @@ type DatabaseConfig struct {
 type RedisConfig struct {
 	Addr string `yaml:"addr"`
 	DB   int    `yaml:"db"`
-}
-
-// GameConfig holds gameplay-wide parameters. Money values are integer yen.
-type GameConfig struct {
-	Timezone        string `yaml:"timezone"`
-	DayBoundaryHour int    `yaml:"day_boundary_hour"`
-	InitialMoney    int64  `yaml:"initial_money"`
-	MoneyMax        int64  `yaml:"money_max"`
-	// RNGSeed fixes the random seed for deterministic runs/tests. 0 = time-based.
-	RNGSeed int64 `yaml:"rng_seed"`
-	// DailyInterestPermille is the savings interest rate per mille per game day
-	// (5 = 0.5%). Interest is floored to an integer, matching the legacy game.
-	DailyInterestPermille int `yaml:"daily_interest_permille"`
-	// EnergyRecoverySec / NouRecoverySec: seconds required to recover 1 point of
-	// 身体パワー / 頭脳パワー. The worker recovers power on this cadence.
-	EnergyRecoverySec int `yaml:"energy_recovery_sec"`
-	NouRecoverySec    int `yaml:"nou_recovery_sec"`
-	// MealIntervalMin: 食事のクールタイム(分)。前回食事からこの時間は次の食事不可。
-	MealIntervalMin int `yaml:"meal_interval_min"`
-	// SatietyDecaySec: 空腹値(満腹度)が1減るのに要する秒数。workerが減少させる。
-	SatietyDecaySec int `yaml:"satiety_decay_sec"`
-	// ConditionEvalIntervalMin: 病気指数のコンディション評価間隔(分)。この間隔ごとに
-	// workerがコンディションに応じて病気指数を増減する。
-	ConditionEvalIntervalMin int `yaml:"condition_eval_interval_min"`
-	// WorkIntervalMin: 就労のクールタイム(分)。前回出勤からこの時間は再出勤できない。
-	WorkIntervalMin int `yaml:"work_interval_min"`
-	// DebugNoCooldown: trueにすると仕事・アイテム使用・施設・食事の各間隔(クールタイム)を
-	// すべて無効化する。デバッグ用。本番では false にすること。
-	DebugNoCooldown bool `yaml:"debug_no_cooldown"`
-	// DepartDailyCount / SyokudouDailyCount: デパート/食堂で毎日表示する品数(旧100/9)。
-	// 商品プールから game_date をシードに決定論的に選ぶ。0以下は全件表示。
-	DepartDailyCount   int `yaml:"depart_daily_count"`
-	SyokudouDailyCount int `yaml:"syokudou_daily_count"`
-	// HanbaiDailyCount: 自販機で毎日陳列する品数(旧仕様は3。0以下=全件)。
-	HanbaiDailyCount int `yaml:"hanbai_daily_count"`
-	// ItemKindLimit: 所持できるアイテムの種類上限(旧TOWN 25品目)。0以下で無制限。
-	ItemKindLimit int `yaml:"item_kind_limit"`
-	// StockAdjust: 店頭在庫の割り算倍率(旧 zaiko_tyousetuti)。実在庫=ceil(標準在庫/倍率)。
-	StockAdjust int `yaml:"stock_adjust"`
-	// MoveWalkSecs/MoveBusSecs: 街移動にかかる秒数(旧 matiidou_time)。徒歩/バス。
-	MoveWalkSecs int `yaml:"move_walk_secs"`
-	MoveBusSecs  int `yaml:"move_bus_secs"`
 }
 
 type WorkerConfig struct {

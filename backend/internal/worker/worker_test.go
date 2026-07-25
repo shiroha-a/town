@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shiroha-a/town/internal/config"
+	"github.com/shiroha-a/town/internal/settings"
 )
 
 func TestGameDateBoundary(t *testing.T) {
@@ -13,8 +13,8 @@ func TestGameDateBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	w := &Worker{
-		loc: jst,
-		cfg: &config.Config{Game: config.GameConfig{DayBoundaryHour: 5}},
+		loc:      jst,
+		settings: settings.NewStatic(settings.Game{DayBoundaryHour: 5}),
 	}
 
 	cases := []struct {
