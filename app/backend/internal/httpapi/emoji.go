@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -82,4 +83,15 @@ func (s *Server) emojiUsed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"emojis": items})
+}
+
+// tooManyEmoji answers and reports true when a post carries more custom emoji
+// than allowed. 表示崩れと荒らしを防ぐための上限で、投稿系すべてで同じ数にする。
+func tooManyEmoji(w http.ResponseWriter, body string) bool {
+	if emoji.CountRefs(body) > emoji.MaxPerPost {
+		writeError(w, http.StatusUnprocessableEntity,
+			fmt.Sprintf("絵文字は1回の投稿に%d個までです。", emoji.MaxPerPost))
+		return true
+	}
+	return false
 }

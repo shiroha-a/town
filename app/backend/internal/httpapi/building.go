@@ -564,6 +564,9 @@ func (s *Server) companyBbsPost(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "house_id is required")
 		return
 	}
+	if tooManyEmoji(w, req.Body) {
+		return
+	}
 	p, err := s.actions.DoCompanyBbsPost(r.Context(), id, req.HouseID, req.Board, req.Body, req.WantJoin, req.WantLeave, req.IdempotencyKey)
 	writeFacilityResult(w, p, err)
 }
@@ -719,6 +722,9 @@ func (s *Server) postBbs(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.HouseID <= 0 || req.Body == "" {
 		writeError(w, http.StatusBadRequest, "house_id and body are required")
+		return
+	}
+	if tooManyEmoji(w, req.Body) {
 		return
 	}
 	p, result, err := s.actions.DoPostBbs(r.Context(), id, req.HouseID, req.Kind, req.Title, req.Body, req.ParentNo, req.IdempotencyKey)

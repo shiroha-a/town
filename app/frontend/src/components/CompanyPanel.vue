@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import EmojiPicker from './EmojiPicker.vue';
+import RichText from './RichText.vue';
 import { ref, computed, onMounted } from 'vue';
 import { api, type Player, type CompanyView } from '../api';
 import Toast from './Toast.vue';
@@ -12,6 +14,12 @@ const emit = defineEmits<{ update: [player: Player] }>();
 
 const yen = (n: number) => n.toLocaleString('ja-JP');
 const busy = ref(false);
+const emojiFor = ref<'open' | 'member' | null>(null);
+function insertEmoji(code: string) {
+  if (emojiFor.value === 'open') openBody.value += code;
+  else if (emojiFor.value === 'member') memberBody.value += code;
+  emojiFor.value = null;
+}
 const { toast, showToast, closeToast } = useToast();
 
 const view = ref<CompanyView | null>(null);
@@ -306,6 +314,7 @@ const doSeizou = async () => {
       <div class="bbs-col">
         <div class="bbs-head">■メッセージ来訪者</div>
         <textarea v-model="openBody" rows="4" class="bbs-area"></textarea>
+        <button class="btn emoji-btn" @click="emojiFor = 'open'">絵文字</button>
         <label v-if="!view.own && !view.officer" class="chk"><input v-model="openJoin" type="checkbox" />●入会希望</label>
         <div><button class="btn" :disabled="busy" @click="postOpen">OK</button></div>
         <div class="bbs-head2">来訪者掲示板</div>
@@ -320,12 +329,13 @@ const doSeizou = async () => {
               @click="approve(p.id)"
             >入会</button>
           </div>
-          <div class="bbs-body">{{ p.body }}</div>
+          <div class="bbs-body"><RichText :text="p.body" /></div>
         </div>
       </div>
       <div v-if="view.own || view.officer" class="bbs-col">
         <div class="bbs-head">■メッセージメンバー</div>
         <textarea v-model="memberBody" rows="4" class="bbs-area"></textarea>
+        <button class="btn emoji-btn" @click="emojiFor = 'member'">絵文字</button>
         <label v-if="!view.own" class="chk"><input v-model="memberLeave" type="checkbox" />●退会希望</label>
         <div><button class="btn" :disabled="busy" @click="postMember">OK</button></div>
         <div class="bbs-head2">メンバー掲示板</div>
@@ -340,7 +350,7 @@ const doSeizou = async () => {
               @click="approve(p.id)"
             >退会</button>
           </div>
-          <div class="bbs-body">{{ p.body }}</div>
+          <div class="bbs-body"><RichText :text="p.body" /></div>
         </div>
         <div v-if="view.own" class="del-line">
           <select v-model="delBoard">
@@ -378,9 +388,13 @@ const doSeizou = async () => {
       <button class="btn" :disabled="busy || !view.materials.has_shop || view.materials.made_today" @click="doSeizou">変更／作成</button>
     </div>
   </div>
+  <EmojiPicker v-if="emojiFor" @pick="insertEmoji" @close="emojiFor = null" />
 </template>
 
 <style scoped>
+.emoji-btn {
+  margin-left: 6px;
+}
 .company {
   max-width: 820px;
   margin: 8px auto 0;

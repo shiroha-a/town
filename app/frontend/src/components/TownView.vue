@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import RichText from './RichText.vue';
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue';
 import { api, WARP_FEE, assetUrl, type Player, type Params, type TownFacility, type TownAsset, type Town, type HouseCell, type MoveResult, type WorkResponse } from '../api';
 import { satietyLabel } from '../params';
@@ -690,7 +691,7 @@ const paramBar = (v: number) => Math.max(3, Math.round((v / paramMax.value) * 10
           <div v-for="g in adminGreets" :key="g.id" class="chat-line">
             <span class="cbadge admin">管理人</span>
             <span class="ct">{{ fmtChatTime(g.posted_at) }}</span>
-            <span class="cn">{{ g.user_name }}</span>：<span :style="{ color: g.color }">{{ g.body }}</span>
+            <span class="cn">{{ g.user_name }}</span>：<span :style="{ color: g.color }"><RichText :text="g.body" /></span>
           </div>
         </div>
         <!-- 宣伝(有料枠、最新2件) -->
@@ -698,13 +699,13 @@ const paramBar = (v: number) => Math.max(3, Math.round((v / paramMax.value) * 10
           <div v-for="g in adGreets" :key="g.id" class="chat-line">
             <span class="cbadge ad">宣伝</span>
             <span class="ct">{{ fmtChatTime(g.posted_at) }}</span>
-            <span class="cn">{{ g.user_name }}</span>：<span :style="{ color: g.color }">{{ g.body }}</span>
+            <span class="cn">{{ g.user_name }}</span>：<span :style="{ color: g.color }"><RichText :text="g.body" /></span>
           </div>
         </div>
         <!-- 通常のあいさつ(最新6件) -->
         <div v-for="g in normalGreets" :key="g.id" class="chat-line">
           <span class="ct">{{ fmtChatTime(g.posted_at) }}</span>
-          <span class="cn">{{ g.user_name }}</span>：<span :style="{ color: g.color }">{{ g.body }}</span>
+          <span class="cn">{{ g.user_name }}</span>：<span :style="{ color: g.color }"><RichText :text="g.body" /></span>
         </div>
       </div>
     </div>

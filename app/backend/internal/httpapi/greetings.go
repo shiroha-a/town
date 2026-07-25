@@ -49,6 +49,9 @@ func (s *Server) postGreeting(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "category is required")
 		return
 	}
+	if tooManyEmoji(w, req.Body) {
+		return
+	}
 	p, result, err := s.actions.DoGreet(r.Context(), id, req.Category, req.Body, req.Color, req.Janken, req.IdempotencyKey)
 	if errors.Is(err, action.ErrBadGreet) {
 		writeError(w, http.StatusBadRequest, "本文は1〜60字、色は#rrggbbで指定してください。")

@@ -1064,6 +1064,30 @@ export interface ShopStockView {
 // 管理APIの認可はログインセッション(HttpOnly cookie)で行う。
 // 以前は X-Acting-Player-Id ヘッダを自己申告していたが、詐称できるため廃止した。
 // Misskey連携(prof施設)。
+// カスタム絵文字。
+export type UsedEmoji = {
+  host: string;
+  name: string;
+  url: string;
+  license: string;
+  category: string;
+};
+
+export type PickerEmoji = {
+  name: string;
+  category: string;
+  url: string;
+  aliases: string[] | null;
+};
+
+export type EmojiResolveResult = {
+  allowed: boolean;
+  reason?: string;
+  message?: string;
+  emoji?: UsedEmoji;
+  shortcode?: string;
+};
+
 export type MisskeyProfile = {
   player_id: number;
   username: string;
@@ -1118,6 +1142,15 @@ export const api = {
     }),
   getPlayer: (id: number) => request<Player>('GET', `/players/${id}`),
   listPlayers: () => request<PublicSummary[]>('GET', '/players'),
+  emojiList: (host?: string) =>
+    request<{ host: string; emojis: PickerEmoji[] }>(
+      'GET',
+      `/emojis${host ? `?host=${encodeURIComponent(host)}` : ''}`,
+    ),
+  resolveEmoji: (host: string, name: string) =>
+    request<EmojiResolveResult>('POST', '/emojis/resolve', { host, name }),
+  usedEmojis: () =>
+    request<{ emojis: UsedEmoji[] }>('GET', '/emojis/used').then((r) => r.emojis),
   misskeyProfile: (id: number) => request<MisskeyProfileResp>('GET', `/players/${id}/misskey`),
   misskeyFollow: (targetId: number) =>
     request<FollowResult>('POST', '/misskey/follow', { target_id: targetId }),

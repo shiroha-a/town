@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import EmojiPicker from './EmojiPicker.vue';
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { api, type Player } from '../api';
 
@@ -36,6 +37,11 @@ const MAX_LEN = 60;
 
 const category = ref('あいさつ');
 const body = ref('');
+const emojiOpen = ref(false);
+function insertEmoji(code: string) {
+  body.value += code;
+  emojiOpen.value = false;
+}
 const color = ref('#333333');
 const janken = ref('none');
 const message = ref('');
@@ -118,6 +124,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
           <select v-model="janken" title="ジャンケン">
             <option v-for="j in JANKEN" :key="j.value" :value="j.value">{{ j.label }}</option>
           </select>
+          <button class="gm-emoji" title="絵文字" @click="emojiOpen = true">絵</button>
           <span class="gm-remain" :class="{ low: remain <= 10 }">{{ remain }}</span>
           <button class="gm-post" :disabled="busy || !body.trim()" @click="post">投稿</button>
         </div>
@@ -128,9 +135,18 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
       </div>
     </div>
   </div>
+  <EmojiPicker v-if="emojiOpen" @pick="insertEmoji" @close="emojiOpen = false" />
 </template>
 
 <style scoped>
+.gm-emoji {
+  border: 1px solid #997a44;
+  background: #f0e6cf;
+  color: #663300;
+  font-size: 12px;
+  padding: 2px 6px;
+  cursor: pointer;
+}
 .gm-overlay {
   position: fixed;
   inset: 0;

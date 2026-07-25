@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import EmojiPicker from './EmojiPicker.vue';
+import RichText from './RichText.vue';
 import { ref, computed, onMounted } from 'vue';
 import {
   api,
@@ -241,18 +243,18 @@ const nushiPagePosts = computed(() =>
 const bbsMaxPage = computed(() => Math.max(0, Math.ceil(bbsThreads.value.length / BBS_PER_PAGE) - 1));
 const nushiMaxPage = computed(() => Math.max(0, Math.ceil(nushiPosts.value.length / NUSHI_PER_PAGE) - 1));
 // 本文中のURLをリンク化するためのトークン分割(レガシーの自動リンク)。
-function linkTokens(body: string): { link: boolean; v: string }[] {
-  const out: { link: boolean; v: string }[] = [];
-  const re = /https?:\/\/[\w.~\-/?&+=:@%;#]+/g;
-  let last = 0;
-  for (const m of body.matchAll(re)) {
-    if (m.index > last) out.push({ link: false, v: body.slice(last, m.index) });
-    out.push({ link: true, v: m[0] });
-    last = m.index + m[0].length;
+// 絵文字ピッカー。開いた入力欄を覚えておき、選ばれたショートコードを差し込む。
+const emojiFor = ref<string | null>(null);
+function insertEmoji(code: string) {
+  const target = emojiFor.value;
+  emojiFor.value = null;
+  if (target === 'bbs') bbsBody.value = bbsBody.value + code;
+  else if (target?.startsWith('reply:')) {
+    const no = Number(target.slice(6));
+    replyBodies.value[no] = (replyBodies.value[no] ?? '') + code;
   }
-  if (last < body.length) out.push({ link: false, v: body.slice(last) });
-  return out;
 }
+
 async function loadBbs() {
   bbs.value = [];
   try {
@@ -369,7 +371,10 @@ async function doDeleteBbs(kind: string, opts: { articleNo?: number; threadNo?: 
           <div v-if="current.comment" class="bbs-lead">{{ current.comment }}</div>
           <div class="bbs-form">
             <textarea v-model="bbsBody" rows="4" class="bbs-area"></textarea>
-            <div><button class="btn" :disabled="busy" @click="doPostBbs(bbsBody)">新規投稿</button></div>
+            <div>
+              <button class="btn" :disabled="busy" @click="doPostBbs(bbsBody)">新規投稿</button>
+              <button class="btn emoji-btn" @click="emojiFor = 'bbs'">絵文字</button>
+            </div>
           </div>
           <div class="bbs-posts">
             <div v-if="bbsThreads.length === 0" class="bbs-empty">まだ書き込みはありません。</div>
@@ -377,14 +382,15 @@ async function doDeleteBbs(kind: string, opts: { articleNo?: number; threadNo?: 
               <hr class="thread-hr" />
               <div class="thread-no">NO.{{ t.parent.thread_no }}</div>
               <div>
-                <span class="bbs-author">{{ t.parent.author_name }}<span v-if="t.parent.author_job" class="bbs-job">（{{ t.parent.author_job }}）</span></span>：<span class="bbs-body-inline"><template v-for="(tk, i) in linkTokens(t.parent.body)" :key="i"><a v-if="tk.link" :href="tk.v" target="_blank" rel="noopener noreferrer">{{ tk.v }}</a><template v-else>{{ tk.v }}</template></template></span>（{{ fmtDate(t.parent.created_at) }}）<span class="bbs-no">記事no.{{ t.parent.id }}</span>
+                <span class="bbs-author">{{ t.parent.author_name }}<span v-if="t.parent.author_job" class="bbs-job">（{{ t.parent.author_job }}）</span></span>：<span class="bbs-body-inline"><RichText :text="t.parent.body" /></span>（{{ fmtDate(t.parent.created_at) }}）<span class="bbs-no">記事no.{{ t.parent.id }}</span>
               </div>
               <div class="reply-form">
                 <textarea v-model="replyBodies[t.parent.thread_no]" rows="2" class="reply-area"></textarea>
+                <button class="btn emoji-btn" @click="emojiFor = `reply:${t.parent.thread_no}`">絵文字</button>
                 <button class="btn" :disabled="busy" @click="doPostBbs(replyBodies[t.parent.thread_no] ?? '', t.parent.thread_no)">レス</button>
               </div>
               <div v-for="p in t.replies" :key="p.id" class="bbs-reply">
-                <span class="bbs-author">{{ p.author_name }}<span v-if="p.author_job" class="bbs-job">（{{ p.author_job }}）</span></span>：<span class="bbs-body-inline"><template v-for="(tk, i) in linkTokens(p.body)" :key="i"><a v-if="tk.link" :href="tk.v" target="_blank" rel="noopener noreferrer">{{ tk.v }}</a><template v-else>{{ tk.v }}</template></template></span>（{{ fmtDate(p.created_at) }}）<span class="bbs-no">記事no.{{ p.id }}</span>
+                <span class="bbs-author">{{ p.author_name }}<span v-if="p.author_job" class="bbs-job">（{{ p.author_job }}）</span></span>：<span class="bbs-body-inline"><RichText :text="p.body" /></span>（{{ fmtDate(p.created_at) }}）<span class="bbs-no">記事no.{{ p.id }}</span>
               </div>
             </div>
           </div>
@@ -530,9 +536,13 @@ async function doDeleteBbs(kind: string, opts: { articleNo?: number; threadNo?: 
       </div>
     </template>
   </div>
+  <EmojiPicker v-if="emojiFor" @pick="insertEmoji" @close="emojiFor = null" />
 </template>
 
 <style scoped>
+.emoji-btn {
+  margin-left: 6px;
+}
 /* bodyのmargin(5px)を打ち消し、レガシーのbody背景色のように全面を塗る。 */
 .house-page {
   padding: 6px;
