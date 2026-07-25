@@ -137,7 +137,6 @@ const facilityTitles: Record<string, string> = {
     <div class="booting">読み込み中…</div>
   </template>
   <template v-else-if="!player">
-    <h1 class="town-title">Ｔｏｗｎ</h1>
     <LoginView :logged-out="loggedOut" :logged-out-host="loggedOutHost" @login="onLogin" />
   </template>
   <template v-else>
