@@ -65,10 +65,10 @@ go run ./cmd/town web      # REST API
 go run ./cmd/town worker   # 時間進行(別ターミナル)
 ```
 
-## API
+## ドキュメント
 
-REST APIは `/api/v1` 以下にあります。全162エンドポイントの一覧と、認可の区分・
-冪等キー・エラー形式は [docs/api.md](docs/api.md) を参照してください。
+- [docs/architecture.md](docs/architecture.md) — プロジェクト構成と設計上の決めごと
+- [docs/api.md](docs/api.md) — APIリファレンス(全162エンドポイント)
 
 ## テスト
 
