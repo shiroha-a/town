@@ -65,10 +65,7 @@ async function onLogout() {
   // i/revoke-token は secure:true でアクセストークンから呼べないため、
   // こちらから古いトークンを消せない。無駄なログアウトを減らすために断りを入れる。
   const ok = window.confirm(
-    'ログアウトしますか？\n\n' +
-      '次にログインすると、Misskey側で新しいアクセストークンが発行されます。' +
-      'Misskeyの仕様で古いトークンをこちらから削除できないため、使わないトークンが残ります。\n\n' +
-      'このブラウザを閉じるだけならログアウトは不要です（30日間はそのまま入れます）。',
+    'ログアウトしますか？\n次にログインすると、Misskey側で新しいアクセストークンが発行されます。',
   );
   if (!ok) return;
   loggedOutHost.value = player.value?.instance_host ?? '';
