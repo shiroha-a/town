@@ -41,9 +41,8 @@ const AMOUNTS = [1, 2, 3, 5, 10, 20, 30, 50, 80, 100, 200, 300, 500, 800, 1000];
 
 // 教育できるか: 運営=オーナーのみ / 株式会社=オーナー+役員。
 const canEdu = computed(() => (view.value?.own ?? false) || (view.value?.officer ?? false));
-const CREDIT_CARDS = ['クレジットカード', 'ゴールドクレジットカード', 'スペシャルクレジットカード'];
 const hasCreditCard = computed(() =>
-  props.player.items.some((it) => CREDIT_CARDS.includes(it.name) && it.remaining_uses > 0),
+  props.player.items.some((it) => it.enables_credit && it.remaining_uses > 0),
 );
 const myParams = computed(() => props.player.params as unknown as Record<string, number>);
 

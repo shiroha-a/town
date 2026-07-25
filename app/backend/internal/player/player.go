@@ -77,6 +77,7 @@ type ItemStack struct {
 	IntervalMin     int            // 使用間隔(分)
 	CalorieG        int            // 摂取カロリー(食べると体重+calorie_g g)
 	Special         string         // 特殊効果の説明(体重/身長/病気。無ければ空)
+	EnablesCredit   bool           // 所持しているとクレジット払いができる(カード類)
 	NextAvailableAt *time.Time     // クールタイム中の再使用可能時刻(未使用/経過済みはnil)
 }
 
@@ -529,7 +530,7 @@ func (s *Service) Get(ctx context.Context, id int64) (*Player, error) {
 	items, err := s.pool.Query(ctx,
 		`SELECT ci.id, ci.name, COALESCE(ci.category, ''), pi.quantity, pi.remaining_uses,
 		        CEIL(pi.remaining_uses::numeric / ci.durability)::int AS sets,
-		        ci.durability_unit, ci.effect, ci.use_interval_min, ci.calorie_g,
+		        ci.durability_unit, ci.effect, ci.use_interval_min, ci.calorie_g, ci.enables_credit,
 		        CASE WHEN pi.last_used_at IS NOT NULL
 		                  AND pi.last_used_at + make_interval(mins => ci.use_interval_min) > now()
 		             THEN pi.last_used_at + make_interval(mins => ci.use_interval_min)
@@ -547,7 +548,7 @@ func (s *Service) Get(ctx context.Context, id int64) (*Player, error) {
 			it      ItemStack
 			effJSON []byte
 		)
-		if err := items.Scan(&it.ItemID, &it.Name, &it.Category, &it.Quantity, &it.RemainingUses, &it.Sets, &it.DurabilityUnit, &effJSON, &it.IntervalMin, &it.CalorieG, &it.NextAvailableAt); err != nil {
+		if err := items.Scan(&it.ItemID, &it.Name, &it.Category, &it.Quantity, &it.RemainingUses, &it.Sets, &it.DurabilityUnit, &effJSON, &it.IntervalMin, &it.CalorieG, &it.EnablesCredit, &it.NextAvailableAt); err != nil {
 			return nil, fmt.Errorf("scan item: %w", err)
 		}
 		if debugNoCd {

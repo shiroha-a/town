@@ -14,6 +14,7 @@ export interface ItemStack {
   interval_min: number;
   calorie_g: number; // 摂取カロリー(食べると体重+calorie_g g)
   special: string; // 特殊効果の説明(体重/身長/病気。無ければ空)
+  enables_credit: boolean; // 所持しているとクレジット払いができる(カード類)
   // クールタイム中の再使用可能時刻(ISO8601)。使用可能ならnull。
   next_available_at: string | null;
 }
@@ -1048,9 +1049,10 @@ export const api = {
       course_id: courseId,
       idempotency_key: newIdempotencyKey(),
     }),
-  facilityUse: (id: number, facility: string, menuId: number) =>
+  facilityUse: (id: number, facility: string, menuId: number, payMethod: 'cash' | 'credit' = 'cash') =>
     request<Player>('POST', `/players/${id}/facilities/${facility}/use`, {
       menu_id: menuId,
+      pay_method: payMethod,
       idempotency_key: newIdempotencyKey(),
     }),
   jobs: () => request<JobOption[]>('GET', '/jobs'),
@@ -1061,10 +1063,11 @@ export const api = {
     }),
   work: (id: number) =>
     request<WorkResponse>('POST', `/players/${id}/work`, { idempotency_key: newIdempotencyKey() }),
-  buy: (id: number, itemId: number, facility = '') =>
+  buy: (id: number, itemId: number, facility = '', payMethod: 'cash' | 'credit' = 'cash') =>
     request<Player>('POST', `/players/${id}/buy`, {
       item_id: itemId,
       facility,
+      pay_method: payMethod,
       idempotency_key: newIdempotencyKey(),
     }),
   use: (id: number, itemId: number) =>

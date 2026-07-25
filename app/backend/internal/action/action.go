@@ -1943,7 +1943,7 @@ func (s *Service) loadOnsenBath(ctx context.Context, bathID int64) (price int64,
 // enforces the shop stock, the per-item ownership cap (max_sets), charges the
 // total price out of circulation and adds the durability to the inventory.
 // remaining_uses accumulates durability×sets ('use'なら残回数, 'day'なら残日数)。
-func (s *Service) DoBuy(ctx context.Context, playerID int64, facility string, itemID int64, sets int, idempotencyKey string) (*player.Player, error) {
+func (s *Service) DoBuy(ctx context.Context, playerID int64, facility string, itemID int64, sets int, payMethod, idempotencyKey string) (*player.Player, error) {
 	if sets <= 0 {
 		sets = 1
 	}
@@ -1957,8 +1957,10 @@ func (s *Service) DoBuy(ctx context.Context, playerID int64, facility string, it
 	total := price * int64(sets)
 	add := durability * sets
 	return s.runAction(ctx, playerID, "buy", idempotencyKey, func(ctx context.Context, tx pgx.Tx, state effects.State) error {
-		if state.Money < total {
-			return &ConditionError{Message: "お金が足りません。"}
+		// 支払い元(現金 or クレジット=普通口座)。残高不足はここで弾かれる。
+		payer, err := s.payerAccount(ctx, tx, playerID, payMethod, total, state.Money)
+		if err != nil {
+			return err
 		}
 		// 所持上限: 追加後の残量が max_sets×durability を超えないこと。
 		var current int
@@ -1987,7 +1989,7 @@ func (s *Service) DoBuy(ctx context.Context, playerID int64, facility string, it
 			return err
 		}
 		if err := s.ledger.PostTx(ctx, tx, "buy", "", []ledger.Entry{
-			{Account: ledger.PlayerAccount(playerID), Delta: -total},
+			{Account: payer, Delta: -total},
 			{Account: ledger.SystemAccount("shop_sink"), Delta: total},
 		}); err != nil {
 			return fmt.Errorf("pay: %w", err)
@@ -2144,7 +2146,7 @@ func (s *Service) loadFood(ctx context.Context, foodID int64) (int64, effects.Ef
 // it enforces a per-(player,facility) cooldown, checks power, charges the price,
 // applies the effect (param上昇 + power消費), and advances the cooldown by the
 // menu item's interval.
-func (s *Service) DoFacilityAction(ctx context.Context, playerID int64, facility string, menuID int64, idempotencyKey string) (*player.Player, error) {
+func (s *Service) DoFacilityAction(ctx context.Context, playerID int64, facility string, menuID int64, payMethod, idempotencyKey string) (*player.Player, error) {
 	price, eff, intervalMin, err := s.loadFacilityMenuItem(ctx, facility, menuID)
 	if err != nil {
 		return nil, err
@@ -2163,11 +2165,13 @@ func (s *Service) DoFacilityAction(ctx context.Context, playerID int64, facility
 		if param, short := eff.InsufficientParam(state); short {
 			return &ConditionError{Message: paramShortMessage(param)}
 		}
-		if state.Money < price {
-			return &ConditionError{Message: "お金が足りません。"}
+		// 支払い元(現金 or クレジット=普通口座)。
+		payer, err := s.payerAccount(ctx, tx, playerID, payMethod, price, state.Money)
+		if err != nil {
+			return err
 		}
 		if err := s.ledger.PostTx(ctx, tx, facility, "", []ledger.Entry{
-			{Account: ledger.PlayerAccount(playerID), Delta: -price},
+			{Account: payer, Delta: -price},
 			{Account: ledger.SystemAccount(facility + "_sink"), Delta: price},
 		}); err != nil {
 			return fmt.Errorf("pay: %w", err)

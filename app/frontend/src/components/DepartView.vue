@@ -15,6 +15,13 @@ const kind = ref<'ok' | 'error'>('ok');
 const busy = ref(false);
 const { toast, showToast, closeToast } = useToast();
 
+// 支払い方法。クレジットはカード類(enables_credit)を持っているときだけ選べ、
+// 普通口座から引き落とす(レガシー depart.cgi の支払い方法セレクト)。
+const payMethod = ref<'cash' | 'credit'>('cash');
+const hasCreditCard = computed(() =>
+  props.player.items.some((it) => it.enables_credit && it.remaining_uses > 0),
+);
+
 onMounted(async () => {
   try {
     items.value = await api.shopItems();
@@ -42,12 +49,12 @@ async function buy(it: ShopItem) {
   message.value = '';
   const before = props.player;
   try {
-    const after = await api.buy(props.player.id, it.id);
+    const after = await api.buy(props.player.id, it.id, '', payMethod.value);
     emit('update', after);
     items.value = await api.shopItems(); // 購入後の在庫数を反映する
     showToast({
       variant: 'item',
-      title: `${it.name}を購入した`,
+      title: `${it.name}を購入した${payMethod.value === 'credit' ? '（クレジット）' : ''}`,
       lines: buildEffectLines(before, after),
       icon: 'item',
     });
@@ -74,6 +81,13 @@ async function buy(it: ShopItem) {
         デパートです。品揃えは毎日変わります。種類は豊富ですが値段は高めです。<br />
         また一度に持てる所有物の限度は{{ player.item_kind_limit > 0 ? `${player.item_kind_limit}品目` : '無制限' }}です。<br />
         ●{{ player.display_name }}さんの所持金：<span class="money">{{ yen(player.money) }}円</span>
+        <span class="pay">
+          支払い
+          <select v-model="payMethod" data-test="pay-method">
+            <option value="cash">現金</option>
+            <option value="credit" :disabled="!hasCreditCard">クレジット（普通口座）</option>
+          </select>
+        </span>
       </div>
       <div class="title">デパート</div>
     </div>
@@ -156,6 +170,10 @@ async function buy(it: ShopItem) {
   display: flex;
   align-items: stretch;
   margin-bottom: 8px;
+}
+.depart-header .pay {
+  margin-left: 12px;
+  white-space: nowrap;
 }
 .depart-header .lead {
   flex: 1 1 auto;

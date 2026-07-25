@@ -1481,12 +1481,12 @@ func TestDailyShop(t *testing.T) {
 	}
 
 	// 本日の品揃え内の商品は「品揃えにない」で弾かれない(価格不足等は別問題)。
-	if _, err := asvc.DoBuy(ctx, alice.ID, "", items[0].ID, 1, "buy-in"); errors.Is(err, action.ErrItemNotFound) {
+	if _, err := asvc.DoBuy(ctx, alice.ID, "", items[0].ID, 1, "cash", "buy-in"); errors.Is(err, action.ErrItemNotFound) {
 		t.Errorf("in-rotation item rejected as not found")
 	}
 	// 本日の品揃え外の商品は購入不可(ErrItemNotFound)。
 	if outID != 0 {
-		if _, err := asvc.DoBuy(ctx, alice.ID, "", outID, 1, "buy-out"); !errors.Is(err, action.ErrItemNotFound) {
+		if _, err := asvc.DoBuy(ctx, alice.ID, "", outID, 1, "cash", "buy-out"); !errors.Is(err, action.ErrItemNotFound) {
 			t.Errorf("out-of-rotation buy err = %v, want ErrItemNotFound", err)
 		}
 	} else {
