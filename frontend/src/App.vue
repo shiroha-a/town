@@ -106,19 +106,36 @@ async function reload() {
 
 // メイン画面では一定間隔でステータスを取り込み、パワー回復・コンディション・
 // 就労可否などをリアルタイムに近い形で反映する(サブ画面では操作を妨げないため停止)。
+//
+// 間隔はサーバーの回復間隔(1ポイントあたりの秒数)に合わせる。固定値だと、
+// 回復が遅い設定では無駄に叩き、速い設定では表示が追いつかないため。
+// 設定を変えても次回の予約から効くよう、都度読み直す。
+const POLL_MIN_SEC = 5;
+const POLL_FALLBACK_SEC = 10;
 let pollTimer: number | undefined;
-onMounted(() => {
-  pollTimer = window.setInterval(() => {
+
+function pollIntervalMs(): number {
+  const st = player.value?.status;
+  const secs = [st?.energy_recovery_sec, st?.nou_recovery_sec].filter(
+    (v): v is number => typeof v === 'number' && v > 0,
+  );
+  const sec = secs.length ? Math.min(...secs) : POLL_FALLBACK_SEC;
+  return Math.max(POLL_MIN_SEC, sec) * 1000;
+}
+
+function schedulePoll() {
+  pollTimer = window.setTimeout(async () => {
     if (player.value && view.value === 'town') {
-      api
-        .getPlayer(player.value.id)
-        .then((p) => {
-          player.value = p;
-        })
-        .catch(() => {});
+      try {
+        player.value = await api.getPlayer(player.value.id);
+      } catch {
+        // 一時的な失敗は無視して次回に任せる。
+      }
     }
-  }, 10000);
-});
+    schedulePoll();
+  }, pollIntervalMs());
+}
+onMounted(schedulePoll);
 onMounted(() => {
   guestTimer = window.setInterval(() => {
     now.value = Date.now();
@@ -127,7 +144,7 @@ onMounted(() => {
   }, 30000);
 });
 onUnmounted(() => {
-  if (pollTimer !== undefined) window.clearInterval(pollTimer);
+  if (pollTimer !== undefined) window.clearTimeout(pollTimer);
   if (guestTimer !== undefined) window.clearInterval(guestTimer);
 });
 

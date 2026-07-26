@@ -110,7 +110,11 @@ type Status struct {
 	WorkAvailableAt *time.Time // 就労クールタイム中の再就労可能時刻(可能ならnil)
 	EnergyFullAt    *time.Time // 身体パワーが満タンになる時刻(満タン時はnil)
 	NouEnergyFullAt *time.Time // 頭脳パワーが満タンになる時刻(満タン時はnil)
-	OnsenMultiplier int        // 入浴中の回復倍率(1=入浴していない)
+	// 1ポイント回復に要する秒数(入浴倍率を反映済み)。画面が状態を取り直す
+	// 間隔をこれに合わせるために返す。
+	EnergyRecoverySec int
+	NouRecoverySec    int
+	OnsenMultiplier   int // 入浴中の回復倍率(1=入浴していない)
 }
 
 // Service is the player domain service.
@@ -623,6 +627,9 @@ func (s *Service) Get(ctx context.Context, id int64) (*Player, error) {
 	if mult < 1 {
 		mult = 1
 	}
+	// 画面のポーリング間隔用。入浴中は回復が速いので、その倍率も反映する。
+	p.Status.EnergyRecoverySec = int(float64(cfg.EnergyRecoverySec) / float64(mult))
+	p.Status.NouRecoverySec = int(float64(cfg.NouRecoverySec) / float64(mult))
 	if sec := cfg.EnergyRecoverySec; sec > 0 && p.Status.Energy < p.Status.EnergyMax {
 		d := time.Duration(float64(sec)/float64(mult)*float64(p.Status.EnergyMax-p.Status.Energy)) * time.Second
 		full := energyRecoveredAt.Add(d)

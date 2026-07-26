@@ -17,26 +17,28 @@ type registerReq struct {
 }
 
 type statusResp struct {
-	Energy          int        `json:"energy"`
-	EnergyMax       int        `json:"energy_max"`
-	NouEnergy       int        `json:"nou_energy"`
-	NouEnergyMax    int        `json:"nou_energy_max"`
-	Job             string     `json:"job"`
-	JobLevel        int        `json:"job_level"`
-	JobExp          int        `json:"job_exp"`
-	JobKaisuu       int        `json:"job_kaisuu"`
-	MasteredJobs    []string   `json:"mastered_jobs"`
-	Satiety         int        `json:"satiety"`
-	HeightCm        int        `json:"height_cm"`
-	WeightG         int        `json:"weight_g"`
-	BMI             int        `json:"bmi"`
-	BodyType        string     `json:"body_type"`
-	DiseaseIndex    int        `json:"disease_index"`
-	DiseaseName     string     `json:"disease_name"`
-	Condition       string     `json:"condition"`
-	WorkAvailableAt *time.Time `json:"work_available_at"`
-	EnergyFullAt    *time.Time `json:"energy_full_at"`
-	NouEnergyFullAt *time.Time `json:"nou_energy_full_at"`
+	Energy            int        `json:"energy"`
+	EnergyMax         int        `json:"energy_max"`
+	NouEnergy         int        `json:"nou_energy"`
+	NouEnergyMax      int        `json:"nou_energy_max"`
+	Job               string     `json:"job"`
+	JobLevel          int        `json:"job_level"`
+	JobExp            int        `json:"job_exp"`
+	JobKaisuu         int        `json:"job_kaisuu"`
+	MasteredJobs      []string   `json:"mastered_jobs"`
+	Satiety           int        `json:"satiety"`
+	HeightCm          int        `json:"height_cm"`
+	WeightG           int        `json:"weight_g"`
+	BMI               int        `json:"bmi"`
+	BodyType          string     `json:"body_type"`
+	DiseaseIndex      int        `json:"disease_index"`
+	DiseaseName       string     `json:"disease_name"`
+	Condition         string     `json:"condition"`
+	WorkAvailableAt   *time.Time `json:"work_available_at"`
+	EnergyRecoverySec int        `json:"energy_recovery_sec"`
+	NouRecoverySec    int        `json:"nou_recovery_sec"`
+	EnergyFullAt      *time.Time `json:"energy_full_at"`
+	NouEnergyFullAt   *time.Time `json:"nou_energy_full_at"`
 }
 
 type itemResp struct {
@@ -143,26 +145,28 @@ func toResp(p *player.Player) playerResp {
 		IsGuest:      p.IsGuest,
 		GuestExpires: p.GuestExpiresAt,
 		Status: statusResp{
-			Energy:          p.Status.Energy,
-			EnergyMax:       p.Status.EnergyMax,
-			NouEnergy:       p.Status.NouEnergy,
-			NouEnergyMax:    p.Status.NouEnergyMax,
-			Job:             p.Status.Job,
-			JobLevel:        p.Status.JobLevel,
-			JobExp:          p.Status.JobExp,
-			JobKaisuu:       p.Status.JobKaisuu,
-			MasteredJobs:    masteredJobs,
-			Satiety:         p.Status.Satiety,
-			HeightCm:        p.Status.HeightCm,
-			WeightG:         p.Status.WeightG,
-			BMI:             p.Status.BMI,
-			BodyType:        p.Status.BodyType,
-			DiseaseIndex:    p.Status.DiseaseIndex,
-			DiseaseName:     p.Status.DiseaseName,
-			Condition:       p.Status.Condition,
-			WorkAvailableAt: p.Status.WorkAvailableAt,
-			EnergyFullAt:    p.Status.EnergyFullAt,
-			NouEnergyFullAt: p.Status.NouEnergyFullAt,
+			Energy:            p.Status.Energy,
+			EnergyMax:         p.Status.EnergyMax,
+			NouEnergy:         p.Status.NouEnergy,
+			NouEnergyMax:      p.Status.NouEnergyMax,
+			Job:               p.Status.Job,
+			JobLevel:          p.Status.JobLevel,
+			JobExp:            p.Status.JobExp,
+			JobKaisuu:         p.Status.JobKaisuu,
+			MasteredJobs:      masteredJobs,
+			Satiety:           p.Status.Satiety,
+			HeightCm:          p.Status.HeightCm,
+			WeightG:           p.Status.WeightG,
+			BMI:               p.Status.BMI,
+			BodyType:          p.Status.BodyType,
+			DiseaseIndex:      p.Status.DiseaseIndex,
+			DiseaseName:       p.Status.DiseaseName,
+			Condition:         p.Status.Condition,
+			WorkAvailableAt:   p.Status.WorkAvailableAt,
+			EnergyRecoverySec: p.Status.EnergyRecoverySec,
+			NouRecoverySec:    p.Status.NouRecoverySec,
+			EnergyFullAt:      p.Status.EnergyFullAt,
+			NouEnergyFullAt:   p.Status.NouEnergyFullAt,
 		},
 		Params:        paramsResp(p.Params),
 		Items:         items,
