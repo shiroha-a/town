@@ -91,7 +91,7 @@ func (s *Server) authStart(w http.ResponseWriter, r *http.Request) {
 	// 参加できるインスタンスか(ブラックリスト/ホワイトリスト)。
 	ok, err := s.instanceRules.Allowed(r.Context(), s.instancePolicy(r), host)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	if !ok {
@@ -107,12 +107,12 @@ func (s *Server) authStart(w http.ResponseWriter, r *http.Request) {
 
 	sessionID, err := miauth.NewSessionID()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	if _, err := s.pool.Exec(r.Context(),
 		`INSERT INTO auth_sessions (id, host) VALUES ($1, $2)`, sessionID, host); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, authStartResp{
@@ -156,7 +156,7 @@ func (s *Server) authCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	// 引き換えに成功した時点で使い切りにする(再利用を防ぐ)。
 	if _, err := s.pool.Exec(r.Context(), `DELETE FROM auth_sessions WHERE id = $1`, req.Session); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	displayName := res.User.Name
@@ -165,12 +165,12 @@ func (s *Server) authCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	p, err := s.players.Register(r.Context(), host, res.User.ID, displayName)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	// Misskeyのアクセストークンを保存(prof表示やフォローで使う)。
 	if err := s.players.SetMisskeyToken(r.Context(), p.ID, res.Token); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	// prof施設で見せるプロフィールを取り込んでおく。相手インスタンスの不調で
@@ -180,12 +180,15 @@ func (s *Server) authCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	token, err := s.sessions.Issue(r.Context(), p.ID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	s.sessions.SetCookie(w, token)
 	writeJSON(w, http.StatusOK, toResp(p))
 }
+
+// maxLiveGuests caps how many guests may exist at once.
+const maxLiveGuests = 200
 
 // authGuest starts a お試しプレイ: 使い捨ての住民を作ってセッションを張る。
 // Misskeyアカウントが無くても触れるようにするためのもので、作られた住民は
@@ -199,14 +202,26 @@ func (s *Server) authGuest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "お試しプレイは現在受け付けていません。")
 		return
 	}
+	// 同時に生きているゲストの総数で頭を抑える。IP単位の制限はヘッダを
+	// 詐称されると抜けられるので、DBが膨らむ量はここで確実に止める。
+	live, err := s.players.LiveGuests(r.Context(), s.settings.Get().GuestLifetimeMin)
+	if err != nil {
+		writeInternal(w, r, err)
+		return
+	}
+	if live >= maxLiveGuests {
+		writeError(w, http.StatusServiceUnavailable,
+			"お試しプレイの人数が上限に達しています。しばらく待ってからお試しください。")
+		return
+	}
 	p, err := s.players.RegisterGuest(r.Context(), guestName())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	token, err := s.sessions.Issue(r.Context(), p.ID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	s.sessions.SetCookie(w, token)
@@ -252,7 +267,7 @@ func (s *Server) adminListInstanceRules(w http.ResponseWriter, r *http.Request) 
 	}
 	rules, err := s.instanceRules.List(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -295,7 +310,7 @@ func (s *Server) adminDeleteInstanceRule(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if err := s.instanceRules.Delete(r.Context(), host); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})

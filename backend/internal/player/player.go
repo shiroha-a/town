@@ -210,6 +210,21 @@ func (s *Service) RegisterGuest(ctx context.Context, displayName string) (*Playe
 	return s.Get(ctx, id)
 }
 
+// LiveGuests counts guests that have not expired yet. 量産を頭打ちにするための
+// 全体上限の判定に使う(IP単位の制限はヘッダ詐称で抜けられるため)。
+func (s *Service) LiveGuests(ctx context.Context, lifetimeMin int) (int, error) {
+	if lifetimeMin <= 0 {
+		lifetimeMin = 60
+	}
+	var n int
+	if err := s.pool.QueryRow(ctx,
+		`SELECT count(*) FROM players
+		  WHERE is_guest AND created_at > now() - make_interval(mins => $1)`, lifetimeMin).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count live guests: %w", err)
+	}
+	return n, nil
+}
+
 // IsGuest reports whether the player is a お試しプレイ account.
 func (s *Service) IsGuest(ctx context.Context, id int64) (bool, error) {
 	var guest bool

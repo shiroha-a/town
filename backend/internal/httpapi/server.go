@@ -3,6 +3,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -54,6 +55,7 @@ type Server struct {
 	emojis         *emoji.Service
 	appName        string
 	allowedOrigins []string
+	limiter        *limiter
 }
 
 // instancePolicy reads the current instance policy from settings.
@@ -82,7 +84,7 @@ func NewServer(players *player.Service, actions *action.Service, contentSvc *con
 	s := &Server{players: players, actions: actions, content: contentSvc, settings: st, townmap: tmap, stock: stockSvc, keiba: keibaSvc, mail: mailSvc, greeting: greetingSvc, attendance: attendanceSvc, cleague: cleagueSvc, news: newsSvc, ranking: rankingSvc, serial: serialSvc, greetHub: newGreetHub(),
 		pool: auth.Pool, miauth: auth.MiAuth, instanceRules: auth.InstanceRules,
 		sessions: auth.Sessions, profiles: auth.Profiles, emojis: auth.Emojis,
-		appName: auth.AppName, allowedOrigins: auth.AllowedOrigins}
+		appName: auth.AppName, allowedOrigins: auth.AllowedOrigins, limiter: newLimiter()}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", s.health)
 	mux.HandleFunc("GET /api/v1/players", s.listPlayers)
@@ -254,7 +256,7 @@ func NewServer(players *player.Service, actions *action.Service, contentSvc *con
 	mux.HandleFunc("GET /api/v1/admin/players", s.adminListPlayers)
 	mux.HandleFunc("PUT /api/v1/admin/players/{id}", s.adminUpdatePlayer)
 	mux.HandleFunc("DELETE /api/v1/admin/players/{id}", s.adminDeletePlayer)
-	return recoverer(s.authGuard(mux))
+	return recoverer(securityHeaders(s.authGuard(mux)))
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -263,12 +265,45 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+// writeInternal reports an unexpected failure. 詳細はログにだけ残し、応答は
+// 固定の文言にする(DBのエラー文には表や列の名前が入るため、外に出さない)。
+func writeInternal(w http.ResponseWriter, r *http.Request, err error) {
+	// r は共通ヘルパから呼ぶときに nil のことがある。
+	path, method := "", ""
+	if r != nil {
+		path, method = r.URL.Path, r.Method
+	}
+	slog.Error("internal error", "path", path, "method", method, "err", err)
+	writeError(w, http.StatusInternalServerError, "処理に失敗しました。時間をおいてお試しください。")
+}
+
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// securityHeaders sets the response headers that cost nothing and close off
+// whole classes of mistakes:
+//
+//   - nosniff: アップロード画像を配信する経路があるので、ブラウザに中身を
+//     推測させない(宣言したMIMEとして扱わせる)
+//   - frame-options / CSP frame-ancestors: 他サイトに埋め込ませない
+//     (クリックジャッキング対策)
+//   - Referrer-Policy: 外部リンク(Misskeyのプロフィール等)へURLを漏らさない
+//
+// APIの応答は常にJSONか画像なので、default-src 'none' まで絞れる。
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // recoverer converts panics into 500 responses instead of dropping the connection.

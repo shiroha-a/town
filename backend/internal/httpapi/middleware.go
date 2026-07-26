@@ -103,6 +103,11 @@ func (s *Server) authGuard(mux *http.ServeMux) http.Handler {
 		// 個別に直さずに済ませるため。
 		_, pattern := mux.Handler(r)
 
+		// 認証まわりの経路は未ログインでも叩けるので、認可より先に頭を抑える。
+		if s.rateLimited(w, r, pattern) {
+			return
+		}
+
 		playerID, err := s.sessions.Lookup(r.Context(), session.TokenFrom(r))
 		if err != nil {
 			playerID = 0
@@ -117,7 +122,7 @@ func (s *Server) authGuard(mux *http.ServeMux) http.Handler {
 			}
 			ok, err := s.players.HasRole(r.Context(), playerID, "admin")
 			if err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
+				writeInternal(w, r, err)
 				return
 			}
 			if !ok {
@@ -137,7 +142,7 @@ func (s *Server) authGuard(mux *http.ServeMux) http.Handler {
 			if guestBlocked(pattern) {
 				guest, err := s.players.IsGuest(r.Context(), playerID)
 				if err != nil {
-					writeError(w, http.StatusInternalServerError, err.Error())
+					writeInternal(w, r, err)
 					return
 				}
 				if guest {
@@ -155,7 +160,7 @@ func (s *Server) authGuard(mux *http.ServeMux) http.Handler {
 			if guestBlocked(pattern) {
 				guest, err := s.players.IsGuest(r.Context(), playerID)
 				if err != nil {
-					writeError(w, http.StatusInternalServerError, err.Error())
+					writeInternal(w, r, err)
 					return
 				}
 				if guest {
@@ -180,7 +185,7 @@ func (s *Server) authGuard(mux *http.ServeMux) http.Handler {
 				}
 				isAdmin, err := s.players.HasRole(r.Context(), playerID, "admin")
 				if err != nil {
-					writeError(w, http.StatusInternalServerError, err.Error())
+					writeInternal(w, r, err)
 					return
 				}
 				if !isAdmin {
