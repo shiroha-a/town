@@ -35,6 +35,13 @@ type Item struct {
 	Effect      json.RawMessage `json:"effect"`
 	Enabled     bool            `json:"enabled"`
 	StockMaster *int            `json:"stock_master"` // 標準在庫数(NULL=無制限)
+	// Facility は「どこで扱う品か」。空とhanbai(自販機)は買うと持ち物になるが、
+	// syokudou/gym/onsen/school/kyushitu はその場で消費するメニューで、
+	// 持ち物にはならない(シリアルの景品などに選ばせないための判別に使う)。
+	Facility string `json:"facility"`
+	// IsGift はギフト屋で包んだ状態の品。贈る前提の一時的な形なので、
+	// 景品として直接配るものではない。
+	IsGift bool `json:"is_gift"`
 }
 
 // Job is a content job definition (含む給与体系, design 17.5)。
@@ -216,7 +223,8 @@ func (s *Service) DeleteItem(ctx context.Context, id int64) error {
 // ListItems returns all items ordered by id.
 func (s *Service) ListItems(ctx context.Context) ([]Item, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, name, COALESCE(category, ''), price, effect, enabled, stock_master
+		`SELECT id, name, COALESCE(category, ''), price, effect, enabled, stock_master,
+		        COALESCE(facility, ''), is_gift
 		 FROM content_items ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("list items: %w", err)
@@ -225,7 +233,8 @@ func (s *Service) ListItems(ctx context.Context) ([]Item, error) {
 	items := []Item{}
 	for rows.Next() {
 		var it Item
-		if err := rows.Scan(&it.ID, &it.Name, &it.Category, &it.Price, &it.Effect, &it.Enabled, &it.StockMaster); err != nil {
+		if err := rows.Scan(&it.ID, &it.Name, &it.Category, &it.Price, &it.Effect, &it.Enabled,
+			&it.StockMaster, &it.Facility, &it.IsGift); err != nil {
 			return nil, fmt.Errorf("scan item: %w", err)
 		}
 		items = append(items, it)
