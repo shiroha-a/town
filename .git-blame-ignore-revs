@@ -1,0 +1,8 @@
+# git blame から除外するコミット(整形など、中身を変えていないもの)。
+#
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# GitHubのblame表示はこのファイルを自動で参照する。
+
+# style(frontend): prettierで一括整形する
+1c5cfb3510aa6ffb35c638ad4cd810337ea9ae39

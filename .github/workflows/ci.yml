@@ -85,6 +85,9 @@ jobs:
       - name: 依存の取得
         run: npm ci --include=dev
 
+      - name: 整形の確認
+        run: npx prettier --check src
+
       # build は vue-tsc --noEmit を含むので、型チェックとビルドを兼ねる。
       - name: 型チェックとビルド
         run: npm run build
