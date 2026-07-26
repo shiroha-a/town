@@ -528,6 +528,15 @@ export interface AdminPlayerPayload {
   weight_g: number;
 }
 
+// 住民が自分で変えられる設定。
+export interface UserSettings {
+  display_name: string;
+  /** Misskeyの情報を街のプロフィールに載せるか(既定オフ)。 */
+  profile_public: boolean;
+  /** ログイン時に取り込んだMisskey側の名前(表示名を戻すときに使う)。 */
+  misskey_name: string;
+}
+
 export interface GameSettings {
   /** タイムゾーン。反映には再起動が要る。 */
   timezone: string;
@@ -1180,6 +1189,13 @@ export const api = {
     request<EmojiResolveResult>('POST', '/emojis/resolve', { host, name }),
   usedEmojis: () =>
     request<{ emojis: UsedEmoji[] }>('GET', '/emojis/used').then((r) => r.emojis),
+  userSettings: (id: number) => request<UserSettings>('GET', `/players/${id}/settings`),
+  updateUserSettings: (id: number, s: UserSettings) =>
+    request<UserSettings>('PUT', `/players/${id}/settings`, s),
+  refreshMisskeyProfile: (id: number) =>
+    request<MisskeyProfile>('POST', `/players/${id}/misskey/refresh`),
+  retire: (id: number, confirm: string) =>
+    request<{ retired: boolean }>('POST', `/players/${id}/retire`, { confirm }),
   misskeyProfile: (id: number) => request<MisskeyProfileResp>('GET', `/players/${id}/misskey`),
   misskeyFollow: (targetId: number) =>
     request<FollowResult>('POST', '/misskey/follow', { target_id: targetId }),

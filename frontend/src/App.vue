@@ -25,6 +25,7 @@ import AshiatoView from './components/AshiatoView.vue';
 import CLeagueView from './components/CLeagueView.vue';
 import YakubaView from './components/YakubaView.vue';
 import ProfileView from './components/ProfileView.vue';
+import UserSettingsView from './components/UserSettingsView.vue';
 import TsuriView from './components/TsuriView.vue';
 import GiftShopView from './components/GiftShopView.vue';
 import TokutenView from './components/TokutenView.vue';
@@ -89,6 +90,12 @@ const guestRemainMin = computed(() => {
   const left = new Date(at).getTime() - now.value;
   return left > 0 ? Math.ceil(left / 60000) : 0;
 });
+
+// 退会したら未ログインに戻す(セッションはサーバー側で無効になっている)。
+function onRetired() {
+  player.value = null;
+  view.value = 'town';
+}
 
 // 家訪問(view='house')で開く家のID。街の家クリックからnavigate経由で渡される。
 const houseId = ref<number | null>(null);
@@ -226,6 +233,13 @@ const facilityTitles: Record<string, string> = {
     <BingoView v-else-if="view === 'bingo'" :player="player" @update="onUpdate" @back="back" />
     <YakubaView v-else-if="view === 'yakuba'" :player="player" @back="back" />
     <ProfileView v-else-if="view === 'prof'" :player="player" @back="back" />
+    <UserSettingsView
+      v-else-if="view === 'usersettings'"
+      :player="player"
+      @update="onUpdate"
+      @back="back"
+      @retired="onRetired"
+    />
     <AdminView v-else-if="view === 'admin'" :player="player" @back="back" />
     <PlaceholderView v-else :title="facilityTitles[view] ?? view" @back="back" />
   </template>

@@ -337,6 +337,7 @@ const commands = computed(() => {
   if (hasOwnHouse.value) {
     list.push({ key: 'myhouse', img: 'myhome', alt: '家の設定' });
   }
+  list.push({ key: 'usersettings', img: 'usersettings', alt: 'ユーザー設定' });
   list.push({ key: 'off', img: 'off', alt: 'ログアウト' });
   return list;
 });
