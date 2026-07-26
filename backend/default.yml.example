@@ -1,0 +1,31 @@
+# バックエンドの設定のひな形。`default.yml` にコピーして使う
+# (実ファイルは環境ごとの値を持つためコミットしない)。
+#
+#   cp backend/default.yml.example backend/default.yml
+#
+# 設定ファイルは任意で、コンテナのように環境変数だけで動かす場合は置かなくてよい。
+# ここに書くのはインフラと公開アドレスだけ。ゲームの設定(初期所持金・回復間隔・
+# クールタイムなど)はDBにあり、ゲーム内の管理者メニューから変更する。
+server:
+  http_addr: ":8090"
+  # 公開アドレス。MiAuthのコールバックURLはここから組み立てる。
+  # 本番では TOWN_BASE_URL で実際のURLを指定する。
+  base_url: "http://localhost:5173"
+  # base_url 以外からもアクセスする場合に足す(Tailscale・別ホスト名など)。
+  # 特別値 "all" は全許可。テスト環境専用。
+  extra_origins: []
+  # MiAuthの同意画面に出るアプリ名。
+  app_name: "TOWN"
+
+database:
+  # ホストから直接動かす場合のデフォルト。コンテナでは TOWN_DATABASE_URL で上書き。
+  url: "postgres://town:town@localhost:55432/town?sslmode=disable"
+
+redis:
+  # ホストから直接動かす場合のデフォルト。コンテナでは TOWN_REDIS_ADDR で上書き。
+  addr: "localhost:56379"
+  db: 0
+
+worker:
+  tick_interval: "10s"
+  leader_lock_ttl: "30s"

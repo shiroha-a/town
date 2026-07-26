@@ -1,0 +1,101 @@
+# プロジェクト名はボリューム名(town-rewrite_pgdata 等)の接頭辞になる。変えると
+# 既存環境のDBが別物になってしまうため、リポジトリ名を town に変えた後も据え置く。
+name: town-rewrite
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: town
+      POSTGRES_PASSWORD: town
+      POSTGRES_DB: town
+    ports:
+      # ホストの5432は使用中のため55432で公開
+      - "55432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U town"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      # ホストの6379は使用中のため56379で公開
+      - "56379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  web:
+    build:
+      # 画面もこのイメージに入れるためコンテキストはリポジトリのルート。
+      context: ..
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    command: ["web"]
+    environment:
+      TOWN_DATABASE_URL: "postgres://town:town@postgres:5432/town?sslmode=disable"
+      TOWN_REDIS_ADDR: "redis:6379"
+      TOWN_HTTP_ADDR: ":8090"
+      # ビルド済みの画面をAPIと同じオリジンから配る。
+      TOWN_WEB_DIR: "/app/web"
+    ports:
+      - "8090:8090"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    command: ["worker"]
+    environment:
+      TOWN_DATABASE_URL: "postgres://town:town@postgres:5432/town?sslmode=disable"
+      TOWN_REDIS_ADDR: "redis:6379"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # フロントエンド(Vite開発サーバ)。ソースをマウントしHMRを効かせつつ docker compose で
+  # 常時起動する。/api は web(:8090)へプロキシ。ブラウザからは :5173 でアクセス。
+  # 開発用のViteサーバ(HMR)。公開環境では使わないので profiles で既定から外す。
+  #   docker compose --profile dev up -d frontend
+  frontend:
+    profiles: ["dev"]
+    image: node:22-alpine
+    restart: unless-stopped
+    working_dir: /app
+    command: sh -c "npm install --include=dev && npm run dev -- --host 0.0.0.0"
+    environment:
+      # Vite の /api プロキシ先(Dockerネットワーク内の web サービス)
+      TOWN_API_TARGET: "http://web:8090"
+      # テストサーバーは全ホスト許可(Tailscale等のホスト名でもアクセス可)
+      TOWN_ALLOWED_HOSTS: "all"
+      # bind mount 上のファイル変更を確実に検知するためポーリング監視にする
+      CHOKIDAR_USEPOLLING: "true"
+      CHOKIDAR_INTERVAL: "400"
+    volumes:
+      - ../frontend:/app
+      - frontend_node_modules:/app/node_modules
+    ports:
+      - "5173:5173"
+    depends_on:
+      - web
+
+volumes:
+  pgdata:
+  frontend_node_modules:

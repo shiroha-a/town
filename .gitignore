@@ -8,14 +8,18 @@ playwright-report/
 blob-report/
 
 # SVGアセット確認用のローカルテストページ(本番には含めない)
-app/frontend/public/svg-preview.html
+frontend/public/svg-preview.html
 
 # E2Eテスト用に自動生成されるゲームインスタンス(scripts/reset_test_data.shで再生成)
 town_test/
 
 # レガシー原本・ローカル参照(第三者ゲーム。公開リポジトリには含めない)
+# レガシー環境の説明は .tmp/README.md へ移動した(公開用READMEを別途置けるように)
 /town/
 /scripts/
 /docker/
 /compose.yaml
-/README.md
+
+# 環境ごとの設定(公開アドレス・暗号鍵など)。example をコピーして使う。
+deploy/compose.override.yaml
+backend/default.yml
