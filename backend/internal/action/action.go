@@ -3289,7 +3289,44 @@ func (s *Service) claimIdempotency(ctx context.Context, tx pgx.Tx, playerID int6
 	return false, nil
 }
 
+// settlePower advances one player's power by the elapsed time, using the same
+// formula as the worker's RecoverPower. 行動前に呼び、判定を最新の値で行う。
+func (s *Service) settlePower(ctx context.Context, tx pgx.Tx, playerID int64) error {
+	cfg := s.settings.Get()
+	energySec, nouSec := cfg.EnergyRecoverySec, cfg.NouRecoverySec
+	if energySec <= 0 {
+		energySec = 60
+	}
+	if nouSec <= 0 {
+		nouSec = 60
+	}
+	_, err := tx.Exec(ctx, `
+		UPDATE player_status ps SET
+			energy = LEAST(ps.energy_max, ps.energy + g.gain_e),
+			energy_recovered_at = ps.energy_recovered_at + make_interval(secs => (g.gain_e * $2::double precision / ps.onsen_multiplier)),
+			nou_energy = LEAST(ps.nou_energy_max, ps.nou_energy + g.gain_n),
+			nou_recovered_at = ps.nou_recovered_at + make_interval(secs => (g.gain_n * $3::double precision / ps.onsen_multiplier))
+		FROM (
+			SELECT player_id,
+				FLOOR(EXTRACT(EPOCH FROM (now() - energy_recovered_at)) / ($2::double precision / onsen_multiplier))::int AS gain_e,
+				FLOOR(EXTRACT(EPOCH FROM (now() - nou_recovered_at)) / ($3::double precision / onsen_multiplier))::int AS gain_n
+			FROM player_status WHERE player_id = $1
+		) g
+		WHERE ps.player_id = g.player_id AND (g.gain_e > 0 OR g.gain_n > 0)`,
+		playerID, energySec, nouSec)
+	if err != nil {
+		return fmt.Errorf("settle power: %w", err)
+	}
+	return nil
+}
+
 func (s *Service) readState(ctx context.Context, tx pgx.Tx, playerID int64) (effects.State, error) {
+	// 回復はworkerがtickごとにまとめて確定するため、DBの値は最大1tick分遅れて
+	// いる。行動の前にこのプレイヤーぶんを確定させ、画面に見えている値と判定が
+	// 食い違わないようにする(画面は同じ式で先読み表示している)。
+	if err := s.settlePower(ctx, tx, playerID); err != nil {
+		return effects.State{}, err
+	}
 	var (
 		energy, energyMax, nou, nouMax                              int
 		satiety                                                     int

@@ -1465,11 +1465,11 @@ func TestOnsen(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// パワーを1に下げ、回復基準時刻を5分前にして経過時間を作る(倍率10で一気にMAX回復)。
+	// パワーを1に下げる。未確定の経過は作らない(読み出し時に1倍で確定される
+	// ため、入浴前に溜めた時間を倍率で取り戻すことはできない)。
 	if _, err := pool.Exec(ctx, `
 		UPDATE player_status SET energy = 1, nou_energy = 1,
-		    energy_recovered_at = now() - interval '5 minutes',
-		    nou_recovered_at = now() - interval '5 minutes'
+		    energy_recovered_at = now(), nou_recovered_at = now()
 		WHERE player_id = $1`, alice.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -1487,12 +1487,32 @@ func TestOnsen(t *testing.T) {
 	json.NewDecoder(resp.Body).Decode(&after)
 	resp.Body.Close()
 
-	// 倍率10 × 5分ぶんの加速回復で上限(6)までフル回復し、料金が引かれる。
-	if after.Status.Energy != after.Status.EnergyMax {
-		t.Errorf("energy after onsen = %d, want max %d", after.Status.Energy, after.Status.EnergyMax)
+	// 入浴で料金が引かれ、その場で1回復する(以降は倍率ぶん速く回復する)。
+	if after.Status.Energy != 2 {
+		t.Errorf("energy after bathe = %d, want 2", after.Status.Energy)
 	}
 	if after.Money != 500000-price {
 		t.Errorf("money after onsen = %d, want %d", after.Money, 500000-price)
+	}
+
+	// 入浴中は倍率ぶん速く回復する。1分経過させ、tickで確定させる。
+	if _, err := pool.Exec(ctx, `
+		UPDATE player_status SET energy_recovered_at = now() - interval '1 minute',
+		    nou_recovered_at = now() - interval '1 minute'
+		WHERE player_id = $1`, alice.ID); err != nil {
+		t.Fatal(err)
+	}
+	tickResp, err := http.Post(srv.URL+"/api/v1/players/"+strconv.FormatInt(alice.ID, 10)+"/onsen/tick",
+		"application/json", bytes.NewReader([]byte("{}")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ticked playerResp
+	json.NewDecoder(tickResp.Body).Decode(&ticked)
+	tickResp.Body.Close()
+	// 通常なら60秒で1回復のところ、倍率10なので上限まで回復する。
+	if ticked.Status.Energy != ticked.Status.EnergyMax {
+		t.Errorf("energy after onsen tick = %d, want max %d", ticked.Status.Energy, ticked.Status.EnergyMax)
 	}
 
 	// 満タン状態でもう一度入ると無駄遣い防止で422。

@@ -110,11 +110,16 @@ type Status struct {
 	WorkAvailableAt *time.Time // 就労クールタイム中の再就労可能時刻(可能ならnil)
 	EnergyFullAt    *time.Time // 身体パワーが満タンになる時刻(満タン時はnil)
 	NouEnergyFullAt *time.Time // 頭脳パワーが満タンになる時刻(満タン時はnil)
-	// 1ポイント回復に要する秒数(入浴倍率を反映済み)。画面が状態を取り直す
-	// 間隔をこれに合わせるために返す。
-	EnergyRecoverySec int
-	NouRecoverySec    int
-	OnsenMultiplier   int // 入浴中の回復倍率(1=入浴していない)
+	// 1ポイント回復に要する時間(ミリ秒。入浴倍率を反映済み)。画面が状態を
+	// 取り直す間隔と、次の1ポイントを見せる刻みに使う。
+	// 秒で返すと入浴中(倍率10なら0.5秒)が0に丸まってしまうためミリ秒。
+	EnergyRecoveryMs int
+	NouRecoveryMs    int
+	// 次の1ポイントが回復する時刻(満タン時はnil)。画面はこれに合わせて
+	// 数字を増やすので、設定した秒数どおりに増えて見える。
+	EnergyNextAt    *time.Time
+	NouEnergyNextAt *time.Time
+	OnsenMultiplier int // 入浴中の回復倍率(1=入浴していない)
 }
 
 // Service is the player domain service.
@@ -212,6 +217,32 @@ func (s *Service) RegisterGuest(ctx context.Context, displayName string) (*Playe
 		return nil, fmt.Errorf("grant initial money: %w", err)
 	}
 	return s.Get(ctx, id)
+}
+
+// effectiveSec is how long one point takes, accounting for the onsen speed-up.
+func effectiveSec(sec int, mult float64) time.Duration {
+	if sec <= 0 || mult <= 0 {
+		return 0
+	}
+	return time.Duration(float64(sec)/mult*float64(time.Second)) * 1
+}
+
+// projectPower advances a power value by the time elapsed since it was last
+// settled, returning the value now and the timestamp it corresponds to.
+// workerの確定処理(RecoverPower)と同じ計算にしてある。
+func projectPower(value, max int, recoveredAt time.Time, sec int, mult float64) (int, time.Time) {
+	step := effectiveSec(sec, mult)
+	if step <= 0 || value >= max {
+		return value, recoveredAt
+	}
+	gain := int(time.Since(recoveredAt) / step)
+	if gain <= 0 {
+		return value, recoveredAt
+	}
+	if value+gain > max {
+		gain = max - value
+	}
+	return value + gain, recoveredAt.Add(time.Duration(gain) * step)
 }
 
 // LiveGuests counts guests that have not expired yet. 量産を頭打ちにするための
@@ -623,13 +654,29 @@ func (s *Service) Get(ctx context.Context, id int64) (*Player, error) {
 	// 満タン時刻 = recovered_at + (recovery_sec / 入浴倍率) × (max - current)。
 	// 入浴中(onsen_multiplier>1)は回復が倍率ぶん速いので満タンも早くなる。
 	cfg := s.settings.Get()
-	mult := p.Status.OnsenMultiplier
+	mult := float64(p.Status.OnsenMultiplier)
 	if mult < 1 {
 		mult = 1
 	}
 	// 画面のポーリング間隔用。入浴中は回復が速いので、その倍率も反映する。
-	p.Status.EnergyRecoverySec = int(float64(cfg.EnergyRecoverySec) / float64(mult))
-	p.Status.NouRecoverySec = int(float64(cfg.NouRecoverySec) / float64(mult))
+	p.Status.EnergyRecoveryMs = int(effectiveSec(cfg.EnergyRecoverySec, mult) / time.Millisecond)
+	p.Status.NouRecoveryMs = int(effectiveSec(cfg.NouRecoverySec, mult) / time.Millisecond)
+
+	// 回復はworkerがtickごとにまとめて確定するため、DBの値は最大1tick分
+	// 遅れている。読み出す時点で経過ぶんを反映し、次に増える時刻も返す。
+	// (確定書き込みは行動時とworkerが行う。ここで返す値と同じ式なのでズレない)
+	p.Status.Energy, energyRecoveredAt = projectPower(
+		p.Status.Energy, p.Status.EnergyMax, energyRecoveredAt, cfg.EnergyRecoverySec, mult)
+	p.Status.NouEnergy, nouRecoveredAt = projectPower(
+		p.Status.NouEnergy, p.Status.NouEnergyMax, nouRecoveredAt, cfg.NouRecoverySec, mult)
+	if sec := effectiveSec(cfg.EnergyRecoverySec, mult); sec > 0 && p.Status.Energy < p.Status.EnergyMax {
+		next := energyRecoveredAt.Add(sec)
+		p.Status.EnergyNextAt = &next
+	}
+	if sec := effectiveSec(cfg.NouRecoverySec, mult); sec > 0 && p.Status.NouEnergy < p.Status.NouEnergyMax {
+		next := nouRecoveredAt.Add(sec)
+		p.Status.NouEnergyNextAt = &next
+	}
 	if sec := cfg.EnergyRecoverySec; sec > 0 && p.Status.Energy < p.Status.EnergyMax {
 		d := time.Duration(float64(sec)/float64(mult)*float64(p.Status.EnergyMax-p.Status.Energy)) * time.Second
 		full := energyRecoveredAt.Add(d)
