@@ -73,9 +73,12 @@ export interface Player {
     disease_name: string;
     condition: string;
     work_available_at: string | null;
-    /** 1ポイント回復に要する秒数(入浴倍率を反映済み)。 */
-    energy_recovery_sec: number;
-    nou_recovery_sec: number;
+    /** 1ポイント回復に要する時間(ミリ秒。入浴倍率を反映済み)。 */
+    energy_recovery_ms: number;
+    nou_recovery_ms: number;
+    /** 次の1ポイントが回復する時刻。満タンならnull。 */
+    energy_next_at: string | null;
+    nou_energy_next_at: string | null;
     energy_full_at: string | null;
     nou_energy_full_at: string | null;
     onsen_multiplier: number;

@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { api, type Player, type ShopItem } from '../api';
 import PowerBar from './PowerBar.vue';
+import { projectedPower } from '../power';
 
 const props = defineProps<{ player: Player }>();
 const emit = defineEmits<{ update: [player: Player]; back: [] }>();
@@ -35,9 +36,11 @@ let timer: number | undefined;
 let pollTimer: number | undefined;
 
 onMounted(async () => {
+  // 入浴中は倍率ぶん回復が速く、1秒未満で1回復することがある。
+  // 表示を1回復ごとに追従させるため時計は250msで進める(通信は伴わない)。
   timer = window.setInterval(() => {
     nowMs.value = Date.now();
-  }, 1000);
+  }, 250);
   try {
     baths.value = await api.facilityMenu('onsen');
   } catch (e) {
@@ -69,6 +72,31 @@ function fullRemain(fullAt: string | null): string | null {
   if (m > 0) return `${m}分${String(s).padStart(2, '0')}秒`;
   return `${s}秒`;
 }
+// パワーは「次に回復する時刻」から先読みして表示する(設定した秒数どおりに
+// 増えて見せるため)。nowMsは1秒ごとに進む時計。
+const shownEnergy = computed(() =>
+  projectedPower(
+    {
+      value: props.player.status.energy,
+      max: props.player.status.energy_max,
+      nextAt: props.player.status.energy_next_at,
+      recoveryMs: props.player.status.energy_recovery_ms,
+    },
+    serverCorrectedNow.value,
+  ),
+);
+const shownNou = computed(() =>
+  projectedPower(
+    {
+      value: props.player.status.nou_energy,
+      max: props.player.status.nou_energy_max,
+      nextAt: props.player.status.nou_energy_next_at,
+      recoveryMs: props.player.status.nou_recovery_ms,
+    },
+    serverCorrectedNow.value,
+  ),
+);
+
 const energyFullRemain = computed(() => fullRemain(props.player.status.energy_full_at));
 const nouFullRemain = computed(() => fullRemain(props.player.status.nou_energy_full_at));
 
@@ -81,7 +109,7 @@ const isFull = computed(
 
 function startPolling() {
   stopPolling();
-  pollTimer = window.setInterval(async () => {
+  const tick = async () => {
     try {
       // onsenTickは「その時点まで回復を確定して」返すため、workerの粗いtickを
       // 待たずに2秒ごとパワーが増えていく。
@@ -93,7 +121,11 @@ function startPolling() {
     } catch {
       // 一時的な失敗は無視し、次回のポーリングで追従する。
     }
-  }, 2000);
+  };
+  // 入浴中の回復間隔に合わせて確定させる(倍率ぶん短い)。ただし叩きすぎない
+  // よう下限1秒。画面の数字自体は先読みで1ずつ増えていく。
+  const ms = Math.max(1000, props.player.status.energy_recovery_ms || 2000);
+  pollTimer = window.setInterval(tick, ms);
 }
 function stopPolling() {
   if (pollTimer !== undefined) {
@@ -164,13 +196,13 @@ async function backToTown() {
         </p>
         <PowerBar
           label="身体パワー"
-          :value="player.status.energy"
+          :value="shownEnergy"
           :max="player.status.energy_max"
           :full-remain="energyFullRemain"
         />
         <PowerBar
           label="頭脳パワー"
-          :value="player.status.nou_energy"
+          :value="shownNou"
           :max="player.status.nou_energy_max"
           :full-remain="nouFullRemain"
         />

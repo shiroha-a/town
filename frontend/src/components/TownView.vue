@@ -6,6 +6,7 @@ import { api, WARP_FEE, type Player, type Params, type TownFacility, type TownAs
 import { satietyLabel } from '../params';
 import CommandIcon from './CommandIcon.vue';
 import PowerBar from './PowerBar.vue';
+import { projectedPower } from '../power';
 import GreetingModal from './GreetingModal.vue';
 // v-touch-label: title属性のラベルをモバイルの長押しで表示する
 import { vTouchLabel } from '../touchlabel';
@@ -526,6 +527,31 @@ function fullRemain(fullAt: string | null): string | null {
   if (m > 0) return `${m}分${String(s).padStart(2, '0')}秒`;
   return `${s}秒`;
 }
+// パワーは「次に回復する時刻」から先読みして表示する(設定した秒数どおりに
+// 増えて見せるため)。nowMsは1秒ごとに進む時計。
+const shownEnergy = computed(() =>
+  projectedPower(
+    {
+      value: props.player.status.energy,
+      max: props.player.status.energy_max,
+      nextAt: props.player.status.energy_next_at,
+      recoveryMs: props.player.status.energy_recovery_ms,
+    },
+    serverCorrectedNow.value,
+  ),
+);
+const shownNou = computed(() =>
+  projectedPower(
+    {
+      value: props.player.status.nou_energy,
+      max: props.player.status.nou_energy_max,
+      nextAt: props.player.status.nou_energy_next_at,
+      recoveryMs: props.player.status.nou_recovery_ms,
+    },
+    serverCorrectedNow.value,
+  ),
+);
+
 const energyFullRemain = computed(() => fullRemain(props.player.status.energy_full_at));
 const nouFullRemain = computed(() => fullRemain(props.player.status.nou_energy_full_at));
 
@@ -713,13 +739,13 @@ const paramBar = (v: number) => Math.max(3, Math.round((v / paramMax.value) * 10
             </div>
             <PowerBar
               label="身体パワー"
-              :value="player.status.energy"
+              :value="shownEnergy"
               :max="player.status.energy_max"
               :full-remain="energyFullRemain"
             />
             <PowerBar
               label="頭脳パワー"
-              :value="player.status.nou_energy"
+              :value="shownNou"
               :max="player.status.nou_energy_max"
               :full-remain="nouFullRemain"
             />

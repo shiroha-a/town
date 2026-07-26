@@ -110,17 +110,17 @@ async function reload() {
 // 間隔はサーバーの回復間隔(1ポイントあたりの秒数)に合わせる。固定値だと、
 // 回復が遅い設定では無駄に叩き、速い設定では表示が追いつかないため。
 // 設定を変えても次回の予約から効くよう、都度読み直す。
-const POLL_MIN_SEC = 5;
-const POLL_FALLBACK_SEC = 10;
+const POLL_MIN_MS = 5000;
+const POLL_FALLBACK_MS = 10000;
 let pollTimer: number | undefined;
 
 function pollIntervalMs(): number {
   const st = player.value?.status;
-  const secs = [st?.energy_recovery_sec, st?.nou_recovery_sec].filter(
+  const list = [st?.energy_recovery_ms, st?.nou_recovery_ms].filter(
     (v): v is number => typeof v === 'number' && v > 0,
   );
-  const sec = secs.length ? Math.min(...secs) : POLL_FALLBACK_SEC;
-  return Math.max(POLL_MIN_SEC, sec) * 1000;
+  const ms = list.length ? Math.min(...list) : POLL_FALLBACK_MS;
+  return Math.max(POLL_MIN_MS, ms);
 }
 
 function schedulePoll() {
