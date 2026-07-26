@@ -19,11 +19,11 @@ import (
 
 // News kinds. These double as the display badge text in the 役場 feed.
 const (
-	KindMoveIn = "入居"     // 新規登録
-	KindJob    = "就職"     // 転職
-	KindHouse  = "家"      // 建築/建て替え/売却
-	KindEvent  = "イベント"   // ランダムイベント
-	KindPrize  = "当選"     // ロト6などの高額当選
+	KindMoveIn = "入居"   // 新規登録
+	KindJob    = "就職"   // 転職
+	KindHouse  = "家"    // 建築/建て替え/売却
+	KindEvent  = "イベント" // ランダムイベント
+	KindPrize  = "当選"   // ロト6などの高額当選
 )
 
 // keep bounds the table length. The legacy files kept 100 (街) / 150 (個人)
