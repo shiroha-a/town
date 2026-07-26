@@ -37,9 +37,9 @@ jobs:
         working-directory: backend
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           # バージョンは go.mod の go ディレクティブに従う(1か所で管理する)。
           go-version-file: backend/go.mod
@@ -71,9 +71,9 @@ jobs:
         working-directory: frontend
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           # backend/Dockerfile のビルドステージと揃える。
           node-version: 22
