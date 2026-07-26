@@ -35,6 +35,11 @@ var rateRules = map[string]rateRule{
 		perIP: 10, global: 60, window: time.Minute,
 		message: "ログインの試行が多すぎます。少し待ってからお試しください。",
 	},
+	// プロフィールの再取得も相手インスタンスへ問い合わせる。
+	"POST /api/v1/players/{id}/misskey/refresh": {
+		perIP: 10, global: 60, window: time.Minute,
+		message: "更新が多すぎます。少し待ってからお試しください。",
+	},
 	// コールバックの引き換えも外部への問い合わせを伴う。
 	"POST /api/v1/auth/callback": {
 		perIP: 20, global: 120, window: time.Minute,

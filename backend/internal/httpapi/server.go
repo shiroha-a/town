@@ -224,6 +224,10 @@ func NewServer(players *player.Service, actions *action.Service, contentSvc *con
 	// Misskey連携(prof施設)。プロフィール参照は対象の住民、フォローは
 	// セッションの本人が実行者なのでパスにIDを取らない。
 	mux.HandleFunc("GET /api/v1/players/{id}/misskey", s.misskeyProfile)
+	mux.HandleFunc("POST /api/v1/players/{id}/misskey/refresh", s.refreshMisskeyProfile)
+	mux.HandleFunc("GET /api/v1/players/{id}/settings", s.userSettings)
+	mux.HandleFunc("PUT /api/v1/players/{id}/settings", s.updateUserSettings)
+	mux.HandleFunc("POST /api/v1/players/{id}/retire", s.retire)
 	mux.HandleFunc("POST /api/v1/misskey/follow", s.misskeyFollow)
 	mux.HandleFunc("POST /api/v1/misskey/unfollow", s.misskeyUnfollow)
 

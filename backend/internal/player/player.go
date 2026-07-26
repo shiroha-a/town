@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -243,6 +244,71 @@ func projectPower(value, max int, recoveredAt time.Time, sec int, mult float64) 
 		gain = max - value
 	}
 	return value + gain, recoveredAt.Add(time.Duration(gain) * step)
+}
+
+// UserSettings is what a resident can change about their own account.
+type UserSettings struct {
+	DisplayName string `json:"display_name"`
+	// ProfilePublic: Misskeyの情報を街のプロフィールに載せるか(既定オフ)。
+	ProfilePublic bool `json:"profile_public"`
+	// MisskeyName: ログイン時に取り込んだMisskey側の名前。表示名を戻すときに使う。
+	MisskeyName string `json:"misskey_name"`
+}
+
+// ErrBadName means the requested display name is unusable.
+var ErrBadName = errors.New("invalid display name")
+
+// maxNameRunes caps the in-town display name. 名鑑やチャットの1行に収まる長さ。
+const maxNameRunes = 20
+
+// GetSettings returns the resident's own settings.
+func (s *Service) GetSettings(ctx context.Context, id int64) (*UserSettings, error) {
+	var out UserSettings
+	if err := s.pool.QueryRow(ctx,
+		`SELECT p.display_name, p.profile_public, COALESCE(mp.name, mp.username, '')
+		   FROM players p LEFT JOIN misskey_profiles mp ON mp.player_id = p.id
+		  WHERE p.id = $1 AND p.deleted_at IS NULL`, id).
+		Scan(&out.DisplayName, &out.ProfilePublic, &out.MisskeyName); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("get settings: %w", err)
+	}
+	return &out, nil
+}
+
+// UpdateSettings changes the resident's own settings.
+func (s *Service) UpdateSettings(ctx context.Context, id int64, in UserSettings) (*UserSettings, error) {
+	name := strings.TrimSpace(in.DisplayName)
+	if name == "" {
+		return nil, fmt.Errorf("%w: 名前を入力してください", ErrBadName)
+	}
+	if len([]rune(name)) > maxNameRunes {
+		return nil, fmt.Errorf("%w: 名前は%d文字までです", ErrBadName, maxNameRunes)
+	}
+	// 改行やタブが混じると名鑑やチャットの表示が崩れる。
+	if strings.ContainsAny(name, "\n\r\t") {
+		return nil, fmt.Errorf("%w: 名前に改行は使えません", ErrBadName)
+	}
+	if _, err := s.pool.Exec(ctx,
+		`UPDATE players SET display_name = $2, profile_public = $3 WHERE id = $1 AND deleted_at IS NULL`,
+		id, name, in.ProfilePublic); err != nil {
+		return nil, fmt.Errorf("update settings: %w", err)
+	}
+	return s.GetSettings(ctx, id)
+}
+
+// ProfilePublic reports whether the resident publishes their Misskey info.
+func (s *Service) ProfilePublic(ctx context.Context, id int64) (bool, error) {
+	var pub bool
+	if err := s.pool.QueryRow(ctx,
+		`SELECT profile_public FROM players WHERE id = $1`, id).Scan(&pub); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, ErrNotFound
+		}
+		return false, fmt.Errorf("read profile_public: %w", err)
+	}
+	return pub, nil
 }
 
 // LiveGuests counts guests that have not expired yet. 量産を頭打ちにするための

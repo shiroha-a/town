@@ -4744,3 +4744,76 @@ func TestUseItemRequiresEnoughPower(t *testing.T) {
 		t.Errorf("消費後の身体パワー = %d, want 0", after.Status.Energy)
 	}
 }
+
+// 退会は自分のデータを消すが、台帳の「世界のお金の合計」は動かさない
+// (行だけ消すと合計が合わなくなるため、残高は街へ返してから消す)。
+func TestRetire(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+
+	alice := register(t, srv.URL, "misskey.example", "alice")
+	bob := register(t, srv.URL, "misskey.example", "bob")
+
+	// aliceに貯金と持ち物を作っておく。
+	bankAction(t, srv.URL, "/bank/deposit", alice.ID, 100000, "dep-1")
+	var itemID int64
+	if err := pool.QueryRow(ctx, `SELECT id FROM content_items WHERE name = '栄養ドリンク'`).Scan(&itemID); err != nil {
+		t.Fatal(err)
+	}
+	itemAction(t, srv.URL, "/buy", alice.ID, itemID, "buy-1")
+
+	sum := func() int64 {
+		var v int64
+		if err := pool.QueryRow(ctx, `SELECT COALESCE(SUM(delta), 0) FROM ledger_entry`).Scan(&v); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	before := sum()
+
+	// 名前が違うと拒否される(誤操作防止)。
+	body, _ := json.Marshal(map[string]string{"confirm": "ちがう名前"})
+	bad, err := http.Post(srv.URL+"/api/v1/players/"+strconv.FormatInt(alice.ID, 10)+"/retire",
+		"application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad.Body.Close()
+	if bad.StatusCode != http.StatusBadRequest {
+		t.Fatalf("確認名が違うのに退会できた: status=%d", bad.StatusCode)
+	}
+
+	body, _ = json.Marshal(map[string]string{"confirm": "alice"})
+	resp, err := http.Post(srv.URL+"/api/v1/players/"+strconv.FormatInt(alice.ID, 10)+"/retire",
+		"application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("retire status = %d", resp.StatusCode)
+	}
+
+	// 住民と持ち物が消えている。
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM players WHERE id = $1`, alice.ID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("退会後も住民が残っている")
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM player_items WHERE player_id = $1`, alice.ID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("退会後も持ち物が残っている: %d", n)
+	}
+	// 台帳の合計(=世界のお金)は変わらない。
+	if after := sum(); after != before {
+		t.Errorf("台帳の合計が動いた: %d -> %d", before, after)
+	}
+	// 他の住民には影響しない。
+	if _, status := doWork(t, srv.URL, bob.ID, "bob-after-retire"); status == http.StatusNotFound {
+		t.Errorf("他の住民が消えている")
+	}
+}
