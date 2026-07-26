@@ -100,7 +100,10 @@ const wideStyle = (h: HouseCell) =>
             :title="houseTitle(houseAt(c, ri)!)"
             @click="emit('house', houseAt(c, ri)!)"
           >
-            <img :src="`/img/svg/${houseAt(c, ri)!.exterior}.svg`" :alt="houseTitle(houseAt(c, ri)!)" />
+            <img
+              :src="`/img/svg/${houseAt(c, ri)!.exterior}.svg`"
+              :alt="houseTitle(houseAt(c, ri)!)"
+            />
           </button>
           <span
             v-else
@@ -109,7 +112,10 @@ const wideStyle = (h: HouseCell) =>
             :style="wideStyle(houseAt(c, ri)!)"
             :title="houseTitle(houseAt(c, ri)!)"
           >
-            <img :src="`/img/svg/${houseAt(c, ri)!.exterior}.svg`" :alt="houseTitle(houseAt(c, ri)!)" />
+            <img
+              :src="`/img/svg/${houseAt(c, ri)!.exterior}.svg`"
+              :alt="houseTitle(houseAt(c, ri)!)"
+            />
           </span>
         </template>
         <template v-if="facilityAt(c, ri)">

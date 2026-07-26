@@ -81,7 +81,12 @@ async function buy(it: ShopItem) {
           <tr v-for="it in items" :key="it.id" :data-test="`hanbai-${it.id}`">
             <td class="l">{{ it.name }}</td>
             <td class="price">{{ yen(it.price) }}円</td>
-            <td v-for="c in PARAM_COLUMNS" :key="c.key" class="p" :class="{ up: (it.params[c.key] ?? 0) > 0 }">
+            <td
+              v-for="c in PARAM_COLUMNS"
+              :key="c.key"
+              class="p"
+              :class="{ up: (it.params[c.key] ?? 0) > 0 }"
+            >
               {{ it.params[c.key] ?? 0 }}
             </td>
             <td class="stock" :class="{ soldout: it.stock === 0 }">

@@ -55,7 +55,9 @@ async function play() {
 <template>
   <div class="cg">
     <h3 class="cg-title">ロト</h3>
-    <p class="cg-lead">6桁の数字(各0-9)を予想し、抽選結果と位置ごとに一致した桁数で配当が決まる。</p>
+    <p class="cg-lead">
+      6桁の数字(各0-9)を予想し、抽選結果と位置ごとに一致した桁数で配当が決まる。
+    </p>
 
     <div v-if="result" class="cg-result" :class="result.win ? 'win' : 'lose'" data-test="result">
       <div class="loto-draw">

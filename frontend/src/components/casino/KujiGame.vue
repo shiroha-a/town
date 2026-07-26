@@ -110,8 +110,12 @@ async function settle() {
     <div v-if="inStreak" class="streak">
       <div class="streak-info">{{ stage }}連勝中／いま精算すると {{ yen(pot) }}円</div>
       <div class="cg-controls">
-        <button class="btn" :disabled="busy" data-test="up1" @click="draw(1)">カード1でダブルアップ</button>
-        <button class="btn" :disabled="busy" data-test="up2" @click="draw(2)">カード2でダブルアップ</button>
+        <button class="btn" :disabled="busy" data-test="up1" @click="draw(1)">
+          カード1でダブルアップ
+        </button>
+        <button class="btn" :disabled="busy" data-test="up2" @click="draw(2)">
+          カード2でダブルアップ
+        </button>
         <button class="btn settle" :disabled="busy" data-test="settle" @click="settle">
           精算する（{{ yen(pot) }}円）
         </button>

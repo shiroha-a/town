@@ -153,8 +153,12 @@ onMounted(() => load());
       </div>
 
       <div class="ep-foot">
-        {{ host }} の絵文字 {{ filtered.length }}件<span v-if="hideUnusable">（使えないものを除く）</span>
-        <span v-if="filtered.length > MAX_SHOWN">（{{ MAX_SHOWN }}件まで表示。検索で絞り込んでください）</span>
+        {{ host }} の絵文字 {{ filtered.length }}件<span v-if="hideUnusable"
+          >（使えないものを除く）</span
+        >
+        <span v-if="filtered.length > MAX_SHOWN"
+          >（{{ MAX_SHOWN }}件まで表示。検索で絞り込んでください）</span
+        >
         <span class="ep-lic">※ライセンスが設定された絵文字のみ使えます</span>
       </div>
     </div>

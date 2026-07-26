@@ -30,7 +30,9 @@ function pick(e: BuildingExterior) {
       class="ext-card"
       :class="{ selected: e.key === modelValue, locked: !!reasonFor(e), wide: spanOf(e) > 1 }"
       :disabled="!!reasonFor(e)"
-      :title="reasonFor(e) ? `${e.key}（${e.price}万）／${reasonFor(e)}` : `${e.key}（${e.price}万）`"
+      :title="
+        reasonFor(e) ? `${e.key}（${e.price}万）／${reasonFor(e)}` : `${e.key}（${e.price}万）`
+      "
       @click="pick(e)"
     >
       <img :src="`/img/svg/${e.key}.svg`" :alt="e.key" />

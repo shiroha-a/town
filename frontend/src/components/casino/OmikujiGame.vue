@@ -109,7 +109,9 @@ async function draw() {
           <span class="omi-unsei" :class="`u${f.unsei}`">{{ f.name }}</span>
         </div>
       </div>
-      <div class="omi-overall">全体運：<b>{{ result.overall.name }}</b></div>
+      <div class="omi-overall">
+        全体運：<b>{{ result.overall.name }}</b>
+      </div>
 
       <div class="omi-main">
         <span class="band">{{ result.kibou_name }} → {{ result.result.name }}</span>
@@ -123,7 +125,9 @@ async function draw() {
       </ul>
 
       <div class="omi-money">
-        <span>お賽銭：{{ result.saisen_money >= 0 ? '+' : '' }}{{ yen(result.saisen_money) }}円</span>
+        <span
+          >お賽銭：{{ result.saisen_money >= 0 ? '+' : '' }}{{ yen(result.saisen_money) }}円</span
+        >
         <span v-if="result.kibou === 'kinn' && result.kinn_money !== 0">
           ／金運：{{ result.kinn_money >= 0 ? '+' : '' }}{{ yen(result.kinn_money) }}円
         </span>

@@ -67,14 +67,23 @@ onMounted(reload);
 async function buy(listingId: number) {
   busy.value = true;
   try {
-    const after = await api.yamiBuy(props.player.id, props.houseId, listingId, payMethods.value[listingId] ?? 'cash');
+    const after = await api.yamiBuy(
+      props.player.id,
+      props.houseId,
+      listingId,
+      payMethods.value[listingId] ?? 'cash',
+    );
     emit('update', after);
     await reload();
     const r = after.yami_result;
     showToast({
       variant: 'item',
       title: r.own ? '回収しました' : '買いました',
-      lines: [r.own ? `${r.name} を回収しました（手数料500円）` : `${r.name}（${r.method === 'credit' ? 'クレジット・普通口座' : '現金'} ${yen(r.paid)}円）`],
+      lines: [
+        r.own
+          ? `${r.name} を回収しました（手数料500円）`
+          : `${r.name}（${r.method === 'credit' ? 'クレジット・普通口座' : '現金'} ${yen(r.paid)}円）`,
+      ],
       icon: 'item',
     });
   } catch (e) {
@@ -130,7 +139,9 @@ async function listItem(it: YamiInventoryItem, warehouse: boolean) {
       <tr>
         <td class="yami-desc">
           闇市です。品揃えは家の持ち主が変えます。1品ずつの取り扱いで、価格は持ち主が決めます。
-          <div class="money-line">●{{ player.display_name }}さんの所持金：{{ yen(player.money) }}円</div>
+          <div class="money-line">
+            ●{{ player.display_name }}さんの所持金：{{ yen(player.money) }}円
+          </div>
         </td>
         <td class="yami-label">闇市</td>
       </tr>
@@ -143,7 +154,9 @@ async function listItem(it: YamiInventoryItem, warehouse: boolean) {
           <tr>
             <td class="hanrei" :colspan="PARAM_COLS.length + 8">
               凡例：(国)＝国語up値、(数)＝数学up値、(理)＝理科up値、(社)＝社会up値、(英)＝英語up値、(音)＝音楽up値、(美)＝美術up値、（ル）=ルックスup値、（体）=体力up値、（健）=健康up値、（ス）=スピードup値、（パ）=パワーup値、（腕）=腕力up値、（脚）=脚力up値、（L）=LOVEup値、（面）=面白さup値。
-              <template v-if="view.own">【倉庫品】は訪問者に表示されません。回収は「買う」(手数料500円)です。</template>
+              <template v-if="view.own"
+                >【倉庫品】は訪問者に表示されません。回収は「買う」(手数料500円)です。</template
+              >
             </td>
           </tr>
           <tr class="koumoku">
@@ -184,7 +197,9 @@ async function listItem(it: YamiInventoryItem, warehouse: boolean) {
             </tr>
           </template>
           <tr v-if="view.items.length === 0">
-            <td :colspan="PARAM_COLS.length + 8" class="empty">現在売り出し中の商品はありません。</td>
+            <td :colspan="PARAM_COLS.length + 8" class="empty">
+              現在売り出し中の商品はありません。
+            </td>
           </tr>
         </table>
       </div>

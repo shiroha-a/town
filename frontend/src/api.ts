@@ -138,12 +138,12 @@ async function request<T>(
   const res = await fetch(`/api/v1${path}`, {
     method,
     headers: {
-      ...(body ? { "Content-Type": "application/json" } : {}),
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
       ...(headers ?? {}),
     },
     body: body ? JSON.stringify(body) : undefined,
     // ログインセッションはHttpOnly cookieで持つため、常に送る。
-    credentials: "same-origin",
+    credentials: 'same-origin',
   });
   const text = await res.text();
   const data = text ? JSON.parse(text) : null;
@@ -158,7 +158,7 @@ async function request<T>(
 // HTTP経由の非localhostアクセスでも動くようフォールバックを持つ。
 export function newIdempotencyKey(): string {
   const c = globalThis.crypto;
-  if (c && typeof c.randomUUID === "function") {
+  if (c && typeof c.randomUUID === 'function') {
     return c.randomUUID();
   }
   return `k-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
@@ -177,7 +177,7 @@ export interface PublicProfile {
   id: number;
   display_name: string;
   created_at: string;
-  status: Player["status"];
+  status: Player['status'];
   params: Params;
 }
 
@@ -194,7 +194,7 @@ export interface FishingState {
   at_limit: boolean;
 }
 export interface FishingResult {
-  outcome: "win" | "continue" | "lose";
+  outcome: 'win' | 'continue' | 'lose';
   fish: string;
   cards: number;
 }
@@ -206,12 +206,12 @@ export interface FishingPickResp {
 // 管理: 参加できるインスタンスの許可/拒否リスト。
 export interface InstanceRule {
   host: string;
-  kind: "block" | "allow";
+  kind: 'block' | 'allow';
   note: string;
   created_at: string;
 }
 export interface InstanceRules {
-  policy: "blacklist" | "whitelist";
+  policy: 'blacklist' | 'whitelist';
   rules: InstanceRule[];
 }
 
@@ -442,22 +442,17 @@ export interface LoanQuote {
 
 // 効果エンジンのop(add_param / add_money)。
 export interface EffectOp {
-  op:
-    | "add_param"
-    | "add_money"
-    | "add_weight_g"
-    | "add_height_cm"
-    | "add_disease";
+  op: 'add_param' | 'add_money' | 'add_weight_g' | 'add_height_cm' | 'add_disease';
   param?: string;
   amount: number;
   // add_disease限定: 指定するとその病気のときだけ効く(空=万能)。
   disease?: string;
 }
 // add_diseaseで指定できる病名(バックエンドのeffects.AllDiseasesと対応)。
-export const DISEASE_OPTIONS = ["風邪", "下痢", "肺炎", "結核", "脳腫瘍", "癌"];
+export const DISEASE_OPTIONS = ['風邪', '下痢', '肺炎', '結核', '脳腫瘍', '癌'];
 // 条件(param_gte)。
 export interface Condition {
-  pred: "param_gte";
+  pred: 'param_gte';
   param: string;
   value: number;
 }
@@ -493,7 +488,7 @@ export interface AdminItem {
 }
 
 /** アイテムの作成・更新で送る項目(content_itemsの編集できる列)。 */
-export type AdminItemInput = Omit<AdminItem, "id">;
+export type AdminItemInput = Omit<AdminItem, 'id'>;
 export interface AdminJob {
   id: number;
   name: string;
@@ -699,7 +694,7 @@ export const WARP_FEE = 100000;
 // 背景アセット画像のURLを解決する。'u:'接頭辞はアップロード画像(DB配信)、
 // それ以外は組み込みのpublic/img/svg/*.svg(GIFからSVG化済み)。
 export function assetUrl(img: string): string {
-  return img.startsWith("u:")
+  return img.startsWith('u:')
     ? `/api/v1/assets/${encodeURIComponent(img.slice(2))}`
     : `/img/svg/${img}.svg`;
 }
@@ -1213,86 +1208,74 @@ export type FollowResult = {
 
 export const api = {
   register: (instanceHost: string, remoteUserId: string, displayName: string) =>
-    request<Player>("POST", "/players", {
+    request<Player>('POST', '/players', {
       instance_host: instanceHost,
       remote_user_id: remoteUserId,
       display_name: displayName,
     }),
-  getPlayer: (id: number) => request<Player>("GET", `/players/${id}`),
-  listPlayers: () => request<PublicSummary[]>("GET", "/players"),
-  site: () => request<{ title: string; tagline: string }>("GET", "/site"),
+  getPlayer: (id: number) => request<Player>('GET', `/players/${id}`),
+  listPlayers: () => request<PublicSummary[]>('GET', '/players'),
+  site: () => request<{ title: string; tagline: string }>('GET', '/site'),
   emojiList: (host?: string) =>
     request<{
       host: string;
       emojis: PickerEmoji[];
       verdicts: Record<string, string>;
-    }>("GET", `/emojis${host ? `?host=${encodeURIComponent(host)}` : ""}`),
+    }>('GET', `/emojis${host ? `?host=${encodeURIComponent(host)}` : ''}`),
   resolveEmoji: (host: string, name: string) =>
-    request<EmojiResolveResult>("POST", "/emojis/resolve", { host, name }),
-  usedEmojis: () =>
-    request<{ emojis: UsedEmoji[] }>("GET", "/emojis/used").then(
-      (r) => r.emojis,
-    ),
-  userSettings: (id: number) =>
-    request<UserSettings>("GET", `/players/${id}/settings`),
+    request<EmojiResolveResult>('POST', '/emojis/resolve', { host, name }),
+  usedEmojis: () => request<{ emojis: UsedEmoji[] }>('GET', '/emojis/used').then((r) => r.emojis),
+  userSettings: (id: number) => request<UserSettings>('GET', `/players/${id}/settings`),
   updateUserSettings: (id: number, s: UserSettings) =>
-    request<UserSettings>("PUT", `/players/${id}/settings`, s),
+    request<UserSettings>('PUT', `/players/${id}/settings`, s),
   refreshMisskeyProfile: (id: number) =>
-    request<MisskeyProfile>("POST", `/players/${id}/misskey/refresh`),
+    request<MisskeyProfile>('POST', `/players/${id}/misskey/refresh`),
   retire: (id: number, confirm: string) =>
-    request<{ retired: boolean }>("POST", `/players/${id}/retire`, { confirm }),
-  misskeyProfile: (id: number) =>
-    request<MisskeyProfileResp>("GET", `/players/${id}/misskey`),
+    request<{ retired: boolean }>('POST', `/players/${id}/retire`, { confirm }),
+  misskeyProfile: (id: number) => request<MisskeyProfileResp>('GET', `/players/${id}/misskey`),
   misskeyFollow: (targetId: number) =>
-    request<FollowResult>("POST", "/misskey/follow", { target_id: targetId }),
+    request<FollowResult>('POST', '/misskey/follow', { target_id: targetId }),
   misskeyUnfollow: (targetId: number) =>
-    request<FollowResult>("POST", "/misskey/unfollow", { target_id: targetId }),
-  playerProfile: (id: number) =>
-    request<PublicProfile>("GET", `/players/${id}/profile`),
+    request<FollowResult>('POST', '/misskey/unfollow', { target_id: targetId }),
+  playerProfile: (id: number) => request<PublicProfile>('GET', `/players/${id}/profile`),
   // 役場: 街のニュース(街全体)と住民ごとの出来事。
-  townNews: (limit = 100) =>
-    request<NewsEntry[]>("GET", `/news?limit=${limit}`),
+  townNews: (limit = 100) => request<NewsEntry[]>('GET', `/news?limit=${limit}`),
   playerNews: (id: number, limit = 50) =>
-    request<NewsEntry[]>("GET", `/players/${id}/news?limit=${limit}`),
-  fishing: (id: number) =>
-    request<FishingState>("GET", `/players/${id}/fishing`),
+    request<NewsEntry[]>('GET', `/players/${id}/news?limit=${limit}`),
+  fishing: (id: number) => request<FishingState>('GET', `/players/${id}/fishing`),
   fishingStart: (id: number, itemId: number) =>
-    request<Player>("POST", `/players/${id}/fishing/start`, {
+    request<Player>('POST', `/players/${id}/fishing/start`, {
       item_id: itemId,
       idempotency_key: newIdempotencyKey(),
     }),
   fishingPick: (id: number, card: number) =>
-    request<FishingPickResp>("POST", `/players/${id}/fishing/pick`, {
+    request<FishingPickResp>('POST', `/players/${id}/fishing/pick`, {
       card,
       idempotency_key: newIdempotencyKey(),
     }),
   // インスタンスを指定して認可URLをもらう(飛ばすのは呼び出し側)。
-  adminInstances: () => request<InstanceRules>("GET", "/admin/instances"),
+  adminInstances: () => request<InstanceRules>('GET', '/admin/instances'),
   adminPutInstance: (r: { host: string; kind: string; note: string }) =>
-    request<{ ok: boolean }>("PUT", "/admin/instances", r),
+    request<{ ok: boolean }>('PUT', '/admin/instances', r),
   adminDeleteInstance: (host: string) =>
-    request<{ deleted: boolean }>(
-      "DELETE",
-      `/admin/instances/${encodeURIComponent(host)}`,
-    ),
+    request<{ deleted: boolean }>('DELETE', `/admin/instances/${encodeURIComponent(host)}`),
   authStart: (instance: string) =>
-    request<AuthStartResp>("POST", "/auth/start", {
+    request<AuthStartResp>('POST', '/auth/start', {
       instance,
       origin: window.location.origin,
     }),
   // コールバックで受け取ったsessionを引き換えてログインする。
-  authCallback: (session: string) =>
-    request<Player>("POST", "/auth/callback", { session }),
-  authMe: () => request<Player>("GET", "/auth/me"),
-  authGuest: () => request<Player>("POST", "/auth/guest"),
-  authLogout: () => request<{ ok: boolean }>("POST", "/auth/logout"),
-  bingo: (id: number) => request<BingoState>("GET", `/players/${id}/bingo`),
+  authCallback: (session: string) => request<Player>('POST', '/auth/callback', { session }),
+  authMe: () => request<Player>('GET', '/auth/me'),
+  authGuest: () => request<Player>('POST', '/auth/guest'),
+  authLogout: () => request<{ ok: boolean }>('POST', '/auth/logout'),
+  bingo: (id: number) => request<BingoState>('GET', `/players/${id}/bingo`),
   bingoTakeCard: (id: number) =>
-    request<Player>("POST", `/players/${id}/bingo/card`, {
+    request<Player>('POST', `/players/${id}/bingo/card`, {
       idempotency_key: newIdempotencyKey(),
     }),
   bingoClaim: (id: number, cardId: number) =>
-    request<BingoClaimResp>("POST", `/players/${id}/bingo/claim`, {
+    request<BingoClaimResp>('POST', `/players/${id}/bingo/claim`, {
       card_id: cardId,
       idempotency_key: newIdempotencyKey(),
     }),
@@ -1301,144 +1284,129 @@ export const api = {
     per_day: number;
     days: number;
     lines_to_win: number;
-  }) => request<{ started: boolean }>("POST", "/admin/bingo", cfg),
+  }) => request<{ started: boolean }>('POST', '/admin/bingo', cfg),
   redeemSerial: (id: number, code: string) =>
-    request<SerialRedeemResp>("POST", `/players/${id}/serial/redeem`, {
+    request<SerialRedeemResp>('POST', `/players/${id}/serial/redeem`, {
       code,
       idempotency_key: newIdempotencyKey(),
     }),
-  giftShop: (id: number) =>
-    request<GiftShopState>("GET", `/players/${id}/gifts`),
+  giftShop: (id: number) => request<GiftShopState>('GET', `/players/${id}/gifts`),
   giftConvert: (id: number, itemId: number, uses: number) =>
-    request<Player>("POST", `/players/${id}/gifts/convert`, {
+    request<Player>('POST', `/players/${id}/gifts/convert`, {
       item_id: itemId,
       uses,
       idempotency_key: newIdempotencyKey(),
     }),
-  adminSerials: () => request<SerialCode[]>("GET", "/admin/serials"),
-  adminCreateSerial: (c: Partial<SerialCode>) =>
-    request<SerialCode>("POST", "/admin/serials", c),
-  adminUpdateSerial: (c: SerialCode) =>
-    request<SerialCode>("PUT", `/admin/serials/${c.id}`, c),
+  adminSerials: () => request<SerialCode[]>('GET', '/admin/serials'),
+  adminCreateSerial: (c: Partial<SerialCode>) => request<SerialCode>('POST', '/admin/serials', c),
+  adminUpdateSerial: (c: SerialCode) => request<SerialCode>('PUT', `/admin/serials/${c.id}`, c),
   adminDeleteSerial: (sid: number) =>
-    request<{ deleted: boolean }>("DELETE", `/admin/serials/${sid}`),
-  adminSerialUses: (sid: number) =>
-    request<SerialUse[]>("GET", `/admin/serials/${sid}/uses`),
-  rankingKeys: () => request<RankingKey[]>("GET", "/ranking/keys"),
+    request<{ deleted: boolean }>('DELETE', `/admin/serials/${sid}`),
+  adminSerialUses: (sid: number) => request<SerialUse[]>('GET', `/admin/serials/${sid}/uses`),
+  rankingKeys: () => request<RankingKey[]>('GET', '/ranking/keys'),
   ranking: (key: string, self: number) =>
-    request<RankingResult>("GET", `/ranking?key=${key}&self=${self}`),
-  publicHouses: () => request<HouseCell[]>("GET", "/houses"),
-  townMap: () => request<TownFacility[]>("GET", "/townmap"),
-  townAssets: () => request<TownAsset[]>("GET", "/townassets"),
-  towns: () => request<Town[]>("GET", "/towns"),
+    request<RankingResult>('GET', `/ranking?key=${key}&self=${self}`),
+  publicHouses: () => request<HouseCell[]>('GET', '/houses'),
+  townMap: () => request<TownFacility[]>('GET', '/townmap'),
+  townAssets: () => request<TownAsset[]>('GET', '/townassets'),
+  towns: () => request<Town[]>('GET', '/towns'),
   // 全街の家(メイン画面のグリッド描画用)。ownは呼び出し元プレイヤー基準。
-  houses: (id: number) => request<HouseCell[]>("GET", `/players/${id}/houses`),
+  houses: (id: number) => request<HouseCell[]>('GET', `/players/${id}/houses`),
   // 街移動(徒歩/バス)。行き先の街と手段を送る。移動結果(能力上昇等)を含む。
-  moveTown: (id: number, dest: number, means: "walk" | "bus") =>
-    request<MoveResp>("POST", `/players/${id}/move`, {
+  moveTown: (id: number, dest: number, means: 'walk' | 'bus') =>
+    request<MoveResp>('POST', `/players/${id}/move`, {
       dest,
       means,
       idempotency_key: newIdempotencyKey(),
     }),
   // ワープ(高額・即時)。行き先の街へ瞬間移動する。
   warp: (id: number, dest: number) =>
-    request<Player>("POST", `/players/${id}/warp`, {
+    request<Player>('POST', `/players/${id}/warp`, {
       dest,
       idempotency_key: newIdempotencyKey(),
     }),
-  stocks: () => request<StocksResp>("GET", "/stocks"),
-  playerStocks: (id: number) =>
-    request<PlayerStocksResp>("GET", `/players/${id}/stocks`),
+  stocks: () => request<StocksResp>('GET', '/stocks'),
+  playerStocks: (id: number) => request<PlayerStocksResp>('GET', `/players/${id}/stocks`),
   stockBuy: (id: number, symbol: string, quantity: number) =>
-    request<Player>("POST", `/players/${id}/stocks/buy`, {
+    request<Player>('POST', `/players/${id}/stocks/buy`, {
       symbol,
       quantity,
       idempotency_key: newIdempotencyKey(),
     }),
   stockSell: (id: number, symbol: string, quantity: number) =>
-    request<Player>("POST", `/players/${id}/stocks/sell`, {
+    request<Player>('POST', `/players/${id}/stocks/sell`, {
       symbol,
       quantity,
       idempotency_key: newIdempotencyKey(),
     }),
   stockSettle: (id: number) =>
-    request<Player>("POST", `/players/${id}/stocks/settle`, {
+    request<Player>('POST', `/players/${id}/stocks/settle`, {
       idempotency_key: newIdempotencyKey(),
     }),
-  getMail: (id: number) => request<Mailbox>("GET", `/players/${id}/mail`),
-  getMailUnread: (id: number) =>
-    request<{ unread: number }>("GET", `/players/${id}/mail/unread`),
+  getMail: (id: number) => request<Mailbox>('GET', `/players/${id}/mail`),
+  getMailUnread: (id: number) => request<{ unread: number }>('GET', `/players/${id}/mail/unread`),
   mailSend: (id: number, recipientId: number, body: string, giftId = 0) =>
-    request<{ ok: boolean }>("POST", `/players/${id}/mail/send`, {
+    request<{ ok: boolean }>('POST', `/players/${id}/mail/send`, {
       recipient_id: recipientId,
       body,
       gift_id: giftId,
     }),
   mailDelete: (id: number, msgId: number) =>
-    request<{ ok: boolean }>("DELETE", `/players/${id}/mail/${msgId}`),
+    request<{ ok: boolean }>('DELETE', `/players/${id}/mail/${msgId}`),
   mailSave: (id: number, msgId: number, saved: boolean) =>
-    request<{ ok: boolean }>("PUT", `/players/${id}/mail/${msgId}/save`, {
+    request<{ ok: boolean }>('PUT', `/players/${id}/mail/${msgId}/save`, {
       saved,
     }),
   greetings: (limit?: number) =>
-    request<Greeting[]>("GET", `/greetings${limit ? `?limit=${limit}` : ""}`),
-  postGreeting: (
-    id: number,
-    category: string,
-    body: string,
-    color: string,
-    janken: string,
-  ) =>
-    request<GreetResp>("POST", `/players/${id}/greetings`, {
+    request<Greeting[]>('GET', `/greetings${limit ? `?limit=${limit}` : ''}`),
+  postGreeting: (id: number, category: string, body: string, color: string, janken: string) =>
+    request<GreetResp>('POST', `/players/${id}/greetings`, {
       category,
       body,
       color,
       janken,
       idempotency_key: newIdempotencyKey(),
     }),
-  getCharacter: (id: number) =>
-    request<Character | null>("GET", `/players/${id}/character`),
-  cleague: () => request<CLeagueRank[]>("GET", "/cleague"),
+  getCharacter: (id: number) => request<Character | null>('GET', `/players/${id}/character`),
+  cleague: () => request<CLeagueRank[]>('GET', '/cleague'),
   setCharacterName: (id: number, name: string) =>
-    request<Player>("POST", `/players/${id}/character`, {
+    request<Player>('POST', `/players/${id}/character`, {
       name,
       idempotency_key: newIdempotencyKey(),
     }),
   growCharacter: (id: number, inputs: Record<string, number>) =>
-    request<Player>("POST", `/players/${id}/character/grow`, {
+    request<Player>('POST', `/players/${id}/character/grow`, {
       inputs,
       idempotency_key: newIdempotencyKey(),
     }),
   battle: (id: number, opponentId: number) =>
-    request<BattleResp>("POST", `/players/${id}/character/battle`, {
+    request<BattleResp>('POST', `/players/${id}/character/battle`, {
       opponent_id: opponentId,
       idempotency_key: newIdempotencyKey(),
     }),
-  attendanceBoard: () => request<AttendanceBoard>("GET", "/attendance"),
+  attendanceBoard: () => request<AttendanceBoard>('GET', '/attendance'),
   attendanceCheckin: (id: number) =>
-    request<{ recorded: boolean }>("POST", `/players/${id}/attendance/checkin`),
+    request<{ recorded: boolean }>('POST', `/players/${id}/attendance/checkin`),
   eventRoll: (id: number) =>
-    request<EventRollResp>("POST", `/players/${id}/events/roll`, {
+    request<EventRollResp>('POST', `/players/${id}/events/roll`, {
       idempotency_key: newIdempotencyKey(),
     }),
-  keibaRace: (id: number) =>
-    request<KeibaRaceResp>("GET", `/players/${id}/keiba`),
+  keibaRace: (id: number) => request<KeibaRaceResp>('GET', `/players/${id}/keiba`),
   keibaBet: (id: number, raceId: number, bets: number[]) =>
-    request<KeibaBetResp>("POST", `/players/${id}/keiba/bet`, {
+    request<KeibaBetResp>('POST', `/players/${id}/keiba/bet`, {
       race_id: raceId,
       bets,
       idempotency_key: newIdempotencyKey(),
     }),
-  shopItems: () => request<ShopItem[]>("GET", "/items"),
-  facilityMenu: (facility: string) =>
-    request<ShopItem[]>("GET", `/facilities/${facility}/menu`),
+  shopItems: () => request<ShopItem[]>('GET', '/items'),
+  facilityMenu: (facility: string) => request<ShopItem[]>('GET', `/facilities/${facility}/menu`),
   eat: (id: number, foodId: number) =>
-    request<Player>("POST", `/players/${id}/eat`, {
+    request<Player>('POST', `/players/${id}/eat`, {
       food_id: foodId,
       idempotency_key: newIdempotencyKey(),
     }),
   schoolAttend: (id: number, courseId: number) =>
-    request<Player>("POST", `/players/${id}/school/attend`, {
+    request<Player>('POST', `/players/${id}/school/attend`, {
       course_id: courseId,
       idempotency_key: newIdempotencyKey(),
     }),
@@ -1446,157 +1414,148 @@ export const api = {
     id: number,
     facility: string,
     menuId: number,
-    payMethod: "cash" | "credit" = "cash",
+    payMethod: 'cash' | 'credit' = 'cash',
   ) =>
-    request<Player>("POST", `/players/${id}/facilities/${facility}/use`, {
+    request<Player>('POST', `/players/${id}/facilities/${facility}/use`, {
       menu_id: menuId,
       pay_method: payMethod,
       idempotency_key: newIdempotencyKey(),
     }),
-  jobs: () => request<JobOption[]>("GET", "/jobs"),
+  jobs: () => request<JobOption[]>('GET', '/jobs'),
   changeJob: (id: number, jobName: string) =>
-    request<Player>("POST", `/players/${id}/job`, {
+    request<Player>('POST', `/players/${id}/job`, {
       job_name: jobName,
       idempotency_key: newIdempotencyKey(),
     }),
   work: (id: number) =>
-    request<WorkResponse>("POST", `/players/${id}/work`, {
+    request<WorkResponse>('POST', `/players/${id}/work`, {
       idempotency_key: newIdempotencyKey(),
     }),
-  buy: (
-    id: number,
-    itemId: number,
-    facility = "",
-    payMethod: "cash" | "credit" = "cash",
-  ) =>
-    request<Player>("POST", `/players/${id}/buy`, {
+  buy: (id: number, itemId: number, facility = '', payMethod: 'cash' | 'credit' = 'cash') =>
+    request<Player>('POST', `/players/${id}/buy`, {
       item_id: itemId,
       facility,
       pay_method: payMethod,
       idempotency_key: newIdempotencyKey(),
     }),
   use: (id: number, itemId: number) =>
-    request<Player>("POST", `/players/${id}/use`, {
+    request<Player>('POST', `/players/${id}/use`, {
       item_id: itemId,
       idempotency_key: newIdempotencyKey(),
     }),
   deposit: (id: number, amount: number) =>
-    request<Player>("POST", `/players/${id}/bank/deposit`, {
+    request<Player>('POST', `/players/${id}/bank/deposit`, {
       amount,
       idempotency_key: newIdempotencyKey(),
     }),
   withdraw: (id: number, amount: number) =>
-    request<Player>("POST", `/players/${id}/bank/withdraw`, {
+    request<Player>('POST', `/players/${id}/bank/withdraw`, {
       amount,
       idempotency_key: newIdempotencyKey(),
     }),
-  bankStatement: (id: number, account: "normal" | "super" = "normal") =>
+  bankStatement: (id: number, account: 'normal' | 'super' = 'normal') =>
     request<StatementEntry[]>(
-      "GET",
-      `/players/${id}/bank/statement${account === "super" ? "?account=super" : ""}`,
+      'GET',
+      `/players/${id}/bank/statement${account === 'super' ? '?account=super' : ''}`,
     ),
   transfer: (id: number, toName: string, amount: number) =>
-    request<Player>("POST", `/players/${id}/bank/transfer`, {
+    request<Player>('POST', `/players/${id}/bank/transfer`, {
       to_name: toName,
       amount,
       idempotency_key: newIdempotencyKey(),
     }),
   superDeposit: (id: number, amount: number) =>
-    request<Player>("POST", `/players/${id}/bank/super/deposit`, {
+    request<Player>('POST', `/players/${id}/bank/super/deposit`, {
       amount,
       idempotency_key: newIdempotencyKey(),
     }),
   superCancel: (id: number, amount: number, all: boolean) =>
-    request<Player>("POST", `/players/${id}/bank/super/cancel`, {
+    request<Player>('POST', `/players/${id}/bank/super/cancel`, {
       amount,
       all,
       idempotency_key: newIdempotencyKey(),
     }),
-  loanQuote: (id: number) =>
-    request<LoanQuote>("GET", `/players/${id}/bank/loan/quote`),
+  loanQuote: (id: number) => request<LoanQuote>('GET', `/players/${id}/bank/loan/quote`),
   loanBorrow: (id: number, count: number) =>
-    request<Player>("POST", `/players/${id}/bank/loan/borrow`, {
+    request<Player>('POST', `/players/${id}/bank/loan/borrow`, {
       count,
       idempotency_key: newIdempotencyKey(),
     }),
   loanRepay: (id: number) =>
-    request<Player>("POST", `/players/${id}/bank/loan/repay`, {
+    request<Player>('POST', `/players/${id}/bank/loan/repay`, {
       idempotency_key: newIdempotencyKey(),
     }),
   casinoPlay: (id: number, game: string, bet: number, params: unknown) =>
-    request<CasinoPlayResult>("POST", `/players/${id}/casino/${game}/play`, {
+    request<CasinoPlayResult>('POST', `/players/${id}/casino/${game}/play`, {
       bet,
       params,
       idempotency_key: newIdempotencyKey(),
     }),
   scratchState: (id: number, game: string) =>
-    request<ScratchState>("GET", `/players/${id}/scratch/${game}`),
+    request<ScratchState>('GET', `/players/${id}/scratch/${game}`),
   scratchOpen: (id: number, game: string, card: number, cell: number) =>
-    request<ScratchOpenResult>("POST", `/players/${id}/scratch/${game}/open`, {
+    request<ScratchOpenResult>('POST', `/players/${id}/scratch/${game}/open`, {
       card,
       cell,
       idempotency_key: newIdempotencyKey(),
     }),
-  bjState: (id: number) => request<BJState>("GET", `/players/${id}/blackjack`),
+  bjState: (id: number) => request<BJState>('GET', `/players/${id}/blackjack`),
   bjStart: (id: number, rate: number) =>
-    request<BJState>("POST", `/players/${id}/blackjack/start`, {
+    request<BJState>('POST', `/players/${id}/blackjack/start`, {
       rate,
       idempotency_key: newIdempotencyKey(),
     }),
   bjHit: (id: number) =>
-    request<BJState>("POST", `/players/${id}/blackjack/hit`, {
+    request<BJState>('POST', `/players/${id}/blackjack/hit`, {
       idempotency_key: newIdempotencyKey(),
     }),
   bjStand: (id: number) =>
-    request<BJState>("POST", `/players/${id}/blackjack/stand`, {
+    request<BJState>('POST', `/players/${id}/blackjack/stand`, {
       idempotency_key: newIdempotencyKey(),
     }),
-  pokerState: (id: number) =>
-    request<PokerState>("GET", `/players/${id}/poker`),
+  pokerState: (id: number) => request<PokerState>('GET', `/players/${id}/poker`),
   pokerBuy: (id: number) =>
-    request<PokerState>("POST", `/players/${id}/poker/buy`, {
+    request<PokerState>('POST', `/players/${id}/poker/buy`, {
       idempotency_key: newIdempotencyKey(),
     }),
   pokerDeal: (id: number) =>
-    request<PokerState>("POST", `/players/${id}/poker/deal`, {
+    request<PokerState>('POST', `/players/${id}/poker/deal`, {
       idempotency_key: newIdempotencyKey(),
     }),
   pokerDraw: (id: number, hold: number[]) =>
-    request<PokerState>("POST", `/players/${id}/poker/draw`, {
+    request<PokerState>('POST', `/players/${id}/poker/draw`, {
       hold,
       idempotency_key: newIdempotencyKey(),
     }),
   pokerCashout: (id: number) =>
-    request<PokerState>("POST", `/players/${id}/poker/cashout`, {
+    request<PokerState>('POST', `/players/${id}/poker/cashout`, {
       idempotency_key: newIdempotencyKey(),
     }),
-  loto6State: (id: number) =>
-    request<Loto6State>("GET", `/players/${id}/loto6`),
+  loto6State: (id: number) => request<Loto6State>('GET', `/players/${id}/loto6`),
   loto6Buy: (id: number, numbers: number[]) =>
-    request<Loto6State>("POST", `/players/${id}/loto6/buy`, {
+    request<Loto6State>('POST', `/players/${id}/loto6/buy`, {
       numbers,
       idempotency_key: newIdempotencyKey(),
     }),
   hospitalTreat: (id: number) =>
-    request<Player>("POST", `/players/${id}/hospital/treat`, {
+    request<Player>('POST', `/players/${id}/hospital/treat`, {
       idempotency_key: newIdempotencyKey(),
     }),
   onsenBathe: (id: number, bathId: number) =>
-    request<Player>("POST", `/players/${id}/onsen/bathe`, {
+    request<Player>('POST', `/players/${id}/onsen/bathe`, {
       bath_id: bathId,
       idempotency_key: newIdempotencyKey(),
     }),
   onsenLeave: (id: number) =>
-    request<Player>("POST", `/players/${id}/onsen/leave`, {
+    request<Player>('POST', `/players/${id}/onsen/leave`, {
       idempotency_key: newIdempotencyKey(),
     }),
   onsenTick: (id: number) =>
-    request<Player>("POST", `/players/${id}/onsen/tick`, {
+    request<Player>('POST', `/players/${id}/onsen/tick`, {
       idempotency_key: newIdempotencyKey(),
     }),
 
-  building: (id: number) =>
-    request<BuildingState>("GET", `/players/${id}/building`),
+  building: (id: number) => request<BuildingState>('GET', `/players/${id}/building`),
   buildHouse: (
     id: number,
     town: number,
@@ -1606,7 +1565,7 @@ export const api = {
     interiorRank: number,
     tuika = 0,
   ) =>
-    request<Player>("POST", `/players/${id}/building/build`, {
+    request<Player>('POST', `/players/${id}/building/build`, {
       town,
       row,
       col,
@@ -1616,49 +1575,38 @@ export const api = {
       idempotency_key: newIdempotencyKey(),
     }),
   sellHouse: (id: number, houseId: number) =>
-    request<Player>("POST", `/players/${id}/building/sell`, {
+    request<Player>('POST', `/players/${id}/building/sell`, {
       house_id: houseId,
       idempotency_key: newIdempotencyKey(),
     }),
-  rebuildHouse: (
-    id: number,
-    houseId: number,
-    exterior: string,
-    interiorRank: number,
-  ) =>
-    request<Player>("POST", `/players/${id}/building/rebuild`, {
+  rebuildHouse: (id: number, houseId: number, exterior: string, interiorRank: number) =>
+    request<Player>('POST', `/players/${id}/building/rebuild`, {
       house_id: houseId,
       exterior,
       interior_rank: interiorRank,
       idempotency_key: newIdempotencyKey(),
     }),
   setHouseComment: (id: number, houseId: number, setumei: string) =>
-    request<Player>("POST", `/players/${id}/building/comment`, {
+    request<Player>('POST', `/players/${id}/building/comment`, {
       house_id: houseId,
       setumei,
       idempotency_key: newIdempotencyKey(),
     }),
   // 家のコンテンツ枠を設定(全置き換え)。kind空は非公開。
   setHouseContents: (id: number, houseId: number, contents: HouseContent[]) =>
-    request<Player>("POST", `/players/${id}/building/contents`, {
+    request<Player>('POST', `/players/${id}/building/contents`, {
       house_id: houseId,
       contents,
       idempotency_key: newIdempotencyKey(),
     }),
   saisen: (id: number, houseId: number, amount: number) =>
-    request<Player>("POST", `/players/${id}/building/saisen`, {
+    request<Player>('POST', `/players/${id}/building/saisen`, {
       house_id: houseId,
       amount,
       idempotency_key: newIdempotencyKey(),
     }),
-  openHouseShop: (
-    id: number,
-    houseId: number,
-    title: string,
-    syubetu: string,
-    markup: number,
-  ) =>
-    request<Player>("POST", `/players/${id}/building/shop/open`, {
+  openHouseShop: (id: number, houseId: number, title: string, syubetu: string, markup: number) =>
+    request<Player>('POST', `/players/${id}/building/shop/open`, {
       house_id: houseId,
       title,
       syubetu,
@@ -1666,30 +1614,24 @@ export const api = {
       idempotency_key: newIdempotencyKey(),
     }),
   orosi: (id: number, houseId: number) =>
-    request<OrosiState>(
-      "GET",
-      `/players/${id}/building/orosi?house_id=${houseId}`,
-    ),
+    request<OrosiState>('GET', `/players/${id}/building/orosi?house_id=${houseId}`),
   shiire: (id: number, houseId: number, itemId: number, qty: number) =>
-    request<Player>("POST", `/players/${id}/building/shiire`, {
+    request<Player>('POST', `/players/${id}/building/shiire`, {
       house_id: houseId,
       item_id: itemId,
       qty,
       idempotency_key: newIdempotencyKey(),
     }),
   houseShop: (id: number, houseId: number) =>
-    request<HouseShopView>(
-      "GET",
-      `/players/${id}/building/shop?house_id=${houseId}`,
-    ),
+    request<HouseShopView>('GET', `/players/${id}/building/shop?house_id=${houseId}`),
   buyFromHouseShop: (
     id: number,
     houseId: number,
     itemId: number,
     qty: number,
-    payMethod = "cash",
+    payMethod = 'cash',
   ) =>
-    request<BuyResp>("POST", `/players/${id}/building/shop/buy`, {
+    request<BuyResp>('POST', `/players/${id}/building/shop/buy`, {
       house_id: houseId,
       item_id: itemId,
       qty,
@@ -1697,19 +1639,9 @@ export const api = {
       idempotency_key: newIdempotencyKey(),
     }),
   houseBbs: (id: number, houseId: number) =>
-    request<BbsPost[]>(
-      "GET",
-      `/players/${id}/building/bbs?house_id=${houseId}`,
-    ),
-  postBbs: (
-    id: number,
-    houseId: number,
-    kind: string,
-    body: string,
-    title = "",
-    parentNo = 0,
-  ) =>
-    request<PostBbsResp>("POST", `/players/${id}/building/bbs/post`, {
+    request<BbsPost[]>('GET', `/players/${id}/building/bbs?house_id=${houseId}`),
+  postBbs: (id: number, houseId: number, kind: string, body: string, title = '', parentNo = 0) =>
+    request<PostBbsResp>('POST', `/players/${id}/building/bbs/post`, {
       house_id: houseId,
       kind,
       title,
@@ -1723,7 +1655,7 @@ export const api = {
     kind: string,
     opts: { articleNo?: number; threadNo?: number; all?: boolean },
   ) =>
-    request<Player>("POST", `/players/${id}/building/bbs/delete`, {
+    request<Player>('POST', `/players/${id}/building/bbs/delete`, {
       house_id: houseId,
       kind,
       article_no: opts.articleNo ?? 0,
@@ -1732,48 +1664,28 @@ export const api = {
       idempotency_key: newIdempotencyKey(),
     }),
   yamiShop: (id: number, houseId: number) =>
-    request<YamiView>(
-      "GET",
-      `/players/${id}/building/yami?house_id=${houseId}`,
-    ),
+    request<YamiView>('GET', `/players/${id}/building/yami?house_id=${houseId}`),
   yamiInventory: (id: number) =>
-    request<YamiInventoryItem[]>(
-      "GET",
-      `/players/${id}/building/yami/inventory`,
-    ),
-  yamiList: (
-    id: number,
-    houseId: number,
-    itemId: number,
-    price: number,
-    warehouse: boolean,
-  ) =>
-    request<Player>("POST", `/players/${id}/building/yami/list`, {
+    request<YamiInventoryItem[]>('GET', `/players/${id}/building/yami/inventory`),
+  yamiList: (id: number, houseId: number, itemId: number, price: number, warehouse: boolean) =>
+    request<Player>('POST', `/players/${id}/building/yami/list`, {
       house_id: houseId,
       item_id: itemId,
       price,
       warehouse,
       idempotency_key: newIdempotencyKey(),
     }),
-  yamiBuy: (
-    id: number,
-    houseId: number,
-    listingId: number,
-    payMethod = "cash",
-  ) =>
-    request<YamiBuyResp>("POST", `/players/${id}/building/yami/buy`, {
+  yamiBuy: (id: number, houseId: number, listingId: number, payMethod = 'cash') =>
+    request<YamiBuyResp>('POST', `/players/${id}/building/yami/buy`, {
       house_id: houseId,
       listing_id: listingId,
       pay_method: payMethod,
       idempotency_key: newIdempotencyKey(),
     }),
   companyView: (id: number, houseId: number) =>
-    request<CompanyView>(
-      "GET",
-      `/players/${id}/building/company?house_id=${houseId}`,
-    ),
+    request<CompanyView>('GET', `/players/${id}/building/company?house_id=${houseId}`),
   companyStaffAdd: (id: number, houseId: number) =>
-    request<Player>("POST", `/players/${id}/building/company/staff`, {
+    request<Player>('POST', `/players/${id}/building/company/staff`, {
       house_id: houseId,
       idempotency_key: newIdempotencyKey(),
     }),
@@ -1783,9 +1695,9 @@ export const api = {
     staffId: number,
     param: string,
     amount: number,
-    payMethod = "cash",
+    payMethod = 'cash',
   ) =>
-    request<EducateResp>("POST", `/players/${id}/building/company/educate`, {
+    request<EducateResp>('POST', `/players/${id}/building/company/educate`, {
       house_id: houseId,
       staff_id: staffId,
       param,
@@ -1801,7 +1713,7 @@ export const api = {
     wantJoin = false,
     wantLeave = false,
   ) =>
-    request<Player>("POST", `/players/${id}/building/company/bbs`, {
+    request<Player>('POST', `/players/${id}/building/company/bbs`, {
       house_id: houseId,
       board,
       body,
@@ -1810,19 +1722,19 @@ export const api = {
       idempotency_key: newIdempotencyKey(),
     }),
   companyApprove: (id: number, houseId: number, postId: number) =>
-    request<Player>("POST", `/players/${id}/building/company/approve`, {
+    request<Player>('POST', `/players/${id}/building/company/approve`, {
       house_id: houseId,
       post_id: postId,
       idempotency_key: newIdempotencyKey(),
     }),
   companyKick: (id: number, houseId: number, officerId: number) =>
-    request<Player>("POST", `/players/${id}/building/company/kick`, {
+    request<Player>('POST', `/players/${id}/building/company/kick`, {
       house_id: houseId,
       officer_id: officerId,
       idempotency_key: newIdempotencyKey(),
     }),
   companyBbsDelete: (id: number, houseId: number, board: string, no: number) =>
-    request<Player>("POST", `/players/${id}/building/company/bbs/delete`, {
+    request<Player>('POST', `/players/${id}/building/company/bbs/delete`, {
       house_id: houseId,
       board,
       no,
@@ -1841,25 +1753,16 @@ export const api = {
       price: number;
     },
   ) =>
-    request<SeizouResp>("POST", `/players/${id}/building/company/seizou`, {
+    request<SeizouResp>('POST', `/players/${id}/building/company/seizou`, {
       house_id: houseId,
       input,
       idempotency_key: newIdempotencyKey(),
     }),
-  participants: () =>
-    request<{ id: number; display_name: string }[]>("GET", "/participants"),
+  participants: () => request<{ id: number; display_name: string }[]>('GET', '/participants'),
   houseShopStock: (id: number, houseId: number) =>
-    request<ShopStockView>(
-      "GET",
-      `/players/${id}/building/shop/stock?house_id=${houseId}`,
-    ),
-  setHouseShopPrice: (
-    id: number,
-    houseId: number,
-    itemId: number,
-    sellPrice: number,
-  ) =>
-    request<Player>("POST", `/players/${id}/building/shop/price`, {
+    request<ShopStockView>('GET', `/players/${id}/building/shop/stock?house_id=${houseId}`),
+  setHouseShopPrice: (id: number, houseId: number, itemId: number, sellPrice: number) =>
+    request<Player>('POST', `/players/${id}/building/shop/price`, {
       house_id: houseId,
       item_id: itemId,
       sell_price: sellPrice,
@@ -1867,69 +1770,56 @@ export const api = {
     }),
 
   // 管理者API(ログインセッションのadminロールで認可)。
-  adminListItems: () => request<AdminItem[]>("GET", "/admin/items"),
-  adminCreateItem: (item: AdminItemInput) =>
-    request<AdminItem>("POST", "/admin/items", item),
+  adminListItems: () => request<AdminItem[]>('GET', '/admin/items'),
+  adminCreateItem: (item: AdminItemInput) => request<AdminItem>('POST', '/admin/items', item),
   adminUpdateItem: (id: number, item: AdminItemInput) =>
-    request<AdminItem>("PUT", `/admin/items/${id}`, item),
-  adminDeleteItem: (id: number) =>
-    request<{ deleted: boolean }>("DELETE", `/admin/items/${id}`),
-  adminListJobs: () => request<AdminJob[]>("GET", "/admin/jobs"),
-  adminCreateJob: (job: JobPayload) =>
-    request<AdminJob>("POST", "/admin/jobs", job),
+    request<AdminItem>('PUT', `/admin/items/${id}`, item),
+  adminDeleteItem: (id: number) => request<{ deleted: boolean }>('DELETE', `/admin/items/${id}`),
+  adminListJobs: () => request<AdminJob[]>('GET', '/admin/jobs'),
+  adminCreateJob: (job: JobPayload) => request<AdminJob>('POST', '/admin/jobs', job),
   adminUpdateJob: (id: number, job: JobPayload) =>
-    request<AdminJob>("PUT", `/admin/jobs/${id}`, job),
-  adminDeleteJob: (id: number) =>
-    request<{ deleted: boolean }>("DELETE", `/admin/jobs/${id}`),
+    request<AdminJob>('PUT', `/admin/jobs/${id}`, job),
+  adminDeleteJob: (id: number) => request<{ deleted: boolean }>('DELETE', `/admin/jobs/${id}`),
   adminSimulate: (
     effect: EffectOp[],
     state: {
       money: number;
       params: Record<string, { value: number; max: number }>;
     },
-  ) => request<SimResult>("POST", "/admin/simulate", { effect, state }),
-  adminListPlayers: () =>
-    request<AdminPlayerSummary[]>("GET", "/admin/players"),
+  ) => request<SimResult>('POST', '/admin/simulate', { effect, state }),
+  adminListPlayers: () => request<AdminPlayerSummary[]>('GET', '/admin/players'),
   adminUpdatePlayer: (id: number, payload: AdminPlayerPayload) =>
-    request<Player>("PUT", `/admin/players/${id}`, payload),
+    request<Player>('PUT', `/admin/players/${id}`, payload),
   adminDeletePlayer: (id: number) =>
-    request<{ deleted: boolean }>("DELETE", `/admin/players/${id}`),
+    request<{ deleted: boolean }>('DELETE', `/admin/players/${id}`),
   adminDeleteGreeting: (id: number) =>
-    request<{ deleted: boolean }>("DELETE", `/admin/greetings/${id}`),
-  adminGetSettings: () => request<GameSettings>("GET", "/admin/settings"),
+    request<{ deleted: boolean }>('DELETE', `/admin/greetings/${id}`),
+  adminGetSettings: () => request<GameSettings>('GET', '/admin/settings'),
   adminUpdateSettings: (settings: GameSettings) =>
-    request<GameSettings>("PUT", "/admin/settings", settings),
+    request<GameSettings>('PUT', '/admin/settings', settings),
   adminUpdateTownMap: (facilities: TownFacility[]) =>
-    request<TownFacility[]>("PUT", "/admin/townmap", facilities),
+    request<TownFacility[]>('PUT', '/admin/townmap', facilities),
   adminUpdateTownAssets: (assets: TownAsset[]) =>
-    request<TownAsset[]>("PUT", "/admin/townassets", assets),
+    request<TownAsset[]>('PUT', '/admin/townassets', assets),
   // 施設プリセット(画像・表示名・遷移先の保存済みテンプレート)。
-  adminFacilityPresets: () =>
-    request<FacilityPreset[]>("GET", "/admin/townmap/presets"),
+  adminFacilityPresets: () => request<FacilityPreset[]>('GET', '/admin/townmap/presets'),
   adminUpdateFacilityPresets: (presets: FacilityPreset[]) =>
-    request<FacilityPreset[]>("PUT", "/admin/townmap/presets", presets),
+    request<FacilityPreset[]>('PUT', '/admin/townmap/presets', presets),
   // カスタムイベント(ランダムイベントの追加/編集/削除)。
-  adminListEvents: () => request<AdminEvent[]>("GET", "/admin/events"),
-  adminCreateEvent: (e: Omit<AdminEvent, "id">) =>
-    request<AdminEvent>("POST", "/admin/events", e),
-  adminUpdateEvent: (e: AdminEvent) =>
-    request<AdminEvent>("PUT", `/admin/events/${e.id}`, e),
-  adminDeleteEvent: (id: number) =>
-    request<{ deleted: boolean }>("DELETE", `/admin/events/${id}`),
+  adminListEvents: () => request<AdminEvent[]>('GET', '/admin/events'),
+  adminCreateEvent: (e: Omit<AdminEvent, 'id'>) => request<AdminEvent>('POST', '/admin/events', e),
+  adminUpdateEvent: (e: AdminEvent) => request<AdminEvent>('PUT', `/admin/events/${e.id}`, e),
+  adminDeleteEvent: (id: number) => request<{ deleted: boolean }>('DELETE', `/admin/events/${id}`),
   // 家が建っているマス(施設エディタでロックするため)。
-  adminHouseCells: () => request<PlotCell[]>("GET", "/admin/townmap/houses"),
+  adminHouseCells: () => request<PlotCell[]>('GET', '/admin/townmap/houses'),
   // アップロード済み画像名の一覧(背景アセットのパレット用)。
-  adminListAssets: () => request<string[]>("GET", "/admin/assets"),
+  adminListAssets: () => request<string[]>('GET', '/admin/assets'),
   // 背景アセット画像をアップロード(base64)。nameはURLスラッグ。
   adminUploadAsset: (name: string, mime: string, data: string) =>
-    request<{ name: string }>("POST", "/admin/assets", { name, mime, data }),
+    request<{ name: string }>('POST', '/admin/assets', { name, mime, data }),
   // アップロード画像を削除(配置中は422)。
   adminDeleteAsset: (name: string) =>
-    request<{ ok: boolean }>(
-      "DELETE",
-      `/admin/assets/${encodeURIComponent(name)}`,
-    ),
+    request<{ ok: boolean }>('DELETE', `/admin/assets/${encodeURIComponent(name)}`),
   // 街の一覧(名前・地価)を更新。街番号は並び順で決まる。
-  adminUpdateTowns: (towns: TownConfig[]) =>
-    request<Town[]>("PUT", "/admin/towns", towns),
+  adminUpdateTowns: (towns: TownConfig[]) => request<Town[]>('PUT', '/admin/towns', towns),
 };

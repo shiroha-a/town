@@ -108,7 +108,9 @@ async function pick(card: number) {
               {{ b.name }}（残り{{ b.uses }}）
             </option>
           </select>
-          <button class="btn primary" :disabled="busy" data-test="start" @click="start">釣りをする</button>
+          <button class="btn primary" :disabled="busy" data-test="start" @click="start">
+            釣りをする
+          </button>
         </div>
       </template>
 

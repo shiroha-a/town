@@ -62,7 +62,9 @@ async function convert() {
 
     <div class="gift-header">
       <div class="lead">
-        ギフト屋です。持ち物を贈り物用の「ギフト」に変えられます（手数料{{ yen(state?.fee ?? 0) }}円）。<br />
+        ギフト屋です。持ち物を贈り物用の「ギフト」に変えられます（手数料{{
+          yen(state?.fee ?? 0)
+        }}円）。<br />
         ギフトは自分では使えません。メール画面から他の住民に贈ってください。<br />
         ●{{ player.display_name }}さんの所持金：<span class="money">{{ yen(player.money) }}円</span>
       </div>
@@ -80,8 +82,12 @@ async function convert() {
             {{ c.name }}（残り{{ c.uses }}）
           </option>
         </select>
-        <label class="uses">個数<input type="number" v-model.number="uses" min="1" data-test="convert-uses" /></label>
-        <button class="btn primary" :disabled="busy" data-test="convert" @click="convert">ギフトにする</button>
+        <label class="uses"
+          >個数<input type="number" v-model.number="uses" min="1" data-test="convert-uses"
+        /></label>
+        <button class="btn primary" :disabled="busy" data-test="convert" @click="convert">
+          ギフトにする
+        </button>
       </div>
       <p class="note">※個数を残り以上にすると、まとめて全部ギフトになります。</p>
 
@@ -89,7 +95,10 @@ async function convert() {
       <div v-if="!state?.gifts.length" class="note">まだギフトはありません。</div>
       <table v-else class="gift-table" data-test="gift-list">
         <thead>
-          <tr><th class="l">品名</th><th>残り</th></tr>
+          <tr>
+            <th class="l">品名</th>
+            <th>残り</th>
+          </tr>
         </thead>
         <tbody>
           <tr v-for="g in state.gifts" :key="g.id">

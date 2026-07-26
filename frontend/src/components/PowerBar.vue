@@ -24,8 +24,10 @@ const color = computed(() => {
 
 <template>
   <div class="honbun2">
-    <span class="honbun2">{{ label }}</span>：{{ value }} （MAX値：{{ max }}）
-    <span v-if="fullRemain" class="recover-timer">満タンまで{{ fullRemain }}</span><br />
+    <span class="honbun2">{{ label }}</span
+    >：{{ value }} （MAX値：{{ max }}）
+    <span v-if="fullRemain" class="recover-timer">満タンまで{{ fullRemain }}</span
+    ><br />
     <span class="powerbar">
       <span class="bar-fill" :class="color" :style="{ width: pct + '%' }"></span>
     </span>

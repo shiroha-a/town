@@ -190,7 +190,9 @@ function selectTown(no: number) {
 
 // 追加種別(2軒目以降)。同種は1軒まで、株式会社/持ち物販売店は能力審査が必要。
 const selectedTuika = ref(0);
-const ownedTuikas = computed(() => new Set((state.value?.my_houses ?? []).map((h) => h.tuika).filter((t) => t !== 0)));
+const ownedTuikas = computed(
+  () => new Set((state.value?.my_houses ?? []).map((h) => h.tuika).filter((t) => t !== 0)),
+);
 function tuikaDisabled(t: { no: number; shinsa: boolean }): string {
   if (t.no !== 0 && ownedTuikas.value.has(t.no)) return 'すでに所有';
   if (t.shinsa && !state.value?.shinsa_ok) return '設営能力不足';
@@ -287,7 +289,6 @@ async function build() {
     busy.value = false;
   }
 }
-
 </script>
 
 <template>
@@ -298,7 +299,9 @@ async function build() {
     <div class="kentiku-header">
       <div class="lead">
         建設会社です。街の空地に家を建てられます。<br />
-        1軒目は「（地価＋外装）×内装ランク倍率」、2軒目以降は「地価＋外装×2」の建築費が<b>普通口座</b>から引き落とされます（1人{{ state?.mochiie_max ?? 4 }}軒まで）。
+        1軒目は「（地価＋外装）×内装ランク倍率」、2軒目以降は「地価＋外装×2」の建築費が<b>普通口座</b>から引き落とされます（1人{{
+          state?.mochiie_max ?? 4
+        }}軒まで）。
       </div>
       <div class="title">建設会社</div>
     </div>
@@ -331,7 +334,12 @@ async function build() {
               :title="cellTitle(row, col)"
               @click="clickCell(row, col)"
             >
-              <img v-if="assetImgAt(row, col)" class="cell-bg" :src="assetImgAt(row, col)!" alt="" />
+              <img
+                v-if="assetImgAt(row, col)"
+                class="cell-bg"
+                :src="assetImgAt(row, col)!"
+                alt=""
+              />
               <img
                 v-if="cellImg(row, col)"
                 class="cell-fg"
@@ -349,7 +357,10 @@ async function build() {
       <div v-if="selectedCell" class="build-form panel-white">
         <div class="row">
           <span class="lbl">建築位置</span>
-          <span class="val">{{ townName(selectedTown) }}／{{ rowLabel(selectedCell.row) }}{{ selectedCell.col }}</span>
+          <span class="val"
+            >{{ townName(selectedTown) }}／{{ rowLabel(selectedCell.row)
+            }}{{ selectedCell.col }}</span
+          >
         </div>
         <div class="row ext-row">
           <span class="lbl">外装</span>
@@ -360,7 +371,9 @@ async function build() {
               :disabled-reason="exteriorDisabled"
             />
             <div v-if="hasWideExteriors" class="note ext-note">
-              横長の外装は<b>2マス</b>の大邸宅です。建築許可証を1枚消費し、建築費は<b>{{ costFactor }}倍</b>になります（許可証は売却しても戻りません）。
+              横長の外装は<b>2マス</b>の大邸宅です。建築許可証を1枚消費し、建築費は<b
+                >{{ costFactor }}倍</b
+              >になります（許可証は売却しても戻りません）。
               <template v-if="permits > 0">所持している許可証：{{ permits }}枚</template>
               <template v-else>許可証は店では売っていません（配布のみ）。</template>
             </div>
@@ -377,8 +390,18 @@ async function build() {
         <div v-else class="row ext-row">
           <span class="lbl">種別</span>
           <div class="tuika-list">
-            <label v-for="t in state.tuikas" :key="t.no" class="tuika-opt" :class="{ off: !!tuikaDisabled(t) }">
-              <input v-model.number="selectedTuika" type="radio" :value="t.no" :disabled="!!tuikaDisabled(t)" />
+            <label
+              v-for="t in state.tuikas"
+              :key="t.no"
+              class="tuika-opt"
+              :class="{ off: !!tuikaDisabled(t) }"
+            >
+              <input
+                v-model.number="selectedTuika"
+                type="radio"
+                :value="t.no"
+                :disabled="!!tuikaDisabled(t)"
+              />
               {{ t.name }}<template v-if="t.fee > 0">（+{{ t.fee }}万）</template>
               <span v-if="tuikaDisabled(t)" class="tuika-ng">{{ tuikaDisabled(t) }}</span>
             </label>
@@ -394,7 +417,9 @@ async function build() {
         </div>
         <div v-if="placeError" class="message error place-error">{{ placeError }}</div>
         <div class="row">
-          <button class="btn build-btn" :disabled="busy || !!placeError" @click="build">この場所に建てる</button>
+          <button class="btn build-btn" :disabled="busy || !!placeError" @click="build">
+            この場所に建てる
+          </button>
         </div>
       </div>
       <div v-else class="hint">
@@ -411,13 +436,23 @@ async function build() {
         <ul v-else class="mh-list">
           <li v-for="h in state.my_houses" :key="h.id" class="mh-item">
             <div class="mh-row">
-              <img :src="`/img/svg/${h.exterior}.svg`" :alt="h.exterior" :class="{ 'mh-wide': (h.span_w ?? 1) > 1 }" />
+              <img
+                :src="`/img/svg/${h.exterior}.svg`"
+                :alt="h.exterior"
+                :class="{ 'mh-wide': (h.span_w ?? 1) > 1 }"
+              />
               <span class="mh-loc">{{ townName(h.town) }}／{{ rowLabel(h.row) }}{{ h.col }}</span>
-              <span class="mh-ext">{{ h.exterior }}・内装{{ ['A','B','C','D'][h.interior_rank] ?? '?' }}ランク<template v-if="(h.span_w ?? 1) > 1">・2マス</template></span>
+              <span class="mh-ext"
+                >{{ h.exterior }}・内装{{
+                  ['A', 'B', 'C', 'D'][h.interior_rank] ?? '?'
+                }}ランク<template v-if="(h.span_w ?? 1) > 1">・2マス</template></span
+              >
             </div>
           </li>
         </ul>
-        <div class="mh-note">コメント・コンテンツ・店・建て替え・売却は、街のコマンドバー「家の設定」から行えます。</div>
+        <div class="mh-note">
+          コメント・コンテンツ・店・建て替え・売却は、街のコマンドバー「家の設定」から行えます。
+        </div>
       </div>
     </template>
 

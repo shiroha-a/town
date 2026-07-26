@@ -16,7 +16,8 @@ const message = ref('');
 const suits = ['♠', '♥', '♦', '♣']; // スペード/ハート/ダイヤ/クラブ
 function cardLabel(card: number): string {
   const rank = (card % 13) + 1;
-  const r = rank === 1 ? 'A' : rank === 11 ? 'J' : rank === 12 ? 'Q' : rank === 13 ? 'K' : String(rank);
+  const r =
+    rank === 1 ? 'A' : rank === 11 ? 'J' : rank === 12 ? 'Q' : rank === 13 ? 'K' : String(rank);
   return `${suits[Math.floor(card / 13)]}${r}`;
 }
 // ハート/ダイヤは赤。
@@ -93,14 +94,18 @@ function reset() {
           ディーラー（{{ state.phase === 'over' ? state.oya_score : `${state.oya_score} + ?` }}）
         </div>
         <div class="cards">
-          <span v-for="(c, i) in state.oya" :key="i" class="card" :class="{ red: isRed(c) }">{{ cardLabel(c) }}</span>
+          <span v-for="(c, i) in state.oya" :key="i" class="card" :class="{ red: isRed(c) }">{{
+            cardLabel(c)
+          }}</span>
           <span v-for="n in state.oya_hidden" :key="'h' + n" class="card back">?</span>
         </div>
       </div>
       <div class="hand">
         <div class="hand-label">あなた（{{ state.ply_score }}）</div>
         <div class="cards">
-          <span v-for="(c, i) in state.ply" :key="i" class="card" :class="{ red: isRed(c) }">{{ cardLabel(c) }}</span>
+          <span v-for="(c, i) in state.ply" :key="i" class="card" :class="{ red: isRed(c) }">{{
+            cardLabel(c)
+          }}</span>
         </div>
       </div>
 
@@ -110,7 +115,9 @@ function reset() {
       </div>
       <div v-else class="cg-result" :class="resultClass" data-test="result">
         {{ resultText }}
-        <span class="net">{{ state.payout > 0 ? `+${yen(state.payout - state.rate)}円` : `${yen(-state.rate)}円` }}</span>
+        <span class="net">{{
+          state.payout > 0 ? `+${yen(state.payout - state.rate)}円` : `${yen(-state.rate)}円`
+        }}</span>
         <button class="btn" :disabled="busy" data-test="again" @click="reset">もう一度</button>
       </div>
     </div>

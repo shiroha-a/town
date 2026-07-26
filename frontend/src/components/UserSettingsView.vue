@@ -146,7 +146,9 @@ async function retire() {
           退会する
         </button>
         <div v-else class="retire-form">
-          <div class="us-hint">確認のため、街での名前「{{ form.display_name }}」を入力してください。</div>
+          <div class="us-hint">
+            確認のため、街での名前「{{ form.display_name }}」を入力してください。
+          </div>
           <div class="us-row">
             <input v-model="retireConfirm" class="us-name" placeholder="街での名前" />
             <button class="btn danger-btn" :disabled="busy || !retireConfirm" @click="retire">

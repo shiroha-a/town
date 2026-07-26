@@ -102,7 +102,9 @@ async function use(item: ShopItem) {
         <tbody>
           <tr v-for="item in menu" :key="item.id" :data-test="`menu-${item.id}`">
             <td class="l">{{ item.name }}</td>
-            <td class="use"><button class="btn" :disabled="busy" @click="use(item)">{{ useLabel }}</button></td>
+            <td class="use">
+              <button class="btn" :disabled="busy" @click="use(item)">{{ useLabel }}</button>
+            </td>
             <td class="price">{{ yen(item.price) }}円</td>
             <td
               v-for="c in PARAM_COLUMNS"

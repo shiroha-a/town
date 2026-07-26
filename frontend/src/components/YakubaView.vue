@@ -55,10 +55,16 @@ const sortedRoster = computed(() =>
 );
 const isSelf = computed(() => selectedId.value === props.player.id);
 // 表示対象: 自分は player(全項目)、他人は取得した公開プロフィール。
-const view = computed<Player | PublicProfile | null>(() => (isSelf.value ? props.player : other.value));
-const weightKg = computed(() => (view.value ? (view.value.status.weight_g / 1000).toFixed(1) : '0'));
+const view = computed<Player | PublicProfile | null>(() =>
+  isSelf.value ? props.player : other.value,
+);
+const weightKg = computed(() =>
+  view.value ? (view.value.status.weight_g / 1000).toFixed(1) : '0',
+);
 // 入居日は自分もroster側から引く(playerには含まれないため)。
-const joinedAt = computed(() => roster.value.find((m) => m.id === selectedId.value)?.created_at ?? '');
+const joinedAt = computed(
+  () => roster.value.find((m) => m.id === selectedId.value)?.created_at ?? '',
+);
 
 const zunou = [
   { label: '国語', key: 'kokugo' },
@@ -172,7 +178,9 @@ onMounted(async () => {
     <div class="profile-header">
       <div class="lead">
         役場です。住民名鑑・街のニュース・各種ランキングを見ることができます。<br />
-        ●{{ player.display_name }}さんが街に来てから{{ joinedAt ? daysSince(joinedAt) : 0 }}日経ちました。
+        ●{{ player.display_name }}さんが街に来てから{{
+          joinedAt ? daysSince(joinedAt) : 0
+        }}日経ちました。
       </div>
       <div class="title">役　場</div>
     </div>
@@ -220,19 +228,53 @@ onMounted(async () => {
         </div>
         <table class="pinfo">
           <tbody>
-            <tr><th>職業</th><td>{{ view.status.job }}（レベル{{ view.status.job_level }} / 経験値{{ view.status.job_exp }} / 勤務{{ view.status.job_kaisuu }}回）</td></tr>
-            <tr v-if="view.status.mastered_jobs.length"><th>マスター職</th><td>{{ view.status.mastered_jobs.join('、') }}</td></tr>
-            <tr v-if="joinedAt"><th>入居日</th><td>{{ fmtDay(joinedAt) }}（{{ daysSince(joinedAt) }}日目）</td></tr>
+            <tr>
+              <th>職業</th>
+              <td>
+                {{ view.status.job }}（レベル{{ view.status.job_level }} / 経験値{{
+                  view.status.job_exp
+                }}
+                / 勤務{{ view.status.job_kaisuu }}回）
+              </td>
+            </tr>
+            <tr v-if="view.status.mastered_jobs.length">
+              <th>マスター職</th>
+              <td>{{ view.status.mastered_jobs.join('、') }}</td>
+            </tr>
+            <tr v-if="joinedAt">
+              <th>入居日</th>
+              <td>{{ fmtDay(joinedAt) }}（{{ daysSince(joinedAt) }}日目）</td>
+            </tr>
             <tr>
               <th>コンディション</th>
-              <td><span :class="{ sick: view.status.disease_name }">{{ view.status.condition }}</span></td>
+              <td>
+                <span :class="{ sick: view.status.disease_name }">{{ view.status.condition }}</span>
+              </td>
             </tr>
-            <tr><th>身長 / 体重</th><td>{{ view.status.height_cm }}cm / {{ weightKg }}kg</td></tr>
-            <tr><th>体型</th><td>{{ view.status.body_type }}（BMI {{ view.status.bmi }}）</td></tr>
-            <tr><th>身体パワー</th><td>{{ view.status.energy }} / {{ view.status.energy_max }}</td></tr>
-            <tr><th>頭脳パワー</th><td>{{ view.status.nou_energy }} / {{ view.status.nou_energy_max }}</td></tr>
-            <tr><th>空腹度</th><td>{{ satietyLabel(view.status.satiety) }}</td></tr>
-            <tr v-if="isSelf"><th>持ち金 / 貯金</th><td class="money">{{ yen(player.money) }}円 / {{ yen(player.savings) }}円</td></tr>
+            <tr>
+              <th>身長 / 体重</th>
+              <td>{{ view.status.height_cm }}cm / {{ weightKg }}kg</td>
+            </tr>
+            <tr>
+              <th>体型</th>
+              <td>{{ view.status.body_type }}（BMI {{ view.status.bmi }}）</td>
+            </tr>
+            <tr>
+              <th>身体パワー</th>
+              <td>{{ view.status.energy }} / {{ view.status.energy_max }}</td>
+            </tr>
+            <tr>
+              <th>頭脳パワー</th>
+              <td>{{ view.status.nou_energy }} / {{ view.status.nou_energy_max }}</td>
+            </tr>
+            <tr>
+              <th>空腹度</th>
+              <td>{{ satietyLabel(view.status.satiety) }}</td>
+            </tr>
+            <tr v-if="isSelf">
+              <th>持ち金 / 貯金</th>
+              <td class="money">{{ yen(player.money) }}円 / {{ yen(player.savings) }}円</td>
+            </tr>
           </tbody>
         </table>
 
@@ -240,19 +282,22 @@ onMounted(async () => {
           <div class="param-col">
             <div class="phead">頭　脳</div>
             <div v-for="p in zunou" :key="p.key" class="prow">
-              <span class="plabel">{{ p.label }}</span><span class="pval">{{ view.params[p.key] }}</span>
+              <span class="plabel">{{ p.label }}</span
+              ><span class="pval">{{ view.params[p.key] }}</span>
             </div>
           </div>
           <div class="param-col">
             <div class="phead">身　体</div>
             <div v-for="p in shintai" :key="p.key" class="prow">
-              <span class="plabel">{{ p.label }}</span><span class="pval">{{ view.params[p.key] }}</span>
+              <span class="plabel">{{ p.label }}</span
+              ><span class="pval">{{ view.params[p.key] }}</span>
             </div>
           </div>
           <div class="param-col">
             <div class="phead">その他</div>
             <div v-for="p in others" :key="p.key" class="prow">
-              <span class="plabel">{{ p.label }}</span><span class="pval">{{ view.params[p.key] }}</span>
+              <span class="plabel">{{ p.label }}</span
+              ><span class="pval">{{ view.params[p.key] }}</span>
             </div>
           </div>
         </div>
@@ -263,7 +308,9 @@ onMounted(async () => {
           <div v-if="!personalNews.length" class="muted">記録は残っていません。</div>
           <div v-for="n in personalNews" :key="n.id" class="feed-row">
             <span class="fdate">{{ fmtDate(n.at) }}</span>
-            <span class="fkind" :style="{ color: newsStyle(n).color }">{{ newsStyle(n).mark }}{{ n.kind }}</span>
+            <span class="fkind" :style="{ color: newsStyle(n).color }"
+              >{{ newsStyle(n).mark }}{{ n.kind }}</span
+            >
             <span class="fbody">{{ n.message }}</span>
           </div>
         </div>
@@ -278,7 +325,9 @@ onMounted(async () => {
         <div v-if="!news.length" class="muted">まだニュースはありません。</div>
         <div v-for="n in news" :key="n.id" class="feed-row">
           <span class="fdate">{{ fmtDate(n.at) }}</span>
-          <span class="fkind" :style="{ color: newsStyle(n).color }">{{ newsStyle(n).mark }}{{ n.kind }}</span>
+          <span class="fkind" :style="{ color: newsStyle(n).color }"
+            >{{ newsStyle(n).mark }}{{ n.kind }}</span
+          >
           <span class="fbody" :style="{ color: newsStyle(n).color }">{{ n.message }}</span>
         </div>
       </div>
@@ -295,10 +344,17 @@ onMounted(async () => {
       <div class="table-scroll">
         <table class="rank-table" data-test="rank-table">
           <thead>
-            <tr><th>順位</th><th class="l">名　前</th><th class="l job">職　業</th><th class="num">{{ rank?.label ?? '' }}</th></tr>
+            <tr>
+              <th>順位</th>
+              <th class="l">名　前</th>
+              <th class="l job">職　業</th>
+              <th class="num">{{ rank?.label ?? '' }}</th>
+            </tr>
           </thead>
           <tbody>
-            <tr v-if="!rank?.entries.length"><td colspan="4" class="muted">該当者なし。</td></tr>
+            <tr v-if="!rank?.entries.length">
+              <td colspan="4" class="muted">該当者なし。</td>
+            </tr>
             <tr v-for="e in rank?.entries ?? []" :key="e.id" :class="{ me: e.id === player.id }">
               <td class="rk">{{ e.rank }}</td>
               <td class="l">{{ e.display_name }}</td>

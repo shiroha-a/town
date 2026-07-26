@@ -15,10 +15,24 @@ body {
   --plaid: rgba(59, 197, 115, 0.25);
   background-image:
     repeating-linear-gradient(90deg, transparent 0 50px, var(--plaid) 50px 100px),
-    repeating-linear-gradient(90deg, transparent 0 56px, var(--plaid) 56px 61px, transparent 61px 89px, var(--plaid) 89px 94px, transparent 94px 100px),
+    repeating-linear-gradient(
+      90deg,
+      transparent 0 56px,
+      var(--plaid) 56px 61px,
+      transparent 61px 89px,
+      var(--plaid) 89px 94px,
+      transparent 94px 100px
+    ),
     repeating-linear-gradient(0deg, transparent 0 50px, var(--plaid) 50px 100px),
-    repeating-linear-gradient(0deg, transparent 0 56px, var(--plaid) 56px 61px, transparent 61px 89px, var(--plaid) 89px 94px, transparent 94px 100px);
-  font-family: "MS PGothic", Osaka, "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+    repeating-linear-gradient(
+      0deg,
+      transparent 0 56px,
+      var(--plaid) 56px 61px,
+      transparent 61px 89px,
+      var(--plaid) 89px 94px,
+      transparent 94px 100px
+    );
+  font-family: 'MS PGothic', Osaka, 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif;
   font-size: 13px;
   color: #000;
 }

@@ -123,19 +123,34 @@ function retry() {
       <div class="main-col">
         <!-- 出走表(賭け画面) -->
         <div v-if="mode === 'bet'" class="panel-white">
-          <h3>出走表<span class="hint"> 賭け {{ horsesBet }}/2頭 ・ {{ totalTickets }}枚 ・ {{ yen(totalCost) }}円</span></h3>
+          <h3>
+            出走表<span class="hint">
+              賭け {{ horsesBet }}/2頭 ・ {{ totalTickets }}枚 ・ {{ yen(totalCost) }}円</span
+            >
+          </h3>
           <table class="uma-table">
             <thead>
-              <tr><th>枠</th><th class="l">馬名</th><th>オッズ</th><th>購入枚数</th></tr>
+              <tr>
+                <th>枠</th>
+                <th class="l">馬名</th>
+                <th>オッズ</th>
+                <th>購入枚数</th>
+              </tr>
             </thead>
             <tbody>
               <tr v-for="(h, i) in lineup" :key="i" :data-test="`horse-${i}`">
                 <td>{{ i + 1 }}</td>
-                <td class="l"><img :src="`/img/svg/uma/${h.img}.svg`" class="uma-ico" :alt="h.name" />{{ h.name }}</td>
+                <td class="l">
+                  <img :src="`/img/svg/uma/${h.img}.svg`" class="uma-ico" :alt="h.name" />{{
+                    h.name
+                  }}
+                </td>
                 <td class="odds">{{ h.odds }}倍</td>
                 <td>
                   <select v-model.number="tickets[i]">
-                    <option v-for="n in TICKET_OPTIONS" :key="n" :value="n">{{ n === 0 ? '-' : n + '枚' }}</option>
+                    <option v-for="n in TICKET_OPTIONS" :key="n" :value="n">
+                      {{ n === 0 ? '-' : n + '枚' }}
+                    </option>
                   </select>
                 </td>
               </tr>
@@ -150,7 +165,7 @@ function retry() {
         <div v-else class="panel-white">
           <h3>レース</h3>
           <div class="track">
-            <div v-for="(h, i) in (result?.lineup ?? [])" :key="i" class="lane">
+            <div v-for="(h, i) in result?.lineup ?? []" :key="i" class="lane">
               <span class="lane-no">{{ i + 1 }}</span>
               <div class="lane-track">
                 <img
@@ -164,10 +179,13 @@ function retry() {
             </div>
           </div>
           <div v-if="mode === 'result' && result" class="race-result">
-            <div class="winner">{{ result.winner_index + 1 }}枠 {{ result.winner_name }} ゴール！</div>
+            <div class="winner">
+              {{ result.winner_index + 1 }}枠 {{ result.winner_name }} ゴール！
+            </div>
             <div>購入金額: {{ yen(result.invested) }}円</div>
             <div :class="{ up: result.payout > 0 }">
-              獲得金額: {{ result.payout > 0 ? yen(result.payout) + '円' : '残念ながら配当はありません' }}
+              獲得金額:
+              {{ result.payout > 0 ? yen(result.payout) + '円' : '残念ながら配当はありません' }}
             </div>
             <button class="btn primary" @click="retry">再挑戦</button>
           </div>
@@ -178,14 +196,22 @@ function retry() {
       <div class="rank-col panel-white">
         <h3>ギャンブル王ベスト10</h3>
         <table class="rank-table">
-          <thead><tr><th>#</th><th class="l">名前</th><th>儲け</th></tr></thead>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th class="l">名前</th>
+              <th>儲け</th>
+            </tr>
+          </thead>
           <tbody>
             <tr v-for="(e, i) in ranking" :key="i" :class="{ me: e.name === player.display_name }">
               <td>{{ i + 1 }}</td>
               <td class="l">{{ e.name }}</td>
               <td :class="{ up: e.profit > 0, down: e.profit < 0 }">{{ yen(e.profit) }}円</td>
             </tr>
-            <tr v-if="!ranking.length"><td colspan="3" class="muted">まだ記録がありません。</td></tr>
+            <tr v-if="!ranking.length">
+              <td colspan="3" class="muted">まだ記録がありません。</td>
+            </tr>
           </tbody>
         </table>
       </div>

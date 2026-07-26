@@ -53,7 +53,12 @@ async function send() {
   busy.value = true;
   message.value = '';
   try {
-    await api.mailSend(props.player.id, recipientId.value, body.value, giftId.value === '' ? 0 : giftId.value);
+    await api.mailSend(
+      props.player.id,
+      recipientId.value,
+      body.value,
+      giftId.value === '' ? 0 : giftId.value,
+    );
     giftId.value = '';
     message.value = 'メッセージを送信しました。';
     kind.value = 'ok';
@@ -124,7 +129,9 @@ async function del(m: MailMessage) {
         <span class="lbl">贈り物</span>
         <select v-model="giftId" data-test="gift-select">
           <option value="">添付しない</option>
-          <option v-for="g in gifts" :key="g.id" :value="g.id">{{ g.name }}（残り{{ g.uses }}）</option>
+          <option v-for="g in gifts" :key="g.id" :value="g.id">
+            {{ g.name }}（残り{{ g.uses }}）
+          </option>
         </select>
       </label>
       <div class="actions">
@@ -137,7 +144,13 @@ async function del(m: MailMessage) {
       <div class="panel-white box">
         <h3>受信箱（{{ received.length }}）</h3>
         <div v-if="!received.length" class="muted">まだ受信したメッセージはありません。</div>
-        <div v-for="m in received" :key="m.id" class="mail" :class="{ unread: m.unread }" :data-test="`recv-${m.id}`">
+        <div
+          v-for="m in received"
+          :key="m.id"
+          class="mail"
+          :class="{ unread: m.unread }"
+          :data-test="`recv-${m.id}`"
+        >
           <div class="mail-head">
             <span class="from">{{ m.counterpart_name }}さんより</span>
             <span class="date">{{ fmtDate(m.sent_at) }}</span>
@@ -145,9 +158,13 @@ async function del(m: MailMessage) {
             <span v-if="m.saved" class="badge saved">保存</span>
           </div>
           <div class="mail-body">{{ m.body }}</div>
-          <div v-if="m.gift_item_name" class="gift-note">🎁 {{ m.gift_item_name }} が贈られてきました。</div>
+          <div v-if="m.gift_item_name" class="gift-note">
+            🎁 {{ m.gift_item_name }} が贈られてきました。
+          </div>
           <div class="mail-act">
-            <button class="btn mini" :disabled="busy" @click="toggleSave(m)">{{ m.saved ? '保存解除' : '保存する' }}</button>
+            <button class="btn mini" :disabled="busy" @click="toggleSave(m)">
+              {{ m.saved ? '保存解除' : '保存する' }}
+            </button>
             <button class="btn mini danger" :disabled="busy" @click="del(m)">削除する</button>
           </div>
         </div>
@@ -164,9 +181,13 @@ async function del(m: MailMessage) {
             <span v-if="m.saved" class="badge saved">保存</span>
           </div>
           <div class="mail-body">{{ m.body }}</div>
-          <div v-if="m.gift_item_name" class="gift-note">🎁 {{ m.gift_item_name }} を贈りました。</div>
+          <div v-if="m.gift_item_name" class="gift-note">
+            🎁 {{ m.gift_item_name }} を贈りました。
+          </div>
           <div class="mail-act">
-            <button class="btn mini" :disabled="busy" @click="toggleSave(m)">{{ m.saved ? '保存解除' : '保存する' }}</button>
+            <button class="btn mini" :disabled="busy" @click="toggleSave(m)">
+              {{ m.saved ? '保存解除' : '保存する' }}
+            </button>
             <button class="btn mini danger" :disabled="busy" @click="del(m)">削除する</button>
           </div>
         </div>

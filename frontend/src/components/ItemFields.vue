@@ -40,7 +40,9 @@ const FACILITIES = [
 
   <div class="fields-head">持ち物としての扱い</div>
   <div class="field-row">
-    <label class="narrow">耐久<input type="number" min="1" v-model.number="item.durability" /></label>
+    <label class="narrow"
+      >耐久<input type="number" min="1" v-model.number="item.durability"
+    /></label>
     <label class="narrow">
       単位
       <select v-model="item.durability_unit">

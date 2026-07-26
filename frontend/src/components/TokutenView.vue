@@ -69,7 +69,12 @@ async function redeem() {
           data-test="serial-code"
           @keydown.enter="redeem"
         />
-        <button class="btn primary" :disabled="busy || !code.trim()" data-test="serial-redeem" @click="redeem">
+        <button
+          class="btn primary"
+          :disabled="busy || !code.trim()"
+          data-test="serial-redeem"
+          @click="redeem"
+        >
           受け取る
         </button>
       </div>

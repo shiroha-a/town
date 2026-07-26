@@ -130,12 +130,19 @@ async function settle() {
               {{ h.shares > 0 ? (h.unrealized > 0 ? '+' : '') + yen(h.unrealized) + '円' : '-' }}
             </td>
             <td class="act">
-              <input type="number" min="1" :max="200 - h.shares" v-model.number="buyQty[h.symbol]" />
+              <input
+                type="number"
+                min="1"
+                :max="200 - h.shares"
+                v-model.number="buyQty[h.symbol]"
+              />
               <button class="btn mini" :disabled="busy" @click="buy(h)">購入</button>
             </td>
             <td class="act">
               <input type="number" min="0" :max="h.shares" v-model.number="sellQty[h.symbol]" />
-              <button class="btn mini" :disabled="busy || h.shares <= 0" @click="sell(h)">売却</button>
+              <button class="btn mini" :disabled="busy || h.shares <= 0" @click="sell(h)">
+                売却
+              </button>
             </td>
           </tr>
         </tbody>
