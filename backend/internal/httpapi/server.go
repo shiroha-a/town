@@ -69,12 +69,15 @@ func (s *Server) instancePolicy(_ *http.Request) miauth.Policy {
 // AuthDeps bundles the MiAuth/Misskey dependencies so NewServer's signature
 // does not grow another six positional arguments.
 type AuthDeps struct {
-	Pool           *pgxpool.Pool
-	MiAuth         *miauth.Client
-	InstanceRules  *miauth.Rules
-	Sessions       *session.Store
-	Profiles       *profile.Service
-	Emojis         *emoji.Service
+	Pool          *pgxpool.Pool
+	MiAuth        *miauth.Client
+	InstanceRules *miauth.Rules
+	Sessions      *session.Store
+	Profiles      *profile.Service
+	Emojis        *emoji.Service
+	// WebDir はビルド済みフロントエンドの置き場。空なら配信しない
+	// (開発でViteの開発サーバを使う場合)。
+	WebDir         string
 	AppName        string
 	AllowedOrigins []string
 }
@@ -256,7 +259,12 @@ func NewServer(players *player.Service, actions *action.Service, contentSvc *con
 	mux.HandleFunc("GET /api/v1/admin/players", s.adminListPlayers)
 	mux.HandleFunc("PUT /api/v1/admin/players/{id}", s.adminUpdatePlayer)
 	mux.HandleFunc("DELETE /api/v1/admin/players/{id}", s.adminDeletePlayer)
-	return recoverer(securityHeaders(s.authGuard(mux)))
+	api := recoverer(securityHeaders(s.authGuard(mux)))
+	if auth.WebDir == "" {
+		return api
+	}
+	// 画面もこのプロセスから配る(オリジンを1つにする)。
+	return spaHandler(auth.WebDir, api)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

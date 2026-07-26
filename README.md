@@ -49,13 +49,16 @@ cp deploy/compose.override.yaml.example deploy/compose.override.yaml   # 公開�
 docker compose -f deploy/compose.yaml -f deploy/compose.override.yaml up -d --build
 ```
 
-| URL | 内容 |
-| --- | --- |
-| http://localhost:5173 | ゲーム画面(Vite開発サーバ) |
-| http://localhost:8090 | REST API |
+画面もAPIも <http://localhost:8090> から出ます(1プロセス・同一オリジン)。
+PostgreSQLは`55432`、Redisは`56379`で公開しています(ホストの標準ポートと
+ぶつからないように)。DBのマイグレーションはwebの起動時に自動で適用されます。
 
-PostgreSQLは`55432`、Redisは`56379`で公開しています(ホストの標準ポートとぶつからないように)。
-DBのマイグレーションはwebの起動時に自動で適用されます。
+画面を書き換えながら開発するときは、HMRの効くViteサーバを別に立てます
+(<http://localhost:5173>。`/api`は自動でwebへ中継されます)。
+
+```sh
+docker compose -f deploy/compose.yaml --profile dev up -d frontend
+```
 
 バックエンドだけホストで動かす場合:
 

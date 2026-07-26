@@ -3,14 +3,16 @@
 ## 全体像
 
 ```
-ブラウザ ──▶ frontend (Vue 3 SPA / Vite)
-                │  /api を web へプロキシ(同一オリジンなのでCORS不要)
-                ▼
-             web (Go)  ──▶ PostgreSQL  … 永続データすべて
-                │         └▶ Redis      … 揮発(リーダーロック等)
-                │
-             worker (Go) ──▶ 同じDB     … 時間進行(利息・株価・病気・回収など)
+ブラウザ ──▶ web (Go)  ──▶ PostgreSQL  … 永続データすべて
+              │  画面(ビルド済みSPA)とAPIを同じプロセス・同じオリジンで配る
+              └────────▶ Redis        … 揮発(リーダーロック等)
+
+           worker (Go) ──▶ 同じDB      … 時間進行(利息・株価・病気・回収など)
 ```
+
+画面は `npm run build` の成果物をイメージへ同梱し、`TOWN_WEB_DIR` の指す場所から
+配信します。開発中はHMRの効くViteサーバ(`--profile dev`)を別に立て、そちらが
+`/api` を web へ中継します。
 
 `web` と `worker` は**同じバイナリの別モード**です(`town web` / `town worker`)。
 どちらも起動時に同じ設定を読み、その時点でDBマイグレーションを適用します
@@ -210,6 +212,7 @@ Vue 3 + TypeScript のSPAです。ルーターは使わず、`App.vue` が `view
 | `TOWN_BASE_URL` | 公開アドレス。MiAuthのコールバックURLをここから組み立てる |
 | `TOWN_EXTRA_ORIGINS` | base_url以外の経路(Tailscale等)を足す。`all` で全許可(テスト専用) |
 | `TOWN_APP_NAME` | Misskeyの承認画面に出るアプリ名 |
+| `TOWN_WEB_DIR` | ビルド済み画面の置き場。空なら配信しない(Vite開発サーバを使う場合) |
 | `TOWN_TOKEN_KEY` | Misskeyアクセストークンの暗号化キー(未設定ならトークンを保存しない) |
 | `TOWN_COOKIE_SECURE` | `1` でcookieにSecure属性を付ける(HTTPS運用時) |
 | `TOWN_RNG_SEED` | 乱数のシードを固定する(開発・テスト用。既定0=時刻ベース) |

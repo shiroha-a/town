@@ -36,13 +36,17 @@ services:
 
   web:
     build:
-      context: ../backend
+      # 画面もこのイメージに入れるためコンテキストはリポジトリのルート。
+      context: ..
+      dockerfile: backend/Dockerfile
     restart: unless-stopped
     command: ["web"]
     environment:
       TOWN_DATABASE_URL: "postgres://town:town@postgres:5432/town?sslmode=disable"
       TOWN_REDIS_ADDR: "redis:6379"
       TOWN_HTTP_ADDR: ":8090"
+      # ビルド済みの画面をAPIと同じオリジンから配る。
+      TOWN_WEB_DIR: "/app/web"
     ports:
       - "8090:8090"
     depends_on:
@@ -53,7 +57,8 @@ services:
 
   worker:
     build:
-      context: ../backend
+      context: ..
+      dockerfile: backend/Dockerfile
     restart: unless-stopped
     command: ["worker"]
     environment:
@@ -67,7 +72,10 @@ services:
 
   # フロントエンド(Vite開発サーバ)。ソースをマウントしHMRを効かせつつ docker compose で
   # 常時起動する。/api は web(:8090)へプロキシ。ブラウザからは :5173 でアクセス。
+  # 開発用のViteサーバ(HMR)。公開環境では使わないので profiles で既定から外す。
+  #   docker compose --profile dev up -d frontend
   frontend:
+    profiles: ["dev"]
     image: node:22-alpine
     restart: unless-stopped
     working_dir: /app

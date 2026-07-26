@@ -127,6 +127,7 @@ func Run(ctx context.Context, mode string, cfg *config.Config) error {
 		Profiles:       profiles,
 		Emojis:         emojis,
 		AppName:        cfg.Server.AppName,
+		WebDir:         cfg.Server.WebDir,
 		AllowedOrigins: cfg.Server.AllowedOrigins(),
 	}
 

@@ -40,6 +40,9 @@ type ServerConfig struct {
 	ExtraOrigins []string `yaml:"extra_origins"`
 	// AppName は MiAuth の同意画面に出るアプリ名。
 	AppName string `yaml:"app_name"`
+	// WebDir はビルド済みフロントエンドの置き場。指定するとAPIと同じ
+	// プロセス・同じオリジンから画面を配る。空なら配信しない。
+	WebDir string `yaml:"web_dir"`
 }
 
 // AllowedOrigins returns the origins a login may come from: the base URL plus
@@ -138,6 +141,9 @@ func Load() (*Config, error) {
 	}
 	if v := os.Getenv("TOWN_EXTRA_ORIGINS"); v != "" {
 		c.Server.ExtraOrigins = splitList(v)
+	}
+	if v := os.Getenv("TOWN_WEB_DIR"); v != "" {
+		c.Server.WebDir = v
 	}
 	if v := os.Getenv("TOWN_APP_NAME"); v != "" {
 		c.Server.AppName = v
