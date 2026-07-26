@@ -4676,3 +4676,47 @@ func TestSetShopPrice(t *testing.T) {
 		t.Errorf("other set: %d, want 422", c)
 	}
 }
+
+// パワーを消費するアイテムは、消費ぶんを持っていないと使えない。
+// (効果の適用は[0,max]にクランプするため、判定が無いと足りないまま使えてしまう。
+// レガシー basic0.cgi:497 の「身体パワーが足りません。」に相当)
+func TestUseItemRequiresEnoughPower(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	alice := register(t, srv.URL, "misskey.example", "alice")
+
+	// 身体パワーを5消費するアイテムを用意する。
+	var itemID int64
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO content_items (name, category, price, stock_master, durability, effect, enabled)
+		 VALUES ('検証用スイミング', '娯楽', 100, NULL, 1,
+		         '[{"op":"add_param","param":"energy","amount":-5},
+		           {"op":"add_param","param":"tairyoku","amount":3}]'::jsonb, true)
+		 RETURNING id`).Scan(&itemID); err != nil {
+		t.Fatal(err)
+	}
+	itemAction(t, srv.URL, "/buy", alice.ID, itemID, "buy-swim")
+
+	// 身体パワーを2にする(消費5に足りない)。
+	if _, err := pool.Exec(ctx,
+		`UPDATE player_status SET energy = 2 WHERE player_id = $1`, alice.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, status := itemAction(t, srv.URL, "/use", alice.ID, itemID, "use-short")
+	if status != http.StatusUnprocessableEntity {
+		t.Fatalf("パワー不足で使えてしまった: status=%d", status)
+	}
+
+	// 消費ぶんが貯まれば使える。
+	if _, err := pool.Exec(ctx,
+		`UPDATE player_status SET energy = 5 WHERE player_id = $1`, alice.ID); err != nil {
+		t.Fatal(err)
+	}
+	after, status := itemAction(t, srv.URL, "/use", alice.ID, itemID, "use-ok")
+	if status != http.StatusOK {
+		t.Fatalf("パワーが足りるのに使えない: status=%d", status)
+	}
+	if after.Status.Energy != 0 {
+		t.Errorf("消費後の身体パワー = %d, want 0", after.Status.Energy)
+	}
+}

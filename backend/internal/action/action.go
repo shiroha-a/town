@@ -2068,6 +2068,12 @@ func (s *Service) DoUse(ctx context.Context, playerID, itemID int64, idempotency
 		if !s.settings.Get().DebugNoCooldown && fillsSatiety && state.Params["satiety"].Value >= satietyMax {
 			return &ConditionError{Message: "お腹がいっぱいです。今は食べられません。"}
 		}
+		// パワーを消費するアイテム(スイミング等)は、消費ぶんを持っていないと
+		// 使えない。効果の適用は[0,max]にクランプするため、ここで見ないと
+		// 足りないまま使えてしまう(レガシー basic0.cgi:497 の判定に相当)。
+		if param, short := eff.InsufficientParam(state); short {
+			return &ConditionError{Message: paramShortMessage(param)}
+		}
 		if !s.settings.Get().DebugNoCooldown && intervalMin > 0 {
 			var lastUsed *time.Time
 			err := tx.QueryRow(ctx,
