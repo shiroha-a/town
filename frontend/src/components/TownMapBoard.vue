@@ -33,6 +33,17 @@ const akichiAt = (col: number, row: number) =>
   );
 const houseAt = (col: number, row: number) =>
   props.houses.find((h) => h.town === props.town && h.col === col && h.row === row);
+// 2マスの家に覆われている右隣のマス。原点マスの家が上にはみ出して描かれるので、
+// このマスには何も置かない(背景アセットだけ敷く)。
+const coveredAt = (col: number, row: number) =>
+  props.houses.some(
+    (h) =>
+      h.town === props.town &&
+      h.row === row &&
+      (h.span_w ?? 1) > 1 &&
+      h.col < col &&
+      col < h.col + (h.span_w ?? 1),
+  );
 // 背景アセット(装飾レイヤー)。1マスに複数重ねられる(配列順=重ね順)。
 const assetsAt = (col: number, row: number) =>
   props.assets.filter((a) => a.town === props.town && a.col === col && a.row === row);
@@ -40,6 +51,11 @@ const assetsAt = (col: number, row: number) =>
 // 家のツールチップ。家主が設定したマウスオーバーコメント(setumei)も出す。
 const houseTitle = (h: HouseCell) =>
   h.setumei ? `${h.owner_name}さんの家\n「${h.setumei}」` : `${h.owner_name}さんの家`;
+
+// 2マスの家はセルからはみ出させる。グリッドの列幅は1frなので、幅はマス数の
+// 百分率で指定する(セル自体は正方形のまま=右隣のマスに重なる)。
+const wideStyle = (h: HouseCell) =>
+  (h.span_w ?? 1) > 1 ? { width: `${(h.span_w ?? 1) * 100}%` } : undefined;
 </script>
 
 <template>
@@ -57,7 +73,9 @@ const houseTitle = (h: HouseCell) =>
           alt=""
         />
         <!-- 空き地(家が建っていないakichiマス)。 -->
-        <template v-if="akichiAt(c, ri) && !houseAt(c, ri) && !facilityAt(c, ri)">
+        <template
+          v-if="akichiAt(c, ri) && !houseAt(c, ri) && !coveredAt(c, ri) && !facilityAt(c, ri)"
+        >
           <button
             v-if="interactive"
             v-touch-label
@@ -71,18 +89,26 @@ const houseTitle = (h: HouseCell) =>
             <img class="akichi-img" src="/img/svg/akiti.svg" alt="空き地" />
           </span>
         </template>
-        <!-- 家。 -->
+        <!-- 家。2マスの家は原点マスから右へはみ出して描く(house-wide)。 -->
         <template v-else-if="houseAt(c, ri)">
           <button
             v-if="interactive"
             v-touch-label
             class="facility house-cell"
+            :class="{ 'house-wide': (houseAt(c, ri)!.span_w ?? 1) > 1 }"
+            :style="wideStyle(houseAt(c, ri)!)"
             :title="houseTitle(houseAt(c, ri)!)"
             @click="emit('house', houseAt(c, ri)!)"
           >
             <img :src="`/img/svg/${houseAt(c, ri)!.exterior}.svg`" :alt="houseTitle(houseAt(c, ri)!)" />
           </button>
-          <span v-else class="facility house-cell" :title="houseTitle(houseAt(c, ri)!)">
+          <span
+            v-else
+            class="facility house-cell"
+            :class="{ 'house-wide': (houseAt(c, ri)!.span_w ?? 1) > 1 }"
+            :style="wideStyle(houseAt(c, ri)!)"
+            :title="houseTitle(houseAt(c, ri)!)"
+          >
             <img :src="`/img/svg/${houseAt(c, ri)!.exterior}.svg`" :alt="houseTitle(houseAt(c, ri)!)" />
           </span>
         </template>

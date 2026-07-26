@@ -233,11 +233,18 @@ async function savePrice(it: ShopStockItem) {
 const rebuildOpen = ref(false);
 const rebuildExterior = ref('');
 const rebuildInterior = ref(0);
+// 建て替えでは家の大きさを変えられない(占有マスの取り直しになるうえ、1マスの家を
+// 建ててから許可証なしで大邸宅へ化けさせる抜け道になる)。同じ幅の外装だけ出す。
+const houseSpan = computed(() => house.value?.span_w ?? 1);
+const rebuildExteriors = computed(
+  () => state.value?.exteriors.filter((e) => (e.span > 1 ? e.span : 1) === houseSpan.value) ?? [],
+);
 const rebuildCost = computed(() => {
   const ext = state.value?.exteriors.find((e) => e.key === rebuildExterior.value);
   const inte = state.value?.interiors.find((i) => i.rank === rebuildInterior.value);
   if (!ext || !inte) return 0;
-  return ext.price * inte.multiplier * 10000;
+  const factor = houseSpan.value > 1 ? (state.value?.cost_factor ?? 1) : 1;
+  return ext.price * inte.multiplier * factor * 10000;
 });
 async function doRebuild() {
   const h = house.value;
@@ -256,13 +263,15 @@ const sellRefund = computed(() => {
   const h = house.value;
   if (!h) return 0;
   const t = state.value?.towns.find((x) => x.no === h.town);
-  return t ? t.land_price * 10000 : 0;
+  // 返金は地価×マス数。外装・内装費と建築許可証は戻らない。
+  return t ? t.land_price * (h.span_w ?? 1) * 10000 : 0;
 });
 async function doSell() {
   const h = house.value;
   if (!h) return;
   const ok = window.confirm(
-    `${townName(h.town)}／${rowLabel(h.row)}${h.col}の家を売却しますか？\n地価分 ${yen(sellRefund.value)}円が現金で戻ります(外装・内装費は戻りません)。`,
+    `${townName(h.town)}／${rowLabel(h.row)}${h.col}の家を売却しますか？\n地価分 ${yen(sellRefund.value)}円が現金で戻ります(外装・内装費は戻りません)。` +
+      (houseSpan.value > 1 ? '\n建築許可証は戻りません。' : ''),
   );
   if (!ok) return;
   await run(async () => {
@@ -304,11 +313,11 @@ async function doSell() {
       </div>
 
       <div class="house-summary panel-white">
-        <img :src="`/img/svg/${house.exterior}.svg`" :alt="house.exterior" />
+        <img :src="`/img/svg/${house.exterior}.svg`" :alt="house.exterior" :class="{ wide: houseSpan > 1 }" />
         <div>
           <div class="hs-loc">{{ townName(house.town) }}／{{ rowLabel(house.row) }}{{ house.col }}</div>
           <div v-if="house.tuika !== 0" class="hs-sub">外装 {{ house.exterior }}・種別 {{ TUIKA_NAMES[house.tuika] ?? '?' }}</div>
-          <div v-else class="hs-sub">外装 {{ house.exterior }}・内装{{ ['A','B','C','D'][house.interior_rank] ?? '?' }}ランク（コンテンツ枠{{ house.slots }}）</div>
+          <div v-else class="hs-sub">外装 {{ house.exterior }}・内装{{ ['A','B','C','D'][house.interior_rank] ?? '?' }}ランク（コンテンツ枠{{ house.slots }}）<template v-if="houseSpan > 1">・2マス</template></div>
         </div>
       </div>
 
@@ -435,12 +444,12 @@ async function doSell() {
       <!-- 家の外観、内装の変更(レガシー: house_change 選択画面) -->
       <div class="panel-white sec">
         <div class="sec-head">●家の外観、内装（コンテンツ枠数）の変更</div>
-        <div class="note">建て替え費用は「外装×内装ランク倍率」×10000円を現金から支払います（地価は不要）。</div>
+        <div class="note">建て替え費用は「外装×内装ランク倍率」×10000円を現金から支払います（地価は不要）。<template v-if="houseSpan > 1">2マスの家なので費用は{{ state?.cost_factor ?? 1 }}倍、外装も2マスのものだけ選べます。</template></div>
         <button v-if="!rebuildOpen" class="btn mini" :disabled="busy" @click="rebuildOpen = true">選択画面へ</button>
         <template v-else>
           <div class="rebuild-ext">
             <div class="fld">外装</div>
-            <ExteriorPicker v-model="rebuildExterior" :exteriors="state!.exteriors" />
+            <ExteriorPicker v-model="rebuildExterior" :exteriors="rebuildExteriors" />
           </div>
           <div class="row-line">
             <label class="fld">内装
@@ -536,6 +545,10 @@ async function doSell() {
   width: 36px;
   height: 36px;
   object-fit: contain;
+}
+/* 2マスの家は横長のまま出す(正方形の枠だと上下に余白ができて小さく見える)。 */
+.house-summary img.wide {
+  width: 72px;
 }
 .hs-loc {
   font-weight: bold;

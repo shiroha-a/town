@@ -1,6 +1,14 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
-import { api, assetUrl, type Player, type BuildingState, type TownFacility, type TownAsset } from '../api';
+import {
+  api,
+  assetUrl,
+  type Player,
+  type BuildingState,
+  type BuildingExterior,
+  type TownFacility,
+  type TownAsset,
+} from '../api';
 import Toast from './Toast.vue';
 import ExteriorPicker from './ExteriorPicker.vue';
 import { useToast } from '../toast';
@@ -96,9 +104,20 @@ function facilityAt(row: number, col: number): TownFacility | undefined {
     (f) => f.key !== 'akichi' && f.town === selectedTown.value && f.row === row && f.col === col,
   );
 }
+// そのマスに原点がある家。
 function houseAt(row: number, col: number) {
   return state.value?.houses.find(
     (h) => h.town === selectedTown.value && h.row === row && h.col === col,
+  );
+}
+// そのマスを覆っている家(2マスの家の右隣も含む)。
+function houseCovering(row: number, col: number) {
+  return state.value?.houses.find(
+    (h) =>
+      h.town === selectedTown.value &&
+      h.row === row &&
+      col >= h.col &&
+      col < h.col + (h.span_w ?? 1),
   );
 }
 // 管理者が空地に指定したマスか。
@@ -112,13 +131,17 @@ function plotAt(row: number, col: number): boolean {
 function cellClass(row: number, col: number) {
   const sel = selectedCell.value;
   const fac = !!facilityAt(row, col);
-  const hou = !!houseAt(row, col);
+  const cover = houseCovering(row, col);
+  const origin = houseAt(row, col);
   return {
     facility: fac,
-    house: hou,
-    own: houseAt(row, col)?.own ?? false,
-    selected: !!sel && sel.row === row && sel.col === col,
-    empty: plotAt(row, col) && !fac && !hou, // 建築可能な空地
+    house: !!cover,
+    own: cover?.own ?? false,
+    // 2マスの外装を選んでいるときは、覆う2マスをまとめて選択中に見せる。
+    selected: !!sel && sel.row === row && col >= sel.col && col < sel.col + selectedSpan.value,
+    empty: plotAt(row, col) && !fac && !cover, // 建築可能な空地
+    // はみ出して描く家の原点マス(overflowを開ける)。
+    'wide-origin': (origin?.span_w ?? 1) > 1,
   };
 }
 function cellImg(row: number, col: number): string | null {
@@ -126,9 +149,16 @@ function cellImg(row: number, col: number): string | null {
   if (f) return `/img/svg/${f.img}.svg`;
   const h = houseAt(row, col);
   if (h) return `/img/svg/${h.exterior}.svg`;
+  // 2マスの家に覆われた側のマスには何も置かない(原点マスの絵が重なる)。
+  if (houseCovering(row, col)) return null;
   // 空地は街マップと同じ空き地アイコンで示す。
   if (plotAt(row, col)) return '/img/svg/akiti.svg';
   return null;
+}
+// 2マスの家は原点マスから右へはみ出して描く。
+function cellImgStyle(row: number, col: number) {
+  const span = houseAt(row, col)?.span_w ?? 1;
+  return span > 1 ? { width: `${span * 100}%` } : undefined;
 }
 // セルの背景アセット(選択中の街)。施設・家・空き地アイコンの下に敷く。
 function assetImgAt(row: number, col: number): string | null {
@@ -140,7 +170,7 @@ function assetImgAt(row: number, col: number): string | null {
 function cellTitle(row: number, col: number): string {
   const f = facilityAt(row, col);
   if (f) return f.alt;
-  const h = houseAt(row, col);
+  const h = houseCovering(row, col);
   if (h) return h.setumei ? `${h.owner_name}さんの家\n「${h.setumei}」` : `${h.owner_name}さんの家`;
   if (plotAt(row, col)) return `${rowLabel(row)}${col}（空地）`;
   return `${rowLabel(row)}${col}`;
@@ -148,7 +178,7 @@ function cellTitle(row: number, col: number): string {
 function clickCell(row: number, col: number) {
   // 建築画面のグリッドは建てる場所を選ぶためのもの。家はクリックしても
   // 何もしない(訪問は街マップの家クリックから)。tooltipで家主名だけ分かる。
-  if (houseAt(row, col)) return;
+  if (houseCovering(row, col)) return;
   // 空地に指定されたマス(施設・家なし)だけ建築選択できる。
   if (!plotAt(row, col) || facilityAt(row, col)) return;
   selectedCell.value = { row, col };
@@ -167,6 +197,38 @@ function tuikaDisabled(t: { no: number; shinsa: boolean }): string {
   return '';
 }
 
+// 2マス(2x1)の大邸宅。建築許可証を1枚消費し、建築費は cost_factor 倍。
+const selectedSpan = computed(
+  () => state.value?.exteriors.find((e) => e.key === selectedExterior.value)?.span ?? 1,
+);
+const permitSpan = computed(() => state.value?.permit_span ?? 0);
+const permits = computed(() => state.value?.permits ?? 0);
+const costFactor = computed(() => state.value?.cost_factor ?? 1);
+const hasWideExteriors = computed(() => state.value?.exteriors.some((e) => e.span > 1) ?? false);
+// 許可証を持っていない外装は選ばせない(存在は見せて目標にしてもらう)。
+function exteriorDisabled(e: BuildingExterior): string {
+  return e.span > 1 && permitSpan.value < e.span ? '建築許可証が必要' : '';
+}
+// 選んだ外装がそのマスに収まるか。覆う全マスが空地で、施設も家も無いこと。
+function canPlace(row: number, col: number, span: number): boolean {
+  for (let i = 0; i < span; i++) {
+    const c = col + i;
+    if (c > (state.value?.cols ?? 0)) return false;
+    if (!plotAt(row, c) || facilityAt(row, c) || houseCovering(row, c)) return false;
+  }
+  return true;
+}
+// 選択中のマスに、選択中の外装で建てられない理由(空なら建てられる)。
+const placeError = computed(() => {
+  const sel = selectedCell.value;
+  if (!sel || selectedSpan.value <= 1) return '';
+  if (permitSpan.value < selectedSpan.value) return '建築許可証を持っていません。';
+  if (!canPlace(sel.row, sel.col, selectedSpan.value)) {
+    return '2マスの家は、横に並んだ空地2マスにしか建てられません。右隣の空地を空けてください。';
+  }
+  return '';
+});
+
 // 建築費プレビュー(building.BuildCostと同じ式。単位:円)。
 const cost = computed(() => {
   const s = state.value;
@@ -183,13 +245,15 @@ const cost = computed(() => {
     const tk = s.tuikas.find((t) => t.no === selectedTuika.value);
     man = town.land_price + ext.price * 2 + (tk?.fee ?? 0);
   }
+  if (selectedSpan.value > 1) man *= costFactor.value;
   return man * 10000;
 });
 
 async function build() {
-  if (!selectedCell.value || !state.value) return;
+  if (!selectedCell.value || !state.value || placeError.value) return;
   busy.value = true;
   const c = cost.value;
+  const span = selectedSpan.value;
   try {
     const after = await api.buildHouse(
       props.player.id,
@@ -205,8 +269,11 @@ async function build() {
     selectedCell.value = null;
     showToast({
       variant: 'item',
-      title: '家を建てた',
-      lines: [`建築費 ${yen(c)}円を普通口座から支払いました`],
+      title: span > 1 ? '大邸宅を建てた' : '家を建てた',
+      lines:
+        span > 1
+          ? [`建築費 ${yen(c)}円を普通口座から支払いました`, '建築許可証を1枚使いました']
+          : [`建築費 ${yen(c)}円を普通口座から支払いました`],
       icon: 'item',
     });
   } catch (e) {
@@ -265,7 +332,14 @@ async function build() {
               @click="clickCell(row, col)"
             >
               <img v-if="assetImgAt(row, col)" class="cell-bg" :src="assetImgAt(row, col)!" alt="" />
-              <img v-if="cellImg(row, col)" class="cell-fg" :src="cellImg(row, col)!" :alt="cellTitle(row, col)" />
+              <img
+                v-if="cellImg(row, col)"
+                class="cell-fg"
+                :class="{ wide: (houseAt(row, col)?.span_w ?? 1) > 1 }"
+                :style="cellImgStyle(row, col)"
+                :src="cellImg(row, col)!"
+                :alt="cellTitle(row, col)"
+              />
             </div>
           </template>
         </div>
@@ -279,7 +353,18 @@ async function build() {
         </div>
         <div class="row ext-row">
           <span class="lbl">外装</span>
-          <ExteriorPicker v-model="selectedExterior" :exteriors="state.exteriors" />
+          <div class="ext-col">
+            <ExteriorPicker
+              v-model="selectedExterior"
+              :exteriors="state.exteriors"
+              :disabled-reason="exteriorDisabled"
+            />
+            <div v-if="hasWideExteriors" class="note ext-note">
+              横長の外装は<b>2マス</b>の大邸宅です。建築許可証を1枚消費し、建築費は<b>{{ costFactor }}倍</b>になります（許可証は売却しても戻りません）。
+              <template v-if="permits > 0">所持している許可証：{{ permits }}枚</template>
+              <template v-else>許可証は店では売っていません（配布のみ）。</template>
+            </div>
+          </div>
         </div>
         <div v-if="isFirstHouse" class="row">
           <span class="lbl">内装</span>
@@ -305,9 +390,11 @@ async function build() {
         <div class="row cost-row">
           <span class="lbl">建築費</span>
           <span class="cost">{{ yen(cost) }}円</span>
+          <span v-if="selectedSpan > 1" class="cost-note">（2マス・通常の{{ costFactor }}倍）</span>
         </div>
+        <div v-if="placeError" class="message error place-error">{{ placeError }}</div>
         <div class="row">
-          <button class="btn build-btn" :disabled="busy" @click="build">この場所に建てる</button>
+          <button class="btn build-btn" :disabled="busy || !!placeError" @click="build">この場所に建てる</button>
         </div>
       </div>
       <div v-else class="hint">
@@ -324,9 +411,9 @@ async function build() {
         <ul v-else class="mh-list">
           <li v-for="h in state.my_houses" :key="h.id" class="mh-item">
             <div class="mh-row">
-              <img :src="`/img/svg/${h.exterior}.svg`" :alt="h.exterior" />
+              <img :src="`/img/svg/${h.exterior}.svg`" :alt="h.exterior" :class="{ 'mh-wide': (h.span_w ?? 1) > 1 }" />
               <span class="mh-loc">{{ townName(h.town) }}／{{ rowLabel(h.row) }}{{ h.col }}</span>
-              <span class="mh-ext">{{ h.exterior }}・内装{{ ['A','B','C','D'][h.interior_rank] ?? '?' }}ランク</span>
+              <span class="mh-ext">{{ h.exterior }}・内装{{ ['A','B','C','D'][h.interior_rank] ?? '?' }}ランク<template v-if="(h.span_w ?? 1) > 1">・2マス</template></span>
             </div>
           </li>
         </ul>
@@ -466,6 +553,18 @@ async function build() {
   outline: 2px solid #cc7a00;
   outline-offset: -2px;
 }
+/* 2マスの家の原点マス: はみ出して描くので overflow を開ける。 */
+.cell.wide-origin {
+  overflow: visible;
+}
+.cell-fg.wide {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  max-width: none;
+  z-index: 2;
+}
 .cell.selected {
   background: #ffd27a;
   outline: 2px solid #cc3300;
@@ -497,6 +596,25 @@ async function build() {
 }
 .build-form .ext-row .lbl {
   padding-top: 6px;
+}
+.ext-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.ext-note {
+  max-width: 460px;
+}
+.cost-note {
+  font-size: 11px;
+  color: #a06000;
+}
+.place-error {
+  margin: 4px 0;
+}
+.mh-wide {
+  width: 48px !important;
 }
 .tuika-list {
   display: flex;

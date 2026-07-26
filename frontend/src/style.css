@@ -256,6 +256,19 @@ body {
   outline: 2px solid #ff6600;
   outline-offset: -2px;
 }
+/* 2マス(2x1)の家。幅はマス数ぶんの百分率をインラインで与え、原点マスから右隣へ
+   はみ出して描く。覆われた側のマスには何も置かない(背景アセットだけが残る)ので、
+   その上に家が重なる。z-indexは右隣の.cell-bg(絶対配置)より前に出すため。 */
+.house-wide {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  z-index: 2;
+}
+.house-wide img {
+  max-width: 64px;
+}
 
 .ticker {
   color: #cc0033;

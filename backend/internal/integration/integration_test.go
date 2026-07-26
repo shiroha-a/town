@@ -4817,3 +4817,121 @@ func TestRetire(t *testing.T) {
 		t.Errorf("他の住民が消えている")
 	}
 }
+
+// TestBuildMulticellHouse covers 2マス(2x1)の家: 建築許可証の消費、占有マスの
+// 確保、建築費の倍率、覆われたマスへの二重建築の拒否、建て替えでのサイズ固定、
+// 売却でのマス数ぶんの返金。
+func TestBuildMulticellHouse(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	register(t, srv.URL, "misskey.example", "admin0") // 1人目=admin(売却の返金が無いので避ける)
+	p := register(t, srv.URL, "misskey.example", "mansionowner")
+	// 謎の街(4)は地価250万。mansion(5000万)+内装D+10倍 = 5億2500万円。
+	creditSavings(t, pool, p.ID, 600_000_000)
+	seedPlots(t, pool, [][3]int{{4, 0, 1}, {4, 0, 2}, {4, 0, 3}, {4, 0, 4}, {4, 0, 5}})
+
+	// 建築許可証を持っていないと2マスの外装では建てられない。
+	if _, c := buildHouse(t, srv.URL, p.ID, 4, 0, 1, "mansion", 3, "m-nopermit"); c != http.StatusUnprocessableEntity {
+		t.Errorf("許可証なしで建った: status=%d, want 422", c)
+	}
+
+	giveItem(t, pool, p.ID, "建築許可証", 1)
+
+	// 右隣が空地でない場所(A5の右=A6は空地ではない)には建てられない。
+	if _, c := buildHouse(t, srv.URL, p.ID, 4, 0, 5, "mansion", 3, "m-nospace"); c != http.StatusUnprocessableEntity {
+		t.Errorf("空地1マスに2マスの家が建った: status=%d, want 422", c)
+	}
+	// 失敗しても許可証は消えない。
+	var permits int
+	if err := pool.QueryRow(ctx,
+		`SELECT COALESCE(SUM(pi.quantity), 0)::int FROM player_items pi
+		 JOIN content_items ci ON ci.id = pi.item_id
+		 WHERE pi.player_id = $1 AND ci.build_span > 1`, p.ID).Scan(&permits); err != nil {
+		t.Fatalf("count permits: %v", err)
+	}
+	if permits != 1 {
+		t.Errorf("失敗した建築で許可証が減った: %d, want 1", permits)
+	}
+
+	// A1に建てる。費用=(250+5000)×1×10×10000=525,000,000。
+	got, code := buildHouse(t, srv.URL, p.ID, 4, 0, 1, "mansion", 3, "m-ok")
+	if code != http.StatusOK {
+		t.Fatalf("build mansion: status=%d", code)
+	}
+	if got.Savings != 75_000_000 {
+		t.Errorf("savings after mansion = %d, want 75000000", got.Savings)
+	}
+	var houseID int64
+	var span int
+	if err := pool.QueryRow(ctx,
+		`SELECT id, span_w FROM player_houses WHERE owner_id = $1`, p.ID).Scan(&houseID, &span); err != nil {
+		t.Fatalf("load house: %v", err)
+	}
+	if span != 2 {
+		t.Errorf("span_w = %d, want 2", span)
+	}
+	// 占有マスはA1とA2の2マス。
+	var cells int
+	if err := pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM player_house_cells WHERE house_id = $1`, houseID).Scan(&cells); err != nil {
+		t.Fatalf("count cells: %v", err)
+	}
+	if cells != 2 {
+		t.Errorf("占有マス = %d, want 2", cells)
+	}
+	// 許可証は建築で消費される。
+	if err := pool.QueryRow(ctx,
+		`SELECT COALESCE(SUM(pi.quantity), 0)::int FROM player_items pi
+		 JOIN content_items ci ON ci.id = pi.item_id
+		 WHERE pi.player_id = $1 AND ci.build_span > 1`, p.ID).Scan(&permits); err != nil {
+		t.Fatalf("count permits: %v", err)
+	}
+	if permits != 0 {
+		t.Errorf("許可証が消費されていない: %d, want 0", permits)
+	}
+
+	// 覆われた側のマス(A2)には1マスの家も建てられない。
+	if _, c := buildHouse(t, srv.URL, p.ID, 4, 0, 2, "house1", 0, "m-covered"); c != http.StatusUnprocessableEntity {
+		t.Errorf("覆われたマスに建った: status=%d, want 422", c)
+	}
+	// 許可証を使い切ったので2軒目の大邸宅も建てられない。
+	if _, c := buildHouse(t, srv.URL, p.ID, 4, 0, 3, "mansion", 0, "m-nopermit2"); c != http.StatusUnprocessableEntity {
+		t.Errorf("許可証なしで2軒目が建った: status=%d, want 422", c)
+	}
+
+	// 建て替えで大きさは変えられない(1マスの外装へは不可)。
+	creditCash(t, pool, p.ID, 800_000_000)
+	if _, c := rebuildHouse(t, srv.URL, p.ID, houseID, "house1", 3, "m-shrink"); c != http.StatusUnprocessableEntity {
+		t.Errorf("2マスの家が1マスへ建て替わった: status=%d, want 422", c)
+	}
+	// 同じ2マスの外装へは建て替えられる。費用=7000×1×10×10000=700,000,000。
+	after, c := rebuildHouse(t, srv.URL, p.ID, houseID, "ryokan", 3, "m-rebuild")
+	if c != http.StatusOK {
+		t.Fatalf("rebuild ryokan: status=%d", c)
+	}
+	// 初期所持金50万円が残っているので 8億+50万-7億。
+	if after.Money != 100_500_000 {
+		t.Errorf("cash after rebuild = %d, want 100500000", after.Money)
+	}
+
+	// 売却は地価×マス数(250万×2=500万)が現金で戻り、占有マスも解放される。
+	sold, c := sellHouse(t, srv.URL, p.ID, houseID, "m-sell")
+	if c != http.StatusOK {
+		t.Fatalf("sell: status=%d", c)
+	}
+	if sold.Money != 105_500_000 {
+		t.Errorf("cash after sell = %d, want 105500000", sold.Money)
+	}
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM player_house_cells`).Scan(&cells); err != nil {
+		t.Fatalf("count cells: %v", err)
+	}
+	if cells != 0 {
+		t.Errorf("売却後の占有マス = %d, want 0", cells)
+	}
+
+	// 台帳ゼロ和は保たれる。
+	led := ledger.New(pool)
+	if sum, _ := led.AuditZeroSum(ctx); sum != 0 {
+		t.Errorf("ledger zero-sum broken: %d", sum)
+	}
+}

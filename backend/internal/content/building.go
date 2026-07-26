@@ -24,6 +24,9 @@ type BuildingState struct {
 	Plots      []PlotCell          `json:"plots"`       // 管理者が指定した空地マス
 	Houses     []HouseCell         `json:"houses"`      // 全プレイヤーの家(グリッド描画用)
 	MyHouses   []MyHouse           `json:"my_houses"`   // 自分の家(一覧)
+	Permits    int                 `json:"permits"`     // 所持している建築許可証の枚数
+	PermitSpan int                 `json:"permit_span"` // 許可証で建てられる最大の横幅(0=許可証なし)
+	CostFactor int                 `json:"cost_factor"` // 2マス以上の家にかかる建築費の倍率
 	ShopKinds  []string            `json:"shop_kinds"`  // 店の種類の選択肢
 	HouseCount int                 `json:"house_count"` // 自分の所有軒数
 	MochiieMax int                 `json:"mochiie_max"`
@@ -50,6 +53,7 @@ type HouseCell struct {
 	Col       int            `json:"col"`
 	Exterior  string         `json:"exterior"`
 	Setumei   string         `json:"setumei"`
+	SpanW     int            `json:"span_w"` // 横のマス数(1 or 2)
 	OwnerName string         `json:"owner_name"`
 	Own       bool           `json:"own"`
 	Tuika     int            `json:"tuika"` // 0=家のみ/1=運営/2=株式会社/3=持ち物販売店
@@ -64,6 +68,7 @@ type MyHouse struct {
 	Col          int            `json:"col"`
 	Exterior     string         `json:"exterior"`
 	Setumei      string         `json:"setumei"`
+	SpanW        int            `json:"span_w"` // 横のマス数(1 or 2)
 	InteriorRank int            `json:"interior_rank"`
 	Tuika        int            `json:"tuika"`    // 0=家のみ/1=運営/2=株式会社/3=持ち物販売店
 	Slots        int            `json:"slots"`    // 内装ランクで決まるコンテンツ枠数
@@ -90,6 +95,7 @@ func (s *Service) Building(ctx context.Context, playerID int64) (*BuildingState,
 		Interiors:  building.Interiors(),
 		Tuikas:     building.Tuikas(),
 		MochiieMax: building.MochiieMax,
+		CostFactor: building.MulticellCostFactor,
 		Cols:       townmap.Cols,
 		Rows:       townmap.Rows,
 		ShopKinds:  building.ShopKinds(),
@@ -113,6 +119,15 @@ func (s *Service) Building(ctx context.Context, playerID int64) (*BuildingState,
 	}
 	st.ShinsaOK = assets >= building.ShinsaAsset && minParam >= building.ShinsaParam
 
+	// 建築許可証(content_items.build_span)の所持枚数と、建てられる最大の横幅。
+	if err := s.pool.QueryRow(ctx,
+		`SELECT COALESCE(SUM(pi.quantity), 0)::int, COALESCE(MAX(ci.build_span), 0)
+		 FROM player_items pi JOIN content_items ci ON ci.id = pi.item_id
+		 WHERE pi.player_id = $1 AND pi.quantity > 0 AND pi.remaining_uses > 0 AND ci.build_span > 1`,
+		playerID).Scan(&st.Permits, &st.PermitSpan); err != nil {
+		return nil, fmt.Errorf("count build permits: %w", err)
+	}
+
 	plots, err := s.ListPlots(ctx)
 	if err != nil {
 		return nil, err
@@ -126,7 +141,7 @@ func (s *Service) Building(ctx context.Context, playerID int64) (*BuildingState,
 	st.Houses = houses
 
 	mrows, err := s.pool.Query(ctx,
-		`SELECT h.id, h.town, h.grid_row, h.grid_col, h.exterior, h.setumei, h.interior_rank, h.tuika, h.built_at,
+		`SELECT h.id, h.town, h.grid_row, h.grid_col, h.exterior, h.setumei, h.span_w, h.interior_rank, h.tuika, h.built_at,
 		        (hs.house_id IS NOT NULL), COALESCE(hs.title, ''), COALESCE(hs.syubetu, ''), COALESCE(hs.markup, 0)::float8
 		 FROM player_houses h LEFT JOIN house_shops hs ON hs.house_id = h.id
 		 WHERE h.owner_id = $1 ORDER BY h.built_at`, playerID)
@@ -139,7 +154,7 @@ func (s *Service) Building(ctx context.Context, playerID int64) (*BuildingState,
 			h     MyHouse
 			built time.Time
 		)
-		if err := mrows.Scan(&h.ID, &h.Town, &h.Row, &h.Col, &h.Exterior, &h.Setumei, &h.InteriorRank, &h.Tuika, &built,
+		if err := mrows.Scan(&h.ID, &h.Town, &h.Row, &h.Col, &h.Exterior, &h.Setumei, &h.SpanW, &h.InteriorRank, &h.Tuika, &built,
 			&h.HasShop, &h.ShopTitle, &h.ShopKind, &h.ShopMarkup); err != nil {
 			return nil, fmt.Errorf("scan my house: %w", err)
 		}
@@ -196,7 +211,7 @@ func (s *Service) ListHouses(ctx context.Context, playerID int64) ([]HouseCell, 
 		return nil, err
 	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT h.id, h.town, h.grid_row, h.grid_col, h.exterior, h.setumei, h.tuika, h.owner_id, COALESCE(p.display_name, '')
+		`SELECT h.id, h.town, h.grid_row, h.grid_col, h.exterior, h.setumei, h.span_w, h.tuika, h.owner_id, COALESCE(p.display_name, '')
 		 FROM player_houses h LEFT JOIN players p ON p.id = h.owner_id
 		 ORDER BY h.town, h.grid_row, h.grid_col`)
 	if err != nil {
@@ -209,7 +224,7 @@ func (s *Service) ListHouses(ctx context.Context, playerID int64) ([]HouseCell, 
 			c       HouseCell
 			ownerID int64
 		)
-		if err := rows.Scan(&c.ID, &c.Town, &c.Row, &c.Col, &c.Exterior, &c.Setumei, &c.Tuika, &ownerID, &c.OwnerName); err != nil {
+		if err := rows.Scan(&c.ID, &c.Town, &c.Row, &c.Col, &c.Exterior, &c.Setumei, &c.SpanW, &c.Tuika, &ownerID, &c.OwnerName); err != nil {
 			return nil, fmt.Errorf("scan house: %w", err)
 		}
 		c.Own = ownerID == playerID
@@ -224,9 +239,10 @@ func (s *Service) ListHouses(ctx context.Context, playerID int64) ([]HouseCell, 
 
 // ListHouseCells returns every cell that currently has a house (any owner),
 // across all towns. 施設編集で家のあるマスをロックするために使う。
+// 2マスの家は覆っている全マスを返す(占有マスの実体テーブルから読む)。
 func (s *Service) ListHouseCells(ctx context.Context) ([]PlotCell, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT town, grid_row, grid_col FROM player_houses ORDER BY town, grid_row, grid_col`)
+		`SELECT town, grid_row, grid_col FROM player_house_cells ORDER BY town, grid_row, grid_col`)
 	if err != nil {
 		return nil, fmt.Errorf("list house cells: %w", err)
 	}

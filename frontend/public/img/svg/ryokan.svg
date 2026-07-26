@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 32">
+  <!-- Japanese inn (2 cells): sweeping tiled roof, two floors, noren and lanterns -->
+  <ellipse cx="32" cy="30.2" rx="27" ry="1.6" fill="#000" opacity="0.12"/>
+  <path d="M5.5 12.6 C15 9.4 20 4 32 4 C44 4 49 9.4 58.5 12.6 Z" fill="#54606c"/>
+  <rect x="29.6" y="2.4" width="4.8" height="1.8" rx="0.9" fill="#3f4a54"/>
+  <rect x="10" y="12.6" width="44" height="7" fill="#f4efe1"/>
+  <g fill="#e8d9a8" stroke="#8a6b42" stroke-width="0.5">
+    <rect x="13" y="14.2" width="6" height="4.2"/>
+    <rect x="22" y="14.2" width="6" height="4.2"/>
+    <rect x="36" y="14.2" width="6" height="4.2"/>
+    <rect x="45" y="14.2" width="6" height="4.2"/>
+  </g>
+  <path d="M6.5 21.6 L10.5 19.4 L53.5 19.4 L57.5 21.6 Z" fill="#54606c"/>
+  <rect x="10" y="21.6" width="44" height="7.9" fill="#8a6b42"/>
+  <rect x="10" y="21.6" width="44" height="1" fill="#6f5433"/>
+  <g fill="#e8d9a8" stroke="#6f5433" stroke-width="0.4">
+    <rect x="14" y="24" width="5.2" height="5.5"/>
+    <rect x="44.8" y="24" width="5.2" height="5.5"/>
+  </g>
+  <rect x="27" y="23.2" width="10" height="6.3" fill="#f4efe1"/>
+  <rect x="27" y="22.8" width="10" height="2.4" fill="#2f5d8a"/>
+  <g fill="#d94f43" stroke="#a83a30" stroke-width="0.3">
+    <ellipse cx="23.4" cy="24.2" rx="1.7" ry="2.3"/>
+    <ellipse cx="40.6" cy="24.2" rx="1.7" ry="2.3"/>
+  </g>
+</svg>

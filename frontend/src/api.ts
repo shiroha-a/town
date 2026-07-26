@@ -860,6 +860,7 @@ export interface BuildingTown {
 export interface BuildingExterior {
   key: string;
   price: number;
+  span: number; // 横のマス数(1=通常 / 2=建築許可証が要る大邸宅)
 }
 export interface BuildingInterior {
   rank: number;
@@ -882,6 +883,7 @@ export interface HouseCell {
   col: number;
   exterior: string;
   setumei: string;
+  span_w: number; // 横のマス数(1 or 2)
   owner_name: string;
   own: boolean;
   tuika: number; // 0=家のみ/1=運営/2=株式会社/3=持ち物販売店
@@ -894,6 +896,7 @@ export interface MyHouse {
   col: number;
   exterior: string;
   setumei: string;
+  span_w: number; // 横のマス数(1 or 2)
   interior_rank: number;
   tuika: number; // 0=家のみ/1=運営/2=株式会社/3=持ち物販売店
   slots: number;
@@ -928,6 +931,9 @@ export interface BuildingState {
   shop_kinds: string[];
   house_count: number;
   mochiie_max: number;
+  permits: number; // 所持している建築許可証の枚数
+  permit_span: number; // 許可証で建てられる最大の横幅(0=許可証なし)
+  cost_factor: number; // 2マス以上の家にかかる建築費の倍率
   cols: number;
   rows: number;
 }
