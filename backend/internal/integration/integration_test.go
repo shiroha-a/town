@@ -184,6 +184,10 @@ func setup(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 // overrides whatever a prior test seeded).
 func newTestSettings(t *testing.T, ctx context.Context, pool *pgxpool.Pool, g settings.Game) *settings.Store {
 	t.Helper()
+	// テストは検証したい項目だけを書くので、必須の表示名は既定で補う。
+	if g.SiteTitle == "" {
+		g.SiteTitle = settings.Defaults().SiteTitle
+	}
 	st, err := settings.NewStore(ctx, pool, g)
 	if err != nil {
 		t.Fatalf("settings: %v", err)

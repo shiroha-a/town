@@ -265,7 +265,12 @@ func (s *Server) adminUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	if err := s.settings.Set(r.Context(), g); err != nil {
+	// 入力の誤り(タイムゾーン・時刻の範囲・ゲーム名が空など)は理由を返す。
+	// 管理者が直せるものなので、内部エラーの固定文言に混ぜない。
+	if err := s.settings.Set(r.Context(), g); errors.Is(err, settings.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	} else if err != nil {
 		writeInternal(w, r, err)
 		return
 	}

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,6 +41,10 @@ type Game struct {
 	MoveWalkSecs             int          `json:"move_walk_secs"`     // 徒歩の街移動にかかる秒数(0以下で既定10)
 	MoveBusSecs              int          `json:"move_bus_secs"`      // バスの街移動にかかる秒数(0以下で既定5)
 	Towns                    []TownConfig `json:"towns"`              // 街の一覧(名前・地価)。数は要素数
+	// SiteTitle / SiteTagline: 画面に出すゲーム名と副題。街の名前を変えて
+	// 遊びたい運営者がいるので設定にしている。
+	SiteTitle   string `json:"site_title"`
+	SiteTagline string `json:"site_tagline"`
 	// GuestEnabled: お試しプレイ(ゲストログイン)を受け付けるか。
 	GuestEnabled bool `json:"guest_enabled"`
 	// GuestLifetimeMin: ゲストのデータを消すまでの分数。作成からの経過で数える。
@@ -79,6 +84,10 @@ func Defaults() Game {
 		MoveMaigoEnabled:         false,  // 徒歩移動の迷子(レガシー既定OFF)
 		MoveWalkSecs:             10,     // 徒歩の街移動にかかる秒数
 		MoveBusSecs:              5,      // バスの街移動にかかる秒数
+		SiteTitle:                "ＴＯＷＮ",
+		SiteTagline:              "働いて、買って、暮らす街",
+		GuestEnabled:             true, // お試しプレイを受け付ける
+		GuestLifetimeMin:         60,   // ゲストのデータは1時間で消す
 	}
 }
 
@@ -102,6 +111,13 @@ func (g Game) Validate() error {
 	}
 	if g.DayBoundaryHour < 0 || g.DayBoundaryHour > 23 {
 		return fmt.Errorf("%w: 日付の切り替わりは0〜23時で指定してください", ErrInvalid)
+	}
+	// 空だと画面の見出しが消えてしまうので、名前だけは必須にする。
+	if strings.TrimSpace(g.SiteTitle) == "" {
+		return fmt.Errorf("%w: ゲーム名を入力してください", ErrInvalid)
+	}
+	if len([]rune(g.SiteTitle)) > 40 || len([]rune(g.SiteTagline)) > 80 {
+		return fmt.Errorf("%w: ゲーム名は40字、副題は80字までです", ErrInvalid)
 	}
 	return nil
 }

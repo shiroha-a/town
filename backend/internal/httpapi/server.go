@@ -90,6 +90,7 @@ func NewServer(players *player.Service, actions *action.Service, contentSvc *con
 		appName: auth.AppName, allowedOrigins: auth.AllowedOrigins, limiter: newLimiter()}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", s.health)
+	mux.HandleFunc("GET /api/v1/site", s.site)
 	mux.HandleFunc("GET /api/v1/players", s.listPlayers)
 	mux.HandleFunc("GET /api/v1/players/{id}", s.getPlayer)
 	mux.HandleFunc("GET /api/v1/participants", s.participants)
@@ -287,6 +288,15 @@ func writeInternal(w http.ResponseWriter, r *http.Request, err error) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// site returns the display name of this town. ログイン前の入口でも使うため公開。
+func (s *Server) site(w http.ResponseWriter, _ *http.Request) {
+	g := s.settings.Get()
+	writeJSON(w, http.StatusOK, map[string]string{
+		"title":   g.SiteTitle,
+		"tagline": g.SiteTagline,
+	})
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
