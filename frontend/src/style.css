@@ -734,6 +734,18 @@ input[type='number'] {
   font-size: 12px;
   margin: 16px 0;
 }
+.footer .copyright {
+  font-size: 11px;
+  color: #999;
+  line-height: 1.7;
+}
+.footer .report {
+  margin-top: 4px;
+  font-size: 11px;
+}
+.footer .report a {
+  color: #006699;
+}
 
 h1.town-title {
   font-size: 22px;

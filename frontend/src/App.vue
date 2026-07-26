@@ -190,8 +190,12 @@ const facilityTitles: Record<string, string> = {
   </template>
 
   <div class="footer">
-    [HOME]<br />
-    - TOWN リライト版 (Vue) -
+    <div class="copyright">&copy; 2026 shiroha-a</div>
+    <div class="report">
+      <a href="https://github.com/shiroha-a/town/issues" target="_blank" rel="noopener noreferrer">
+        要望・不具合報告
+      </a>
+    </div>
   </div>
 </template>
 
