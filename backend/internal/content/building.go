@@ -326,12 +326,12 @@ func (s *Service) Orosi(ctx context.Context, playerID, houseID int64) (*OrosiSta
 	if super {
 		rows, err = s.pool.Query(ctx,
 			`SELECT id, name, category, price FROM content_items
-			 WHERE enabled AND facility = '' AND category = ANY($1) AND category <> $2
+			 WHERE enabled AND shop_listed AND facility = '' AND category = ANY($1) AND category <> $2
 			 ORDER BY category, name`, building.ShopKinds(), building.SuperMarketKind)
 	} else {
 		rows, err = s.pool.Query(ctx,
 			`SELECT id, name, category, price FROM content_items
-			 WHERE enabled AND facility = '' AND category = $1
+			 WHERE enabled AND shop_listed AND facility = '' AND category = $1
 			 ORDER BY name`, syubetu)
 	}
 	if err != nil {

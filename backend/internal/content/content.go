@@ -42,6 +42,12 @@ type Item struct {
 	// IsGift はギフト屋で包んだ状態の品。贈る前提の一時的な形なので、
 	// 景品として直接配るものではない。
 	IsGift bool `json:"is_gift"`
+	// ShopListed は店頭に並べるか。false でも存在はするので、シリアルコードや
+	// イベントで配れて、持っていれば使える(配布限定の品を表す)。
+	ShopListed bool `json:"shop_listed"`
+	// Usable は「使う」ができるか。建築許可証・乗り物・カード類のように持って
+	// いること自体が意味を持つ品は false(使っても耐久が減るだけになるため)。
+	Usable bool `json:"usable"`
 }
 
 // Job is a content job definition (含む給与体系, design 17.5)。
@@ -148,7 +154,7 @@ func orEmptyArray(b []byte) []byte {
 }
 
 // CreateItem validates the effect and inserts a new item.
-func (s *Service) CreateItem(ctx context.Context, name, category string, price int64, effect []byte, stockMaster *int) (Item, error) {
+func (s *Service) CreateItem(ctx context.Context, name, category string, price int64, effect []byte, stockMaster *int, shopListed, usable bool) (Item, error) {
 	if name == "" {
 		return Item{}, &ValidationError{Message: "name is required"}
 	}
@@ -161,18 +167,18 @@ func (s *Service) CreateItem(ctx context.Context, name, category string, price i
 	}
 	var it Item
 	if err := s.pool.QueryRow(ctx,
-		`INSERT INTO content_items (name, category, price, effect, stock_master)
-		 VALUES ($1, $2, $3, $4::jsonb, $5)
-		 RETURNING id, name, COALESCE(category, ''), price, effect, enabled, stock_master`,
-		name, category, price, string(effect), stockMaster).
-		Scan(&it.ID, &it.Name, &it.Category, &it.Price, &it.Effect, &it.Enabled, &it.StockMaster); err != nil {
+		`INSERT INTO content_items (name, category, price, effect, stock_master, shop_listed, usable)
+		 VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
+		 RETURNING id, name, COALESCE(category, ''), price, effect, enabled, stock_master, shop_listed, usable`,
+		name, category, price, string(effect), stockMaster, shopListed, usable).
+		Scan(&it.ID, &it.Name, &it.Category, &it.Price, &it.Effect, &it.Enabled, &it.StockMaster, &it.ShopListed, &it.Usable); err != nil {
 		return Item{}, fmt.Errorf("insert item: %w", err)
 	}
 	return it, nil
 }
 
 // UpdateItem validates and updates an existing item (including enabled/無効化).
-func (s *Service) UpdateItem(ctx context.Context, id int64, name, category string, price int64, effect []byte, enabled bool, stockMaster *int) (Item, error) {
+func (s *Service) UpdateItem(ctx context.Context, id int64, name, category string, price int64, effect []byte, enabled bool, stockMaster *int, shopListed, usable bool) (Item, error) {
 	if name == "" {
 		return Item{}, &ValidationError{Message: "name is required"}
 	}
@@ -185,11 +191,12 @@ func (s *Service) UpdateItem(ctx context.Context, id int64, name, category strin
 	}
 	var it Item
 	err := s.pool.QueryRow(ctx,
-		`UPDATE content_items SET name = $2, category = $3, price = $4, effect = $5::jsonb, enabled = $6, stock_master = $7
+		`UPDATE content_items SET name = $2, category = $3, price = $4, effect = $5::jsonb, enabled = $6,
+		        stock_master = $7, shop_listed = $8, usable = $9
 		 WHERE id = $1
-		 RETURNING id, name, COALESCE(category, ''), price, effect, enabled, stock_master`,
-		id, name, category, price, string(effect), enabled, stockMaster).
-		Scan(&it.ID, &it.Name, &it.Category, &it.Price, &it.Effect, &it.Enabled, &it.StockMaster)
+		 RETURNING id, name, COALESCE(category, ''), price, effect, enabled, stock_master, shop_listed, usable`,
+		id, name, category, price, string(effect), enabled, stockMaster, shopListed, usable).
+		Scan(&it.ID, &it.Name, &it.Category, &it.Price, &it.Effect, &it.Enabled, &it.StockMaster, &it.ShopListed, &it.Usable)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Item{}, &ValidationError{Message: "そのアイテムはありません。"}
 	}
@@ -224,7 +231,7 @@ func (s *Service) DeleteItem(ctx context.Context, id int64) error {
 func (s *Service) ListItems(ctx context.Context) ([]Item, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, name, COALESCE(category, ''), price, effect, enabled, stock_master,
-		        COALESCE(facility, ''), is_gift
+		        COALESCE(facility, ''), is_gift, shop_listed, usable
 		 FROM content_items ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("list items: %w", err)
@@ -234,7 +241,7 @@ func (s *Service) ListItems(ctx context.Context) ([]Item, error) {
 	for rows.Next() {
 		var it Item
 		if err := rows.Scan(&it.ID, &it.Name, &it.Category, &it.Price, &it.Effect, &it.Enabled,
-			&it.StockMaster, &it.Facility, &it.IsGift); err != nil {
+			&it.StockMaster, &it.Facility, &it.IsGift, &it.ShopListed, &it.Usable); err != nil {
 			return nil, fmt.Errorf("scan item: %w", err)
 		}
 		items = append(items, it)
@@ -313,7 +320,7 @@ func (s *Service) listItems(ctx context.Context, facility string) ([]ShopItem, e
 	          FROM content_items ci
 	          LEFT JOIN shop_daily_stock sds
 	                 ON sds.facility = ci.facility AND sds.item_id = ci.id AND sds.game_date = $2
-	          WHERE ci.enabled AND ci.facility = $1`
+	          WHERE ci.enabled AND ci.shop_listed AND ci.facility = $1`
 	args := []any{facility, gameDate, adjust}
 	// デパート/食堂は毎日一部だけを品揃えする(旧仕様)。
 	if n := s.dailyCountFor(facility); n > 0 {

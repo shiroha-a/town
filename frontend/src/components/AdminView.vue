@@ -71,12 +71,16 @@ const item = reactive<{
   price: number;
   effect: EffectOp[];
   stock_master: number | null;
+  shop_listed: boolean;
+  usable: boolean;
 }>({
   name: "",
   category: "",
   price: 0,
   effect: [],
   stock_master: null,
+  shop_listed: true,
+  usable: true,
 });
 function emptyJob(): JobPayload {
   return {
@@ -1292,6 +1296,8 @@ async function createItem() {
       price: item.price,
       effect: item.effect,
       stock_master: item.stock_master,
+      shop_listed: item.shop_listed,
+      usable: item.usable,
     });
     message.value = `アイテム「${item.name}」を作成しました。`;
     kind.value = "ok";
@@ -1300,6 +1306,8 @@ async function createItem() {
     item.price = 0;
     item.effect = [];
     item.stock_master = null;
+    item.shop_listed = true;
+    item.usable = true;
     await refresh();
   } catch (e) {
     fail(e);
@@ -1405,6 +1413,8 @@ async function saveEdit() {
       effect: editing.value.effect,
       enabled: editing.value.enabled,
       stock_master: editing.value.stock_master,
+      shop_listed: editing.value.shop_listed,
+      usable: editing.value.usable,
     });
     message.value = `アイテム「${editing.value.name}」を更新しました。`;
     kind.value = "ok";
@@ -1537,6 +1547,14 @@ async function deleteEdit() {
                   v-model.number="item.stock_master"
                   placeholder="空=無制限"
               /></label>
+              <ToggleSwitch
+                v-model="item.shop_listed"
+                label="店に並べる（オフで販売しない）"
+              />
+              <ToggleSwitch
+                v-model="item.usable"
+                label="使える（オフで持つだけの品）"
+              />
               <div class="ops">
                 <div class="ops-head">使用効果</div>
                 <div v-for="(op, i) in item.effect" :key="i" class="op-row">
@@ -1618,6 +1636,8 @@ async function deleteEdit() {
                       <th>扱い</th>
                       <th>カテゴリ</th>
                       <th>値段</th>
+                      <th>店頭</th>
+                      <th>使用</th>
                       <th>有効</th>
                     </tr>
                   </thead>
@@ -1633,6 +1653,12 @@ async function deleteEdit() {
                       <td>{{ FACILITY_LABEL[it.facility] ?? it.facility }}</td>
                       <td>{{ it.category }}</td>
                       <td class="r">{{ it.price }}</td>
+                      <td :class="{ off: !it.shop_listed }">
+                        {{ it.shop_listed ? "○" : "×" }}
+                      </td>
+                      <td :class="{ off: !it.usable }">
+                        {{ it.usable ? "○" : "×" }}
+                      </td>
                       <td :class="{ off: !it.enabled }">
                         {{ it.enabled ? "○" : "×" }}
                       </td>
@@ -2979,6 +3005,21 @@ async function deleteEdit() {
             placeholder="空=無制限"
         /></label>
         <ToggleSwitch v-model="editing.enabled" label="有効（オフで無効化）" />
+        <ToggleSwitch
+          v-model="editing.shop_listed"
+          label="店に並べる（オフで販売しない）"
+        />
+        <div class="hint">
+          オフにすると{{ FACILITY_LABEL[editing.facility] ?? "店"
+          }}の品揃えと卸問屋から外れ、買えなくなります。シリアルコードやイベントでは配れます。
+        </div>
+        <ToggleSwitch
+          v-model="editing.usable"
+          label="使える（オフで持つだけの品）"
+        />
+        <div class="hint">
+          建築許可証・乗り物・カード類のように、持っていること自体が意味を持つ品はオフにします。使っても何も起きず耐久だけ減るためです。
+        </div>
         <div class="ops">
           <div class="ops-head">使用効果</div>
           <div v-for="(op, i) in editing.effect" :key="i" class="op-row">
@@ -3871,6 +3912,11 @@ async function deleteEdit() {
   font-size: 11px;
   color: #889;
   font-weight: normal;
+}
+/* 「店に並べる」トグルの補足。トグルの直下に小さく置く。 */
+.modal .hint {
+  margin: -2px 0 6px;
+  line-height: 1.5;
 }
 .chk {
   font-size: 12px;

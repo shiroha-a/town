@@ -505,7 +505,7 @@ func (s *Service) DoShiire(ctx context.Context, playerID, houseID, itemID int64,
 			facility string
 		)
 		err = tx.QueryRow(ctx,
-			`SELECT category, price, facility FROM content_items WHERE id = $1 AND enabled`, itemID).
+			`SELECT category, price, facility FROM content_items WHERE id = $1 AND enabled AND shop_listed`, itemID).
 			Scan(&category, &price, &facility)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return &ConditionError{Message: "その商品は仕入れられません。"}

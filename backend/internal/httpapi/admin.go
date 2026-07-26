@@ -303,11 +303,14 @@ func writeContentErr(w http.ResponseWriter, err error) {
 }
 
 type createItemReq struct {
-	Name        string          `json:"name"`
-	Category    string          `json:"category"`
-	Price       int64           `json:"price"`
-	Effect      json.RawMessage `json:"effect"`
-	StockMaster *int            `json:"stock_master"`
+	Name     string          `json:"name"`
+	Category string          `json:"category"`
+	Price    int64           `json:"price"`
+	Effect   json.RawMessage `json:"effect"`
+	// ShopListed / Usable は省略時に有効とみなす(通常の品はこれが既定)。
+	ShopListed  *bool `json:"shop_listed"`
+	Usable      *bool `json:"usable"`
+	StockMaster *int  `json:"stock_master"`
 }
 
 func (s *Server) createItem(w http.ResponseWriter, r *http.Request) {
@@ -319,7 +322,9 @@ func (s *Server) createItem(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	it, err := s.content.CreateItem(r.Context(), req.Name, req.Category, req.Price, req.Effect, req.StockMaster)
+	listed := req.ShopListed == nil || *req.ShopListed
+	usable := req.Usable == nil || *req.Usable
+	it, err := s.content.CreateItem(r.Context(), req.Name, req.Category, req.Price, req.Effect, req.StockMaster, listed, usable)
 	if err != nil {
 		writeContentErr(w, err)
 		return
@@ -328,12 +333,15 @@ func (s *Server) createItem(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateItemReq struct {
-	Name        string          `json:"name"`
-	Category    string          `json:"category"`
-	Price       int64           `json:"price"`
-	Effect      json.RawMessage `json:"effect"`
-	Enabled     bool            `json:"enabled"`
-	StockMaster *int            `json:"stock_master"`
+	Name     string          `json:"name"`
+	Category string          `json:"category"`
+	Price    int64           `json:"price"`
+	Effect   json.RawMessage `json:"effect"`
+	Enabled  bool            `json:"enabled"`
+	// ShopListed / Usable は省略時に有効とみなす(通常の品はこれが既定)。
+	ShopListed  *bool `json:"shop_listed"`
+	Usable      *bool `json:"usable"`
+	StockMaster *int  `json:"stock_master"`
 }
 
 func (s *Server) updateItem(w http.ResponseWriter, r *http.Request) {
@@ -350,7 +358,9 @@ func (s *Server) updateItem(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	it, err := s.content.UpdateItem(r.Context(), id, req.Name, req.Category, req.Price, req.Effect, req.Enabled, req.StockMaster)
+	listed := req.ShopListed == nil || *req.ShopListed
+	usable := req.Usable == nil || *req.Usable
+	it, err := s.content.UpdateItem(r.Context(), id, req.Name, req.Category, req.Price, req.Effect, req.Enabled, req.StockMaster, listed, usable)
 	if err != nil {
 		writeContentErr(w, err)
 		return

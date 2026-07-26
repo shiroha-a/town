@@ -15,6 +15,7 @@ export interface ItemStack {
   calorie_g: number; // 摂取カロリー(食べると体重+calorie_g g)
   special: string; // 特殊効果の説明(体重/身長/病気。無ければ空)
   enables_credit: boolean; // 所持しているとクレジット払いができる(カード類)
+  usable: boolean; // 「使う」ができるか(建築許可証・乗り物などは持つだけの品)
   // クールタイム中の再使用可能時刻(ISO8601)。使用可能ならnull。
   next_available_at: string | null;
 }
@@ -472,6 +473,10 @@ export interface AdminItem {
   facility: string;
   /** ギフト屋で包んだ状態の品。 */
   is_gift: boolean;
+  /** 店頭に並べるか。false でもシリアルコードやイベントで配れて、持っていれば使える。 */
+  shop_listed: boolean;
+  /** 「使う」ができるか。持っていること自体が意味を持つ品は false。 */
+  usable: boolean;
 }
 export interface AdminJob {
   id: number;
@@ -1853,6 +1858,8 @@ export const api = {
     price: number;
     effect: EffectOp[];
     stock_master: number | null;
+    shop_listed: boolean;
+    usable: boolean;
   }) => request<AdminItem>("POST", "/admin/items", item),
   adminUpdateItem: (
     id: number,
@@ -1863,6 +1870,8 @@ export const api = {
       effect: EffectOp[];
       enabled: boolean;
       stock_master: number | null;
+      shop_listed: boolean;
+      usable: boolean;
     },
   ) => request<AdminItem>("PUT", `/admin/items/${id}`, item),
   adminDeleteItem: (id: number) =>

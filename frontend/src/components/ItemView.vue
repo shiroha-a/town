@@ -86,6 +86,8 @@ const cooldowns = computed<Record<number, Cooldown>>(() => {
 async function use(it: ItemStack) {
   // クールタイム中はボタンをグレーアウトしているが、二重の安全策として弾く。
   if (cooldowns.value[it.item_id]?.active) return;
+  // 持つだけの品(建築許可証・乗り物・カード類)は使えない。
+  if (!it.usable) return;
   busy.value = true;
   const before = props.player;
   try {
@@ -152,17 +154,19 @@ async function use(it: ItemStack) {
                 <td
                   class="cooldown"
                   :class="{
-                    ok: !cooldowns[it.item_id].active,
-                    soon: cooldowns[it.item_id].active && cooldowns[it.item_id].soon,
-                    wait: cooldowns[it.item_id].active && !cooldowns[it.item_id].soon,
+                    ok: it.usable && !cooldowns[it.item_id].active,
+                    soon: it.usable && cooldowns[it.item_id].active && cooldowns[it.item_id].soon,
+                    wait: it.usable && cooldowns[it.item_id].active && !cooldowns[it.item_id].soon,
+                    hold: !it.usable,
                   }"
                   :data-test="`cooldown-${it.item_id}`"
                   :rowspan="it.special ? 2 : 1"
                 >
-                  {{ cooldowns[it.item_id].label }}
+                  {{ it.usable ? cooldowns[it.item_id].label : '－' }}
                 </td>
                 <td :rowspan="it.special ? 2 : 1">
                   <button
+                    v-if="it.usable"
                     class="btn"
                     :disabled="busy || cooldowns[it.item_id].active"
                     :data-test="`use-${it.item_id}`"
@@ -286,6 +290,12 @@ async function use(it: ItemStack) {
 }
 .item-table td.cooldown.ok {
   color: #060;
+}
+/* 持っていること自体が意味を持つ品(建築許可証・乗り物・カード類)。
+   使っても何も起きず耐久だけ減るので「使う」ボタンを出さない。 */
+.item-table td.cooldown.hold {
+  color: #aaa;
+  font-weight: normal;
 }
 .item-table td.cooldown.soon {
   color: #0a7d2c;

@@ -4935,3 +4935,138 @@ func TestBuildMulticellHouse(t *testing.T) {
 		t.Errorf("ledger zero-sum broken: %d", sum)
 	}
 }
+
+// TestShopListedFlag covers 店に並べる(shop_listed)の切り替え: オフにすると店頭の
+// 品揃えから消えて買えなくなるが、シリアルコードで配れて持っていれば使える。
+// 建築許可証のような配布限定の品のための設定。
+func TestShopListedFlag(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	alice := register(t, srv.URL, "misskey.example", "alice")
+
+	var drinkID int64
+	if err := pool.QueryRow(ctx,
+		`SELECT id FROM content_items WHERE name = '栄養ドリンク'`).Scan(&drinkID); err != nil {
+		t.Fatalf("seed lookup: %v", err)
+	}
+	// 既定(shop_listed=true)では買える。
+	if _, c := itemAction(t, srv.URL, "/buy", alice.ID, drinkID, "sl-buy1"); c != http.StatusOK {
+		t.Fatalf("既定で買えない: status=%d", c)
+	}
+
+	// content_items はテスト間で truncate されないので、書き換えたら必ず戻す。
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(),
+			`UPDATE content_items SET shop_listed = TRUE WHERE id = $1`, drinkID); err != nil {
+			t.Errorf("restore shop_listed: %v", err)
+		}
+	})
+	if _, err := pool.Exec(ctx,
+		`UPDATE content_items SET shop_listed = FALSE WHERE id = $1`, drinkID); err != nil {
+		t.Fatalf("unlist: %v", err)
+	}
+
+	// 店頭の品揃えから消える。
+	resp, err := http.Get(srv.URL + "/api/v1/items")
+	if err != nil {
+		t.Fatalf("shop items: %v", err)
+	}
+	var shop []struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&shop); err != nil {
+		t.Fatalf("decode shop: %v", err)
+	}
+	resp.Body.Close()
+	for _, it := range shop {
+		if it.ID == drinkID {
+			t.Errorf("店頭に並べない品が品揃えに出ている (id=%d)", drinkID)
+		}
+	}
+	// 直接叩いても買えない(一覧から隠すだけでは不十分)。
+	if _, c := itemAction(t, srv.URL, "/buy", alice.ID, drinkID, "sl-buy2"); c == http.StatusOK {
+		t.Errorf("店頭に並べない品が買えてしまう")
+	}
+
+	// 配布(シリアルコード相当)で持てば、これまでどおり使える。
+	giveItem(t, pool, alice.ID, "栄養ドリンク", 1)
+	if _, c := itemAction(t, srv.URL, "/use", alice.ID, drinkID, "sl-use"); c != http.StatusOK {
+		t.Errorf("配布された品が使えない: status=%d", c)
+	}
+
+	// 建築許可証は既定で店頭に出さない(配布限定)。
+	var listed bool
+	if err := pool.QueryRow(ctx,
+		`SELECT shop_listed FROM content_items WHERE name = '建築許可証'`).Scan(&listed); err != nil {
+		t.Fatalf("permit lookup: %v", err)
+	}
+	if listed {
+		t.Errorf("建築許可証が店頭に並んでいる")
+	}
+}
+
+// TestItemUsableFlag covers 使える(usable)の切り替え: 持っていること自体が意味を
+// 持つ品(建築許可証・乗り物・カード類)は「使う」で消えない。
+func TestItemUsableFlag(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	alice := register(t, srv.URL, "misskey.example", "alice")
+
+	// 効果が空の品は既定で使用不可(migrationで一括設定)。乗り物で確かめる。
+	var bikeID int64
+	if err := pool.QueryRow(ctx,
+		`SELECT id FROM content_items WHERE name = '自転車'`).Scan(&bikeID); err != nil {
+		t.Fatalf("seed lookup: %v", err)
+	}
+	var usable bool
+	if err := pool.QueryRow(ctx,
+		`SELECT usable FROM content_items WHERE id = $1`, bikeID).Scan(&usable); err != nil {
+		t.Fatalf("read usable: %v", err)
+	}
+	if usable {
+		t.Errorf("効果の無い品が使用可のままになっている(自転車)")
+	}
+
+	giveItem(t, pool, alice.ID, "自転車", 1)
+	// 乗り物の耐久は交通事故で減るもので、使用では減らない。
+	var before int
+	if err := pool.QueryRow(ctx,
+		`SELECT remaining_uses FROM player_items WHERE player_id = $1 AND item_id = $2`,
+		alice.ID, bikeID).Scan(&before); err != nil {
+		t.Fatalf("read remaining: %v", err)
+	}
+	if _, c := itemAction(t, srv.URL, "/use", alice.ID, bikeID, "u-bike"); c == http.StatusOK {
+		t.Errorf("持つだけの品が使えてしまう")
+	}
+	var after int
+	if err := pool.QueryRow(ctx,
+		`SELECT remaining_uses FROM player_items WHERE player_id = $1 AND item_id = $2`,
+		alice.ID, bikeID).Scan(&after); err != nil {
+		t.Fatalf("read remaining: %v", err)
+	}
+	if after != before {
+		t.Errorf("使用に失敗したのに耐久が減った: %d -> %d", before, after)
+	}
+
+	// 建築許可証も同じく使えない(誤操作で失わない)。
+	var permitID int64
+	if err := pool.QueryRow(ctx,
+		`SELECT id FROM content_items WHERE name = '建築許可証'`).Scan(&permitID); err != nil {
+		t.Fatalf("permit lookup: %v", err)
+	}
+	giveItem(t, pool, alice.ID, "建築許可証", 1)
+	if _, c := itemAction(t, srv.URL, "/use", alice.ID, permitID, "u-permit"); c == http.StatusOK {
+		t.Errorf("建築許可証が使えてしまう")
+	}
+
+	// 効果のある品はこれまでどおり使える。
+	var drinkID int64
+	if err := pool.QueryRow(ctx,
+		`SELECT id FROM content_items WHERE name = '栄養ドリンク'`).Scan(&drinkID); err != nil {
+		t.Fatalf("drink lookup: %v", err)
+	}
+	giveItem(t, pool, alice.ID, "栄養ドリンク", 1)
+	if _, c := itemAction(t, srv.URL, "/use", alice.ID, drinkID, "u-drink"); c != http.StatusOK {
+		t.Errorf("効果のある品が使えない: status=%d", c)
+	}
+}
