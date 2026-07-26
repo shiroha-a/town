@@ -92,7 +92,8 @@ onMounted(async () => {
     greetings.value = [];
   }
   // 街を開いた=来訪として足あとに記帳する(1日1回)。
-  api.attendanceCheckin(props.player.id).catch(() => {});
+  // ゲストは足あとに残さない(サーバー側でも拒否される)。
+  if (!props.player.is_guest) api.attendanceCheckin(props.player.id).catch(() => {});
   // 街を開いた時にランダムイベントを抽選する。
   rollEvent();
 });
@@ -129,6 +130,8 @@ const normalGreets = computed(
 // 新着メール通知。街トップ表示時とポーリングで未読数を取得する。
 const unreadMail = ref(0);
 async function refreshUnread() {
+  // ゲストはメールを使えない(サーバー側でも拒否される)ので問い合わせない。
+  if (props.player.is_guest) return;
   try {
     unreadMail.value = (await api.getMailUnread(props.player.id)).unread;
   } catch {
