@@ -5143,3 +5143,115 @@ func TestSerialRewardItem(t *testing.T) {
 		t.Errorf("配られた個数 = %d, want 1", qty)
 	}
 }
+
+// TestAdminItemFields covers 管理画面から編集できるアイテムの項目。以前は
+// name/category/price/effect/enabled/stock_master しか送れず、新規作成した品は
+// 必ず「使用間隔なし・耐久1回・カロリーなし・デパート売り」になっていた。
+func TestAdminItemFields(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	admin := register(t, srv.URL, "misskey.example", "admin0") // 1人目=admin
+
+	// 食堂のメニューを、耐久・使用間隔・カロリー付きで作れる。
+	code, body := adminPost(t, srv.URL, "/api/v1/admin/items", admin.ID, map[string]any{
+		"name": "特製ラーメン", "category": "食料品", "facility": "syokudou",
+		"price": 800, "effect": []any{},
+		"durability": 3, "durability_unit": "day", "use_interval_min": 45,
+		"fills_satiety": true, "calorie_g": 700, "max_sets": 2,
+		"body_cost": 5, "nou_cost": 1,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("create item: status=%d body=%s", code, body)
+	}
+	var created struct {
+		ID             int64  `json:"id"`
+		Facility       string `json:"facility"`
+		Durability     int    `json:"durability"`
+		DurabilityUnit string `json:"durability_unit"`
+		UseIntervalMin int    `json:"use_interval_min"`
+		FillsSatiety   bool   `json:"fills_satiety"`
+		CalorieG       int    `json:"calorie_g"`
+		MaxSets        int    `json:"max_sets"`
+		BodyCost       int    `json:"body_cost"`
+		NouCost        int    `json:"nou_cost"`
+		Enabled        bool   `json:"enabled"`
+	}
+	if err := json.Unmarshal([]byte(body), &created); err != nil {
+		t.Fatalf("decode created: %v", err)
+	}
+	if created.Facility != "syokudou" || created.Durability != 3 || created.DurabilityUnit != "day" ||
+		created.UseIntervalMin != 45 || !created.FillsSatiety || created.CalorieG != 700 ||
+		created.MaxSets != 2 || created.BodyCost != 5 || created.NouCost != 1 {
+		t.Errorf("作成した品の設定が反映されていない: %+v", created)
+	}
+	if !created.Enabled {
+		t.Error("作成直後は有効であってほしい")
+	}
+
+	// 建築許可証も管理画面から作れる(これまではSQLが要った)。
+	code, body = adminPost(t, srv.URL, "/api/v1/admin/items", admin.ID, map[string]any{
+		"name": "大邸宅の建築許可証", "category": "デパート", "price": 50000000,
+		"effect": []any{}, "build_span": 2, "shop_listed": false, "usable": false,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("create permit: status=%d body=%s", code, body)
+	}
+	var permit struct {
+		ID         int64 `json:"id"`
+		BuildSpan  int   `json:"build_span"`
+		ShopListed bool  `json:"shop_listed"`
+		Usable     bool  `json:"usable"`
+	}
+	if err := json.Unmarshal([]byte(body), &permit); err != nil {
+		t.Fatalf("decode permit: %v", err)
+	}
+	if permit.BuildSpan != 2 || permit.ShopListed || permit.Usable {
+		t.Errorf("許可証の設定が反映されていない: %+v", permit)
+	}
+
+	// 更新でも全項目が通る。
+	code, body = adminPut(t, srv.URL, "/api/v1/admin/items/"+strconv.FormatInt(created.ID, 10), admin.ID,
+		map[string]any{
+			"name": "特製ラーメン", "category": "食料品", "facility": "syokudou",
+			"price": 900, "effect": []any{}, "enabled": false,
+			"durability": 1, "durability_unit": "use", "use_interval_min": 10,
+			"calorie_g": 650, "max_sets": 5, "power_multiplier": 0,
+		})
+	if code != http.StatusOK {
+		t.Fatalf("update item: status=%d body=%s", code, body)
+	}
+	var updated struct {
+		Price          int64 `json:"price"`
+		UseIntervalMin int   `json:"use_interval_min"`
+		CalorieG       int   `json:"calorie_g"`
+		Enabled        bool  `json:"enabled"`
+	}
+	if err := json.Unmarshal([]byte(body), &updated); err != nil {
+		t.Fatalf("decode updated: %v", err)
+	}
+	if updated.Price != 900 || updated.UseIntervalMin != 10 || updated.CalorieG != 650 || updated.Enabled {
+		t.Errorf("更新が反映されていない: %+v", updated)
+	}
+
+	// 検証: 知らない扱い場所と、意味のない許可証の幅は弾く。
+	if c, _ := adminPost(t, srv.URL, "/api/v1/admin/items", admin.ID, map[string]any{
+		"name": "変な品", "facility": "nowhere", "effect": []any{},
+	}); c != http.StatusBadRequest {
+		t.Errorf("知らない扱い場所: status=%d, want 400", c)
+	}
+	if c, _ := adminPost(t, srv.URL, "/api/v1/admin/items", admin.ID, map[string]any{
+		"name": "変な許可証", "effect": []any{}, "build_span": 1,
+	}); c != http.StatusBadRequest {
+		t.Errorf("幅1の許可証: status=%d, want 400", c)
+	}
+
+	// 作った食堂メニューが、実際に食堂の品揃えへ出る。
+	var facility string
+	if err := pool.QueryRow(ctx,
+		`SELECT facility FROM content_items WHERE id = $1`, created.ID).Scan(&facility); err != nil {
+		t.Fatalf("read facility: %v", err)
+	}
+	if facility != "syokudou" {
+		t.Errorf("facility = %q, want syokudou", facility)
+	}
+}

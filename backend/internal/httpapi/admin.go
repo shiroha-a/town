@@ -302,46 +302,77 @@ func writeContentErr(w http.ResponseWriter, err error) {
 	writeInternal(w, nil, err)
 }
 
-type createItemReq struct {
+// itemReq is the admin form for one item. content_items の編集できる列を全部
+// 受ける。ポインタの項目は「省略したら既定値」の意味で、既存の呼び出しや
+// 手書きのリクエストが壊れないようにしてある。
+type itemReq struct {
 	Name     string          `json:"name"`
 	Category string          `json:"category"`
+	Facility string          `json:"facility"`
 	Price    int64           `json:"price"`
 	Effect   json.RawMessage `json:"effect"`
-	// ShopListed / Usable は省略時に有効とみなす(通常の品はこれが既定)。
-	ShopListed  *bool `json:"shop_listed"`
-	Usable      *bool `json:"usable"`
-	StockMaster *int  `json:"stock_master"`
+	Enabled  bool            `json:"enabled"` // 作成時は無視(常に有効で作る)
+
+	// 省略時に有効とみなす(通常の品はこれが既定)。
+	ShopListed *bool `json:"shop_listed"`
+	Usable     *bool `json:"usable"`
+
+	StockMaster     *int   `json:"stock_master"`
+	IsGift          bool   `json:"is_gift"`
+	Durability      *int   `json:"durability"`      // 省略時1
+	DurabilityUnit  string `json:"durability_unit"` // 省略時 "use"
+	UseIntervalMin  int    `json:"use_interval_min"`
+	FillsSatiety    bool   `json:"fills_satiety"`
+	CalorieG        int    `json:"calorie_g"`
+	MaxSets         *int   `json:"max_sets"` // 省略時5(既定の所持上限)
+	PowerMultiplier int    `json:"power_multiplier"`
+	BodyCost        int    `json:"body_cost"`
+	NouCost         int    `json:"nou_cost"`
+	EnablesCredit   bool   `json:"enables_credit"`
+	BuildSpan       int    `json:"build_span"`
+}
+
+// toInput converts the request into the service payload, filling defaults for
+// the omitted fields.
+func (r itemReq) toInput() content.ItemInput {
+	orDefault := func(p *int, def int) int {
+		if p == nil {
+			return def
+		}
+		return *p
+	}
+	return content.ItemInput{
+		Name: r.Name, Category: r.Category, Facility: r.Facility,
+		Price: r.Price, Effect: r.Effect, Enabled: r.Enabled,
+		StockMaster: r.StockMaster,
+		ShopListed:  r.ShopListed == nil || *r.ShopListed,
+		Usable:      r.Usable == nil || *r.Usable,
+		IsGift:      r.IsGift,
+		Durability:  orDefault(r.Durability, 1), DurabilityUnit: r.DurabilityUnit,
+		UseIntervalMin: r.UseIntervalMin, FillsSatiety: r.FillsSatiety,
+		CalorieG: r.CalorieG, MaxSets: orDefault(r.MaxSets, 5),
+		PowerMultiplier: r.PowerMultiplier, BodyCost: r.BodyCost, NouCost: r.NouCost,
+		EnablesCredit: r.EnablesCredit, BuildSpan: r.BuildSpan,
+	}
 }
 
 func (s *Server) createItem(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdmin(w, r) {
 		return
 	}
-	var req createItemReq
+	var req itemReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	listed := req.ShopListed == nil || *req.ShopListed
-	usable := req.Usable == nil || *req.Usable
-	it, err := s.content.CreateItem(r.Context(), req.Name, req.Category, req.Price, req.Effect, req.StockMaster, listed, usable)
+	in := req.toInput()
+	in.Enabled = true // 作成直後は常に有効(無効化は編集から)
+	it, err := s.content.CreateItem(r.Context(), in)
 	if err != nil {
 		writeContentErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, it)
-}
-
-type updateItemReq struct {
-	Name     string          `json:"name"`
-	Category string          `json:"category"`
-	Price    int64           `json:"price"`
-	Effect   json.RawMessage `json:"effect"`
-	Enabled  bool            `json:"enabled"`
-	// ShopListed / Usable は省略時に有効とみなす(通常の品はこれが既定)。
-	ShopListed  *bool `json:"shop_listed"`
-	Usable      *bool `json:"usable"`
-	StockMaster *int  `json:"stock_master"`
 }
 
 func (s *Server) updateItem(w http.ResponseWriter, r *http.Request) {
@@ -353,14 +384,12 @@ func (s *Server) updateItem(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	var req updateItemReq
+	var req itemReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	listed := req.ShopListed == nil || *req.ShopListed
-	usable := req.Usable == nil || *req.Usable
-	it, err := s.content.UpdateItem(r.Context(), id, req.Name, req.Category, req.Price, req.Effect, req.Enabled, req.StockMaster, listed, usable)
+	it, err := s.content.UpdateItem(r.Context(), id, req.toInput())
 	if err != nil {
 		writeContentErr(w, err)
 		return

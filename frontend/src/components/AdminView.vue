@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import ToggleSwitch from "./ToggleSwitch.vue";
+import ItemFields from "./ItemFields.vue";
 import { ref, reactive, computed, onMounted } from "vue";
 import {
   api,
@@ -9,6 +10,7 @@ import {
   type EffectOp,
   type Condition,
   type AdminItem,
+  type AdminItemInput,
   type AdminJob,
   type JobPayload,
   type SimResult,
@@ -65,23 +67,33 @@ const PARAM_OPTIONS = [
   "omoshirosa",
 ];
 
-const item = reactive<{
-  name: string;
-  category: string;
-  price: number;
-  effect: EffectOp[];
-  stock_master: number | null;
-  shop_listed: boolean;
-  usable: boolean;
-}>({
-  name: "",
-  category: "",
-  price: 0,
-  effect: [],
-  stock_master: null,
-  shop_listed: true,
-  usable: true,
-});
+// アイテムの初期値。content_items の既定値と揃える。
+function blankItem(): AdminItemInput {
+  return {
+    name: "",
+    category: "",
+    facility: "",
+    price: 0,
+    effect: [],
+    enabled: true,
+    stock_master: null,
+    shop_listed: true,
+    usable: true,
+    is_gift: false,
+    durability: 1,
+    durability_unit: "use",
+    use_interval_min: 0,
+    fills_satiety: false,
+    calorie_g: 0,
+    max_sets: 5,
+    power_multiplier: 0,
+    body_cost: 0,
+    nou_cost: 0,
+    enables_credit: false,
+    build_span: 0,
+  };
+}
+const item = reactive<AdminItemInput>(blankItem());
 function emptyJob(): JobPayload {
   return {
     name: "",
@@ -1296,24 +1308,10 @@ async function createItem() {
   busy.value = true;
   message.value = "";
   try {
-    await api.adminCreateItem({
-      name: item.name,
-      category: item.category,
-      price: item.price,
-      effect: item.effect,
-      stock_master: item.stock_master,
-      shop_listed: item.shop_listed,
-      usable: item.usable,
-    });
+    await api.adminCreateItem({ ...item, effect: item.effect });
     message.value = `アイテム「${item.name}」を作成しました。`;
     kind.value = "ok";
-    item.name = "";
-    item.category = "";
-    item.price = 0;
-    item.effect = [];
-    item.stock_master = null;
-    item.shop_listed = true;
-    item.usable = true;
+    Object.assign(item, blankItem());
     await refresh();
   } catch (e) {
     fail(e);
@@ -1412,16 +1410,8 @@ async function saveEdit() {
   busy.value = true;
   message.value = "";
   try {
-    await api.adminUpdateItem(editing.value.id, {
-      name: editing.value.name,
-      category: editing.value.category,
-      price: editing.value.price,
-      effect: editing.value.effect,
-      enabled: editing.value.enabled,
-      stock_master: editing.value.stock_master,
-      shop_listed: editing.value.shop_listed,
-      usable: editing.value.usable,
-    });
+    const { id: _id, ...payload } = editing.value;
+    await api.adminUpdateItem(editing.value.id, payload);
     message.value = `アイテム「${editing.value.name}」を更新しました。`;
     kind.value = "ok";
     closeEdit();
@@ -1534,33 +1524,7 @@ async function deleteEdit() {
           <div v-if="open.item" class="fold-body">
             <section class="panel">
               <h3>アイテム作成</h3>
-              <label
-                >品名<input
-                  v-model="item.name"
-                  placeholder="例: 特製栄養ドリンク"
-              /></label>
-              <label
-                >カテゴリ<input
-                  v-model="item.category"
-                  placeholder="例: ドリンク"
-              /></label>
-              <label
-                >値段<input type="number" v-model.number="item.price"
-              /></label>
-              <label
-                >標準在庫数<input
-                  type="number"
-                  v-model.number="item.stock_master"
-                  placeholder="空=無制限"
-              /></label>
-              <ToggleSwitch
-                v-model="item.shop_listed"
-                label="店に並べる（オフで販売しない）"
-              />
-              <ToggleSwitch
-                v-model="item.usable"
-                label="使える（オフで持つだけの品）"
-              />
+              <ItemFields :item="item" />
               <div class="ops">
                 <div class="ops-head">使用効果</div>
                 <div v-for="(op, i) in item.effect" :key="i" class="op-row">
@@ -3002,33 +2966,7 @@ async function deleteEdit() {
     <div v-if="editing" class="modal-overlay" @click.self="closeEdit">
       <div class="modal">
         <h3>アイテム編集（ID {{ editing.id }}）</h3>
-        <label>品名<input v-model="editing.name" /></label>
-        <label>カテゴリ<input v-model="editing.category" /></label>
-        <label
-          >値段<input type="number" v-model.number="editing.price"
-        /></label>
-        <label
-          >標準在庫数<input
-            type="number"
-            v-model.number="editing.stock_master"
-            placeholder="空=無制限"
-        /></label>
-        <ToggleSwitch v-model="editing.enabled" label="有効（オフで無効化）" />
-        <ToggleSwitch
-          v-model="editing.shop_listed"
-          label="店に並べる（オフで販売しない）"
-        />
-        <div class="hint">
-          オフにすると{{ FACILITY_LABEL[editing.facility] ?? "店"
-          }}の品揃えと卸問屋から外れ、買えなくなります。シリアルコードやイベントでは配れます。
-        </div>
-        <ToggleSwitch
-          v-model="editing.usable"
-          label="使える（オフで持つだけの品）"
-        />
-        <div class="hint">
-          建築許可証・乗り物・カード類のように、持っていること自体が意味を持つ品はオフにします。使っても何も起きず耐久だけ減るためです。
-        </div>
+        <ItemFields :item="editing" edit />
         <div class="ops">
           <div class="ops-head">使用効果</div>
           <div v-for="(op, i) in editing.effect" :key="i" class="op-row">

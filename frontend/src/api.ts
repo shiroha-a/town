@@ -479,7 +479,21 @@ export interface AdminItem {
   usable: boolean;
   /** 1個あたりの耐久(使用回数/日数)。 */
   durability: number;
+  /** 耐久の単位。'use'=使うたびに1減る / 'day'=日数で減る。 */
+  durability_unit: string;
+  use_interval_min: number; // 使用間隔(分。0=制限なし)
+  fills_satiety: boolean; // 食べ物として満腹度を満たすか
+  calorie_g: number; // 摂取カロリー(食べると体重+この値g)
+  max_sets: number; // 1人が持てるセット数の上限
+  power_multiplier: number; // 温泉の回復速度倍率(0=温泉ではない)
+  body_cost: number; // 使用時に減る身体パワー
+  nou_cost: number; // 使用時に減る頭脳パワー
+  enables_credit: boolean; // 持っているとクレジット払いができる
+  build_span: number; // 建築許可証(0=通常 / 2=2マスの家)
 }
+
+/** アイテムの作成・更新で送る項目(content_itemsの編集できる列)。 */
+export type AdminItemInput = Omit<AdminItem, "id">;
 export interface AdminJob {
   id: number;
   name: string;
@@ -1854,28 +1868,10 @@ export const api = {
 
   // 管理者API(ログインセッションのadminロールで認可)。
   adminListItems: () => request<AdminItem[]>("GET", "/admin/items"),
-  adminCreateItem: (item: {
-    name: string;
-    category: string;
-    price: number;
-    effect: EffectOp[];
-    stock_master: number | null;
-    shop_listed: boolean;
-    usable: boolean;
-  }) => request<AdminItem>("POST", "/admin/items", item),
-  adminUpdateItem: (
-    id: number,
-    item: {
-      name: string;
-      category: string;
-      price: number;
-      effect: EffectOp[];
-      enabled: boolean;
-      stock_master: number | null;
-      shop_listed: boolean;
-      usable: boolean;
-    },
-  ) => request<AdminItem>("PUT", `/admin/items/${id}`, item),
+  adminCreateItem: (item: AdminItemInput) =>
+    request<AdminItem>("POST", "/admin/items", item),
+  adminUpdateItem: (id: number, item: AdminItemInput) =>
+    request<AdminItem>("PUT", `/admin/items/${id}`, item),
   adminDeleteItem: (id: number) =>
     request<{ deleted: boolean }>("DELETE", `/admin/items/${id}`),
   adminListJobs: () => request<AdminJob[]>("GET", "/admin/jobs"),
