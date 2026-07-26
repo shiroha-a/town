@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ToggleSwitch from './ToggleSwitch.vue';
 import CommandIcon from './CommandIcon.vue';
 import EmojiPicker from './EmojiPicker.vue';
 import RichText from './RichText.vue';
@@ -315,7 +316,7 @@ const doSeizou = async () => {
       <div class="bbs-col">
         <div class="bbs-head">■メッセージ来訪者</div>
         <textarea v-model="openBody" rows="4" class="bbs-area"></textarea>
-        <label v-if="!view.own && !view.officer" class="chk"><input v-model="openJoin" type="checkbox" />●入会希望</label>
+        <ToggleSwitch v-if="!view.own && !view.officer" v-model="openJoin" label="入会希望" />
         <div class="btn-row">
           <button class="btn" :disabled="busy" @click="postOpen">OK</button>
           <button class="btn emoji-btn" title="絵文字を入れる" @click="emojiFor = 'open'">
@@ -340,7 +341,7 @@ const doSeizou = async () => {
       <div v-if="view.own || view.officer" class="bbs-col">
         <div class="bbs-head">■メッセージメンバー</div>
         <textarea v-model="memberBody" rows="4" class="bbs-area"></textarea>
-        <label v-if="!view.own" class="chk"><input v-model="memberLeave" type="checkbox" />●退会希望</label>
+        <ToggleSwitch v-if="!view.own" v-model="memberLeave" label="退会希望" />
         <div class="btn-row">
           <button class="btn" :disabled="busy" @click="postMember">OK</button>
           <button class="btn emoji-btn" title="絵文字を入れる" @click="emojiFor = 'member'">

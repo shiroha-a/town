@@ -12,6 +12,7 @@ import {
   type StockPrice,
 } from '../api';
 import TownMapBoard from './TownMapBoard.vue';
+import { siteTitle, siteTagline } from '../site';
 import RichText from './RichText.vue';
 
 // MiAuthログイン。自分のMisskeyインスタンスを入力すると、そのインスタンスの
@@ -166,8 +167,8 @@ async function login() {
 <template>
   <div class="entrance">
     <div class="signboard">
-      <div class="town-name">ＴＯＷＮ</div>
-      <div class="tagline">働いて、買って、暮らす街</div>
+      <div class="town-name">{{ siteTitle }}</div>
+      <div v-if="siteTagline" class="tagline">{{ siteTagline }}</div>
     </div>
 
     <div v-if="exchanging" class="exchanging" data-test="exchanging">ログインしています…</div>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { api, type Player } from './api';
+import { loadSite, siteTitle } from './site';
 import LoginView from './components/LoginView.vue';
 import TownView from './components/TownView.vue';
 import GameView from './components/GameView.vue';
@@ -39,6 +40,7 @@ const view = ref('town');
 const booting = ref(true);
 
 onMounted(async () => {
+  void loadSite();
   try {
     player.value = await api.authMe();
   } catch {
@@ -168,7 +170,7 @@ const facilityTitles: Record<string, string> = {
 
 <template>
   <template v-if="booting">
-    <h1 class="town-title">Ｔｏｗｎ</h1>
+    <h1 class="town-title">{{ siteTitle }}</h1>
     <div class="booting">読み込み中…</div>
   </template>
   <template v-else-if="!player">

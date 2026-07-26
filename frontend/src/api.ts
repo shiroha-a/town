@@ -548,6 +548,9 @@ export interface GameSettings {
   stock_adjust: number;
   move_maigo_enabled: boolean;
   /** お試しプレイ(ゲスト)を受け付けるか。 */
+  /** 画面に出すゲーム名と副題。 */
+  site_title: string;
+  site_tagline: string;
   guest_enabled: boolean;
   /** ゲストのデータを消すまでの分数。 */
   guest_lifetime_min: number;
@@ -1167,6 +1170,7 @@ export const api = {
     }),
   getPlayer: (id: number) => request<Player>('GET', `/players/${id}`),
   listPlayers: () => request<PublicSummary[]>('GET', '/players'),
+  site: () => request<{ title: string; tagline: string }>('GET', '/site'),
   emojiList: (host?: string) =>
     request<{ host: string; emojis: PickerEmoji[]; verdicts: Record<string, string> }>(
       'GET',

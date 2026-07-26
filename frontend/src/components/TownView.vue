@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import RichText from './RichText.vue';
+import { siteTitle } from '../site';
 import TownMapBoard from './TownMapBoard.vue';
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue';
 import { api, WARP_FEE, type Player, type Params, type TownFacility, type TownAsset, type Town, type HouseCell, type MoveResult, type WorkResponse } from '../api';
@@ -621,7 +622,7 @@ const paramBar = (v: number) => Math.max(3, Math.round((v / paramMax.value) * 10
 
   <!-- 街情報ヘッダ。狭幅(モバイル)でのみ最上部に表示する(town-info-top)。 -->
   <div class="whitebox town-info town-info-top">
-    <div class="midasi">「Ｔｏｗｎ」内<br />{{ currentTownName }}</div>
+    <div class="midasi">「{{ siteTitle }}」内<br />{{ currentTownName }}</div>
     <div class="num">地　価：{{ currentTownLandPrice }}万<br />経済力：--円<br />繁栄度：--</div>
   </div>
 
@@ -693,7 +694,7 @@ const paramBar = (v: number) => Math.max(3, Math.round((v / paramMax.value) * 10
         <div style="flex: 1 1 auto; min-width: 0">
           <!-- 街情報ヘッダ。デスクトップでのみ右カラム上部に表示する(town-info-side)。 -->
           <div class="whitebox town-info town-info-side">
-            <div class="midasi">「Ｔｏｗｎ」内<br />{{ currentTownName }}</div>
+            <div class="midasi">「{{ siteTitle }}」内<br />{{ currentTownName }}</div>
             <div class="num">地　価：{{ currentTownLandPrice }}万<br />経済力：--円<br />繁栄度：--</div>
           </div>
 

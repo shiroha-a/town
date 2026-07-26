@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ToggleSwitch from './ToggleSwitch.vue';
 import { ref, computed, watch, onMounted } from 'vue';
 import { api, type PickerEmoji } from '../api';
 import { rememberEmoji } from '../emoji';
@@ -129,9 +130,7 @@ onMounted(() => load());
           <option v-for="c in categories" :key="c" :value="c">{{ c || '(未分類)' }}</option>
         </select>
         <input v-model="query" class="ep-search" placeholder="名前で検索" spellcheck="false" />
-        <label class="ep-hide">
-          <input v-model="hideUnusable" type="checkbox" />使えないものを隠す
-        </label>
+        <ToggleSwitch v-model="hideUnusable" label="使えないものを隠す" class="ep-hide" />
       </div>
 
       <div v-if="message" class="ep-message">{{ message }}</div>

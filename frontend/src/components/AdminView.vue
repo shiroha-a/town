@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ToggleSwitch from './ToggleSwitch.vue';
 import { ref, reactive, computed, onMounted } from 'vue';
 import {
   api,
@@ -824,23 +825,76 @@ async function saveTowns() {
 }
 
 // サーバー設定(数値項目)の入力欄メタデータ。ラベルと簡単な補足を持つ。
-const SETTINGS_FIELDS: { key: keyof GameSettings; label: string; hint?: string }[] = [
-  { key: 'initial_money', label: '初期所持金', hint: '新規登録時に付与される金額(円)' },
-  { key: 'daily_interest_permille', label: '日次利息', hint: '貯金に対する1日あたりの利息(‰/千分率)' },
-  { key: 'energy_recovery_sec', label: '身体P回復間隔', hint: '身体パワーが1回復する秒数' },
-  { key: 'nou_recovery_sec', label: '頭脳P回復間隔', hint: '頭脳パワーが1回復する秒数' },
-  { key: 'satiety_decay_sec', label: '満腹度減少間隔', hint: '満腹度が1減少する秒数' },
-  { key: 'condition_eval_interval_min', label: '病気評価間隔', hint: '病気指数を再評価する間隔(分)' },
-  { key: 'work_interval_min', label: '仕事間隔', hint: '連続して働けるようになるまでの分数' },
-  { key: 'depart_daily_count', label: 'デパート日次件数', hint: '0で全件(日次ローテ無効)' },
-  { key: 'syokudou_daily_count', label: '食堂日次件数', hint: '0で全件(日次ローテ無効)' },
-  { key: 'hanbai_daily_count', label: '自販機日次件数', hint: '0で全件(日次ローテ無効)' },
-  { key: 'item_kind_limit', label: '所持アイテム種類上限', hint: '0で無制限(旧TOWN 25品目)' },
-  { key: 'stock_adjust', label: '店頭在庫倍率', hint: '実在庫=ceil(標準在庫÷倍率)。大きいほど品薄' },
-  { key: 'move_walk_secs', label: '徒歩の移動時間', hint: '街移動(徒歩)にかかる秒数。0以下で既定10秒' },
-  { key: 'move_bus_secs', label: 'バスの移動時間', hint: '街移動(バス)にかかる秒数。0以下で既定5秒' },
-  { key: 'day_boundary_hour', label: '日付の切り替わり', hint: '利息や日次リセットが走る時刻(時)。反映には再起動が必要' },
-  { key: 'guest_lifetime_min', label: 'お試しの寿命', hint: 'ゲストのデータを消すまでの分数(作成からの経過)' },
+// ゲーム設定は項目が多いので、意味の近いものをまとめて出す。
+// type を持たせて、数値・文字列・チェックボックスを同じ書き方で並べる。
+type SettingField = {
+  key: keyof GameSettings;
+  label: string;
+  hint?: string;
+  type?: 'number' | 'text' | 'checkbox';
+  /** チェックボックスの右に出す説明。 */
+  chk?: string;
+  maxlength?: number;
+};
+
+const SETTINGS_GROUPS: { title: string; fields: SettingField[] }[] = [
+  {
+    title: '表示',
+    fields: [
+      { key: 'site_title', label: 'ゲーム名', type: 'text', maxlength: 40, hint: '入口の看板・タブ・街の見出しに出る' },
+      { key: 'site_tagline', label: '副題', type: 'text', maxlength: 80, hint: '看板でゲーム名の下に出る(空なら非表示)' },
+    ],
+  },
+  {
+    title: '時間',
+    fields: [
+      { key: 'timezone', label: 'タイムゾーン', type: 'text', hint: '例: Asia/Tokyo。反映には再起動が必要' },
+      { key: 'day_boundary_hour', label: '日付の切り替わり', hint: '利息や日次リセットが走る時刻(時)。反映には再起動が必要' },
+      { key: 'energy_recovery_sec', label: '身体P回復間隔', hint: '身体パワーが1回復する秒数' },
+      { key: 'nou_recovery_sec', label: '頭脳P回復間隔', hint: '頭脳パワーが1回復する秒数' },
+      { key: 'satiety_decay_sec', label: '満腹度減少間隔', hint: '満腹度が1減少する秒数' },
+      { key: 'condition_eval_interval_min', label: '病気評価間隔', hint: '病気指数を再評価する間隔(分)' },
+      { key: 'work_interval_min', label: '仕事間隔', hint: '連続して働けるようになるまでの分数' },
+    ],
+  },
+  {
+    title: 'お金',
+    fields: [
+      { key: 'initial_money', label: '初期所持金', hint: '新規登録時に付与される金額(円)' },
+      { key: 'daily_interest_permille', label: '日次利息', hint: '貯金に対する1日あたりの利息(‰/千分率)' },
+    ],
+  },
+  {
+    title: '店',
+    fields: [
+      { key: 'depart_daily_count', label: 'デパート日次件数', hint: '0で全件(日次ローテ無効)' },
+      { key: 'syokudou_daily_count', label: '食堂日次件数', hint: '0で全件(日次ローテ無効)' },
+      { key: 'hanbai_daily_count', label: '自販機日次件数', hint: '0で全件(日次ローテ無効)' },
+      { key: 'item_kind_limit', label: '所持アイテム種類上限', hint: '0で無制限(旧TOWN 25品目)' },
+      { key: 'stock_adjust', label: '店頭在庫倍率', hint: '実在庫=ceil(標準在庫÷倍率)。大きいほど品薄' },
+    ],
+  },
+  {
+    title: '街の移動',
+    fields: [
+      { key: 'move_walk_secs', label: '徒歩の移動時間', hint: '街移動(徒歩)にかかる秒数。0以下で既定10秒' },
+      { key: 'move_bus_secs', label: 'バスの移動時間', hint: '街移動(バス)にかかる秒数。0以下で既定5秒' },
+      { key: 'move_maigo_enabled', label: '迷子', type: 'checkbox', chk: '徒歩移動で迷子(ダウンタウンへ)を有効化' },
+    ],
+  },
+  {
+    title: 'お試しプレイ',
+    fields: [
+      { key: 'guest_enabled', label: '受け付ける', type: 'checkbox', chk: 'アカウント無しの体験ログインを許可する' },
+      { key: 'guest_lifetime_min', label: '寿命', hint: 'ゲストのデータを消すまでの分数(作成からの経過)' },
+    ],
+  },
+  {
+    title: '開発',
+    fields: [
+      { key: 'debug_no_cooldown', label: '間隔ゼロ', type: 'checkbox', chk: '仕事/使用/食事などの間隔制限を無視する(本番ではオフ)' },
+    ],
+  },
 ];
 async function saveSettings() {
   if (!settings.value) return;
@@ -1314,7 +1368,7 @@ async function deleteEdit() {
               <label>名前<input v-model="evForm.name" placeholder="例: 落とし穴" /></label>
               <label>メッセージ<input v-model="evForm.message" class="wide" placeholder="例: 落とし穴に落ちて{money}円落としました。" /></label>
               <span class="hint">※プレースホルダー: {money}=実際の増減額 {name}=プレイヤー名 {job}=職業 {town}=今いる街</span>
-              <label class="chk"><input type="checkbox" v-model="evForm.good" /> 良いイベント（トーストの色）</label>
+              <ToggleSwitch v-model="evForm.good" label="良いイベント（トーストの色）" />
               <label>お金(最小)<input type="number" v-model.number="evForm.money_min" /></label>
               <label>お金(最大)<input type="number" v-model.number="evForm.money_max" /></label>
               <span class="hint">※増減額は最小〜最大の一様乱数。マイナスで支払い。固定額は同値に</span>
@@ -1364,7 +1418,7 @@ async function deleteEdit() {
               <label>体重増減(g)<input type="number" v-model.number="evForm.weight_g" /></label>
               <label>抽選の重み<input type="number" v-model.number="evForm.weight" min="1" max="100" /></label>
               <span class="hint">※組み込みイベントは各1。2にすると2倍出やすい</span>
-              <label class="chk"><input type="checkbox" v-model="evForm.enabled" /> 有効</label>
+              <ToggleSwitch v-model="evForm.enabled" label="有効" />
               <div class="actions">
                 <button class="btn primary" :disabled="busy || !evForm.name || !evForm.message" @click="evSave">
                   {{ evForm.id > 0 ? '更新' : '作成' }}
@@ -1521,7 +1575,7 @@ async function deleteEdit() {
                 </div>
                 <button class="btn mini" @click="addOp(serialOps)">＋効果を追加</button>
               </div>
-              <label class="chk"><input type="checkbox" v-model="serialForm.enabled" /> 有効</label>
+              <ToggleSwitch v-model="serialForm.enabled" label="有効" />
               <div class="actions">
                 <button class="btn primary" :disabled="busy" data-test="serial-save" @click="saveSerial">
                   {{ serialForm.id > 0 ? '更新' : '発行' }}
@@ -1573,30 +1627,28 @@ async function deleteEdit() {
           <div v-if="open.settings" class="fold-body">
             <section class="panel">
               <h3>ゲーム設定<span class="hint"> ※変更は即時反映(ワーカーは次tickで反映)</span></h3>
-              <div v-if="settings" class="settings-grid">
-                <label v-for="f in SETTINGS_FIELDS" :key="f.key" class="setting">
-                  <span class="setting-label">{{ f.label }}</span>
-                  <input type="number" v-model.number="settings[f.key] as number" />
-                  <span v-if="f.hint" class="setting-hint">{{ f.hint }}</span>
-                </label>
-                <label class="setting">
-                  <span class="setting-label">タイムゾーン</span>
-                  <input type="text" v-model="settings.timezone" spellcheck="false" />
-                  <span class="setting-hint">例: Asia/Tokyo。反映には再起動が必要</span>
-                </label>
-                <label class="setting chk-setting">
-                  <span class="setting-label">デバッグ: 間隔ゼロ</span>
-                  <span class="chk-line"><input type="checkbox" v-model="settings.debug_no_cooldown" /> 仕事/使用/食事などの間隔制限を無視</span>
-                </label>
-                <label class="setting chk-setting">
-                  <span class="setting-label">お試しプレイ</span>
-                  <span class="chk-line"><input type="checkbox" v-model="settings.guest_enabled" /> アカウント無しの体験ログインを受け付ける</span>
-                </label>
-                <label class="setting chk-setting">
-                  <span class="setting-label">街移動: 迷子</span>
-                  <span class="chk-line"><input type="checkbox" v-model="settings.move_maigo_enabled" /> 徒歩移動で迷子(ダウンタウンへ)を有効化</span>
-                </label>
-              </div>
+              <template v-if="settings">
+                <div v-for="grp in SETTINGS_GROUPS" :key="grp.title" class="settings-group">
+                  <div class="settings-group-head">{{ grp.title }}</div>
+                  <div class="settings-grid">
+                    <label v-for="f in grp.fields" :key="f.key" class="setting" :class="{ 'chk-setting': f.type === 'checkbox' }">
+                      <span class="setting-label">{{ f.label }}</span>
+                      <span v-if="f.type === 'checkbox'" class="chk-line">
+                        <ToggleSwitch v-model="(settings[f.key] as boolean)" :label="f.chk" />
+                      </span>
+                      <input
+                        v-else-if="f.type === 'text'"
+                        type="text"
+                        :maxlength="f.maxlength"
+                        spellcheck="false"
+                        v-model="(settings[f.key] as string)"
+                      />
+                      <input v-else type="number" v-model.number="(settings[f.key] as number)" />
+                      <span v-if="f.hint" class="setting-hint">{{ f.hint }}</span>
+                    </label>
+                  </div>
+                </div>
+              </template>
               <div class="actions">
                 <button class="btn primary" :disabled="busy || !settings" @click="saveSettings">保存</button>
                 <button class="btn" :disabled="busy" @click="refresh">再読込</button>
@@ -1626,7 +1678,7 @@ async function deleteEdit() {
                     <td>{{ i }}</td>
                     <td><input v-model="t.name" /></td>
                     <td><input type="number" v-model.number="t.land_price" min="0" /></td>
-                    <td class="chk-cell"><input type="checkbox" v-model="t.hidden" title="ワープで行けない隠し町" /></td>
+                    <td class="chk-cell"><ToggleSwitch v-model="t.hidden" /></td>
                     <td><button class="btn danger mini" :disabled="townDraft.length <= 1" @click="removeTown(i)">削除</button></td>
                   </tr>
                 </tbody>
@@ -1691,7 +1743,7 @@ async function deleteEdit() {
                 </button>
               </div>
               <label class="chk bulk-toggle">
-                <input type="checkbox" v-model="bulkPlace" />
+                <ToggleSwitch v-model="bulkPlace" />
                 一括配置モード（プリセットをクリックで選択し、セルをクリックで連続配置）
               </label>
               <div v-if="presetFormOpen" class="preset-form">
@@ -1809,7 +1861,7 @@ async function deleteEdit() {
                         <option v-for="im in IMG_PRESETS" :key="im" :value="im">{{ im }}</option>
                       </select>
                     </label>
-                    <label class="chk"><input type="checkbox" v-model="selectedFacility.ready" /> 有効（オフで準備中=クリック不可）</label>
+                    <ToggleSwitch v-model="selectedFacility.ready" label="有効（オフで準備中=クリック不可）" />
                     <div class="sel-prev">
                       位置: {{ mapRows[selectedFacility.row] }}{{ selectedFacility.col }}
                       <img :src="`/img/svg/${selectedFacility.img}.svg`" width="28" height="28" alt="" />
@@ -1943,7 +1995,7 @@ async function deleteEdit() {
         <label>カテゴリ<input v-model="editing.category" /></label>
         <label>値段<input type="number" v-model.number="editing.price" /></label>
         <label>標準在庫数<input type="number" v-model.number="editing.stock_master" placeholder="空=無制限" /></label>
-        <label class="chk"><input type="checkbox" v-model="editing.enabled" /> 有効（オフで無効化）</label>
+        <ToggleSwitch v-model="editing.enabled" label="有効（オフで無効化）" />
         <div class="ops">
           <div class="ops-head">使用効果</div>
           <div v-for="(op, i) in editing.effect" :key="i" class="op-row">
@@ -1979,7 +2031,7 @@ async function deleteEdit() {
       <div class="modal">
         <h3>職業編集（ID {{ editingJob.id }}）</h3>
         <label>職業名<input v-model="editingJob.name" /></label>
-        <label class="chk"><input type="checkbox" v-model="editingJob.enabled" /> 有効（オフで無効化）</label>
+        <ToggleSwitch v-model="editingJob.enabled" label="有効（オフで無効化）" />
         <div class="econ-grid">
           <label>給料<input type="number" v-model.number="editingJob.salary" /></label>
           <label>支払間隔<input type="number" v-model.number="editingJob.pay_interval" /></label>
@@ -2041,7 +2093,7 @@ async function deleteEdit() {
           <span class="acct-raw">{{ editingHost }} / {{ editingRemoteID }}</span>
         </div>
         <label>名前<input v-model="editingPlayer.display_name" /></label>
-        <label class="chk"><input type="checkbox" v-model="editingPlayer.is_admin" /> 管理者権限</label>
+        <ToggleSwitch v-model="editingPlayer.is_admin" label="管理者権限" />
         <div class="econ-grid">
           <label>所持金<input type="number" v-model.number="editingPlayer.money" /></label>
           <label>職業
@@ -2217,6 +2269,18 @@ async function deleteEdit() {
 }
 .econ-grid .wide2 {
   grid-column: span 2;
+}
+.settings-group {
+  margin-bottom: 10px;
+}
+.settings-group-head {
+  font-size: 12px;
+  font-weight: bold;
+  color: #663300;
+  background: #f0e6cf;
+  border-left: 3px solid #997a44;
+  padding: 3px 8px;
+  margin-bottom: 6px;
 }
 .settings-grid {
   display: grid;
