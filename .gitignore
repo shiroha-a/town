@@ -6,6 +6,10 @@ node_modules/
 test-results/
 playwright-report/
 blob-report/
+# レガシーCGIの実挙動を記録したE2E一式(.tmp/e2e)を動かすための手元用。
+# config が .tmp/ にあるので、コミットしても他の人は実行できない。
+/package.json
+/package-lock.json
 
 # SVGアセット確認用のローカルテストページ(本番には含めない)
 frontend/public/svg-preview.html
