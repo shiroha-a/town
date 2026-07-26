@@ -840,6 +840,7 @@ const SETTINGS_FIELDS: { key: keyof GameSettings; label: string; hint?: string }
   { key: 'move_walk_secs', label: '徒歩の移動時間', hint: '街移動(徒歩)にかかる秒数。0以下で既定10秒' },
   { key: 'move_bus_secs', label: 'バスの移動時間', hint: '街移動(バス)にかかる秒数。0以下で既定5秒' },
   { key: 'day_boundary_hour', label: '日付の切り替わり', hint: '利息や日次リセットが走る時刻(時)。反映には再起動が必要' },
+  { key: 'guest_lifetime_min', label: 'お試しの寿命', hint: 'ゲストのデータを消すまでの分数(作成からの経過)' },
 ];
 async function saveSettings() {
   if (!settings.value) return;
@@ -1586,6 +1587,10 @@ async function deleteEdit() {
                 <label class="setting chk-setting">
                   <span class="setting-label">デバッグ: 間隔ゼロ</span>
                   <span class="chk-line"><input type="checkbox" v-model="settings.debug_no_cooldown" /> 仕事/使用/食事などの間隔制限を無視</span>
+                </label>
+                <label class="setting chk-setting">
+                  <span class="setting-label">お試しプレイ</span>
+                  <span class="chk-line"><input type="checkbox" v-model="settings.guest_enabled" /> アカウント無しの体験ログインを受け付ける</span>
                 </label>
                 <label class="setting chk-setting">
                   <span class="setting-label">街移動: 迷子</span>

@@ -50,6 +50,10 @@ export interface Player {
   loan_daily: number;
   loan_count: number;
   current_town: number;
+  /** お試しプレイ(ゲスト)の一時アカウントか。 */
+  is_guest: boolean;
+  /** ゲストのデータが消える時刻(ISO)。本物の住民では無い。 */
+  guest_expires_at?: string;
   status: {
     energy: number;
     energy_max: number;
@@ -537,6 +541,10 @@ export interface GameSettings {
   item_kind_limit: number;
   stock_adjust: number;
   move_maigo_enabled: boolean;
+  /** お試しプレイ(ゲスト)を受け付けるか。 */
+  guest_enabled: boolean;
+  /** ゲストのデータを消すまでの分数。 */
+  guest_lifetime_min: number;
   move_walk_secs: number;
   move_bus_secs: number;
   towns: TownConfig[]; // 街の一覧(round-trip用。編集は専用エディタ)
@@ -1194,6 +1202,7 @@ export const api = {
   // コールバックで受け取ったsessionを引き換えてログインする。
   authCallback: (session: string) => request<Player>('POST', '/auth/callback', { session }),
   authMe: () => request<Player>('GET', '/auth/me'),
+  authGuest: () => request<Player>('POST', '/auth/guest'),
   authLogout: () => request<{ ok: boolean }>('POST', '/auth/logout'),
   bingo: (id: number) => request<BingoState>('GET', `/players/${id}/bingo`),
   bingoTakeCard: (id: number) =>

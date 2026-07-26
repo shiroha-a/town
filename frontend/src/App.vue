@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { api, type Player } from './api';
 import LoginView from './components/LoginView.vue';
 import TownView from './components/TownView.vue';
@@ -78,6 +78,16 @@ async function onLogout() {
   view.value = 'town';
   loggedOut.value = true;
 }
+// お試しプレイ(ゲスト)の残り時間。1分ごとに更新し、切れたらログイン画面へ戻す。
+const now = ref(Date.now());
+let guestTimer: number | undefined;
+const guestRemainMin = computed(() => {
+  const at = player.value?.guest_expires_at;
+  if (!player.value?.is_guest || !at) return null;
+  const left = new Date(at).getTime() - now.value;
+  return left > 0 ? Math.ceil(left / 60000) : 0;
+});
+
 // 家訪問(view='house')で開く家のID。街の家クリックからnavigate経由で渡される。
 const houseId = ref<number | null>(null);
 // 建設会社(view='kentiku')の初期建築ターゲット。街マップの空き地クリックから渡される。
@@ -109,8 +119,16 @@ onMounted(() => {
     }
   }, 10000);
 });
+onMounted(() => {
+  guestTimer = window.setInterval(() => {
+    now.value = Date.now();
+    // 期限切れのゲストはサーバー側で消えるため、画面も入口へ戻す。
+    if (guestRemainMin.value === 0) player.value = null;
+  }, 30000);
+});
 onUnmounted(() => {
   if (pollTimer !== undefined) window.clearInterval(pollTimer);
+  if (guestTimer !== undefined) window.clearInterval(guestTimer);
 });
 
 // 施設タイトル(準備中ビュー用)
@@ -140,6 +158,10 @@ const facilityTitles: Record<string, string> = {
     <LoginView :logged-out="loggedOut" :logged-out-host="loggedOutHost" @login="onLogin" />
   </template>
   <template v-else>
+    <div v-if="player.is_guest" class="guest-bar">
+      お試しプレイ中<span v-if="guestRemainMin !== null">（残り約{{ guestRemainMin }}分）</span>
+      — データは保存されません。家の建築・銀行・あいさつ・メールは使えません。
+    </div>
     <TownView v-if="view === 'town'" :player="player" @navigate="navigate" @reload="reload" @logout="onLogout" />
     <GameView v-else-if="view === 'casino'" :player="player" @update="onUpdate" @back="back" />
     <DepartView v-else-if="view === 'depart'" :player="player" @update="onUpdate" @back="back" />
@@ -200,6 +222,16 @@ const facilityTitles: Record<string, string> = {
 </template>
 
 <style scoped>
+.guest-bar {
+  background: #fff3d4;
+  border: 1px solid #e0c98a;
+  color: #7a5f18;
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 5px 10px;
+  margin-bottom: 6px;
+  text-align: center;
+}
 .booting {
   text-align: center;
   color: #666;

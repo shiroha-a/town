@@ -129,6 +129,21 @@ function fmtDay(iso: string): string {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
+// お試しプレイ。Misskeyアカウントが無くても触れるようにする代わりに、
+// 使える操作は限られ、一定時間で消える。
+const guestBusy = ref(false);
+async function playAsGuest() {
+  if (guestBusy.value) return;
+  guestBusy.value = true;
+  error.value = '';
+  try {
+    emit('login', await api.authGuest());
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
+    guestBusy.value = false;
+  }
+}
+
 async function login() {
   if (!instance.value.trim()) {
     error.value = 'インスタンスを入力してください。';
@@ -227,6 +242,16 @@ async function login() {
               ※初めての方はこの操作でそのまま登録されます。<br />
               ※ゲーム内から他の住民をフォローするための許可だけをお願いしています。
             </p>
+
+            <div class="guest">
+              <button class="btn" :disabled="guestBusy" data-test="guest" @click="playAsGuest">
+                {{ guestBusy ? '準備中…' : 'アカウント無しでお試し' }}
+              </button>
+              <span class="guest-note">
+                1時間でデータが消えます。買い物や仕事は試せますが、家の建築・銀行・
+                あいさつ・メールは使えません(住民としても数えません)。
+              </span>
+            </div>
           </div>
         </div>
 
@@ -394,6 +419,21 @@ async function login() {
   color: #888;
   line-height: 1.7;
   margin: 12px 0 0;
+}
+.guest {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dotted #ccc;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.guest-note {
+  flex: 1 1 240px;
+  font-size: 11px;
+  color: #888;
+  line-height: 1.6;
 }
 .logged-out {
   background: #f4f8ee;
