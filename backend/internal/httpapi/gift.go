@@ -15,7 +15,7 @@ func (s *Server) giftShop(w http.ResponseWriter, r *http.Request) {
 	}
 	st, err := s.actions.GiftShopState(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, st)

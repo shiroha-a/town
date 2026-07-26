@@ -45,7 +45,7 @@ func (s *Server) casinoPlay(w http.ResponseWriter, r *http.Request) {
 		case errors.As(err, &condErr):
 			writeError(w, http.StatusUnprocessableEntity, condErr.Message)
 		default:
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeInternal(w, r, err)
 		}
 		return
 	}
@@ -70,7 +70,7 @@ func (s *Server) scratchState(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusUnprocessableEntity, condErr.Message)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, st)
@@ -102,7 +102,7 @@ func (s *Server) scratchOpen(w http.ResponseWriter, r *http.Request) {
 		case errors.As(err, &condErr):
 			writeError(w, http.StatusUnprocessableEntity, condErr.Message)
 		default:
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeInternal(w, r, err)
 		}
 		return
 	}
@@ -125,7 +125,7 @@ func (s *Server) bjRespond(w http.ResponseWriter, st *action.BJState, err error)
 		case errors.As(err, &condErr):
 			writeError(w, http.StatusUnprocessableEntity, condErr.Message)
 		default:
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeInternal(w, nil, err)
 		}
 		return
 	}
@@ -189,7 +189,7 @@ func (s *Server) pokerRespond(w http.ResponseWriter, st *action.PokerState, err 
 		case errors.As(err, &condErr):
 			writeError(w, http.StatusUnprocessableEntity, condErr.Message)
 		default:
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeInternal(w, nil, err)
 		}
 		return
 	}
@@ -262,7 +262,7 @@ func (s *Server) loto6Respond(w http.ResponseWriter, st *action.Loto6State, err 
 		case errors.As(err, &condErr):
 			writeError(w, http.StatusUnprocessableEntity, condErr.Message)
 		default:
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeInternal(w, nil, err)
 		}
 		return
 	}

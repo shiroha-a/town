@@ -19,12 +19,12 @@ func (s *Server) keibaRace(w http.ResponseWriter, r *http.Request) {
 	}
 	raceID, lineup, err := s.keiba.GetOrCreateRace(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	ranking, err := s.keiba.Ranking(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -63,7 +63,7 @@ func (s *Server) keibaBet(w http.ResponseWriter, r *http.Request) {
 		case errors.As(err, &condErr):
 			writeError(w, http.StatusUnprocessableEntity, condErr.Message)
 		default:
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeInternal(w, r, err)
 		}
 		return
 	}

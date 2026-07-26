@@ -18,7 +18,7 @@ func (s *Server) bingo(w http.ResponseWriter, r *http.Request) {
 	}
 	st, err := s.actions.BingoState(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, st)
@@ -73,7 +73,7 @@ func (s *Server) bingoClaim(w http.ResponseWriter, r *http.Request) {
 		case errors.As(err, &condErr):
 			writeError(w, http.StatusUnprocessableEntity, condErr.Message)
 		default:
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeInternal(w, r, err)
 		}
 		return
 	}
@@ -99,7 +99,7 @@ func (s *Server) adminStartBingo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.actions.StartBingo(r.Context(), req.MaxNumber, req.PerDay, req.Days, req.LinesToWin); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"started": true})

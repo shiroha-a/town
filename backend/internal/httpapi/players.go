@@ -186,7 +186,7 @@ func (s *Server) registerPlayer(w http.ResponseWriter, r *http.Request) {
 	}
 	p, err := s.players.Register(r.Context(), req.InstanceHost, req.RemoteUserID, req.DisplayName)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, toResp(p))
@@ -196,7 +196,7 @@ func (s *Server) registerPlayer(w http.ResponseWriter, r *http.Request) {
 func (s *Server) shopItems(w http.ResponseWriter, r *http.Request) {
 	items, err := s.content.ListShopItems(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, items)
@@ -223,7 +223,7 @@ type publicResp struct {
 func (s *Server) listPlayers(w http.ResponseWriter, r *http.Request) {
 	summaries, err := s.players.ListPublic(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	out := make([]publicSummaryResp, 0, len(summaries))
@@ -246,7 +246,7 @@ func (s *Server) playerProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	full := toResp(p)
@@ -265,7 +265,7 @@ func (s *Server) getPlayer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	// 参加者表示用の最終アクセスを刻む(クライアントのポーリングが心拍になる)。
@@ -278,7 +278,7 @@ func (s *Server) getPlayer(w http.ResponseWriter, r *http.Request) {
 func (s *Server) participants(w http.ResponseWriter, r *http.Request) {
 	list, err := s.players.Participants(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, list)

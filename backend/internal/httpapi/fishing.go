@@ -18,7 +18,7 @@ func (s *Server) fishing(w http.ResponseWriter, r *http.Request) {
 	}
 	st, err := s.actions.FishingState(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, st)
@@ -78,7 +78,7 @@ func (s *Server) fishingPick(w http.ResponseWriter, r *http.Request) {
 		case errors.As(err, &condErr):
 			writeError(w, http.StatusUnprocessableEntity, condErr.Message)
 		default:
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeInternal(w, r, err)
 		}
 		return
 	}

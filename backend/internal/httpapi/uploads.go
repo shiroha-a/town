@@ -53,7 +53,7 @@ func (s *Server) adminUploadAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.content.SaveImage(r.Context(), req.Name, strings.ToLower(req.Mime), data); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"name": req.Name})
@@ -66,7 +66,7 @@ func (s *Server) adminListAssets(w http.ResponseWriter, r *http.Request) {
 	}
 	names, err := s.content.ListImageNames(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, names)
@@ -80,7 +80,7 @@ func (s *Server) adminDeleteAsset(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	used, err := s.content.ImageInUse(r.Context(), name)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	if used {
@@ -88,7 +88,7 @@ func (s *Server) adminDeleteAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.content.DeleteImage(r.Context(), name); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -103,7 +103,7 @@ func (s *Server) serveAsset(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	w.Header().Set("Content-Type", mime)

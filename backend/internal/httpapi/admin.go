@@ -69,7 +69,7 @@ func (s *Server) adminUpdateTowns(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	} else if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	syncBuildingTowns(tcs)
@@ -95,7 +95,7 @@ func (s *Server) adminUpdateTownMap(w http.ResponseWriter, r *http.Request) {
 	// akichi施設が残っていることを検証する(UI迂回対策)。
 	houseCells, err := s.content.ListHouseCells(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	akichi := make(map[[3]int]bool)
@@ -124,7 +124,7 @@ func (s *Server) adminHouseCells(w http.ResponseWriter, r *http.Request) {
 	}
 	cells, err := s.content.ListHouseCells(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, cells)
@@ -184,7 +184,7 @@ func (s *Server) adminListEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	list, err := s.content.ListAdminEvents(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, list)
@@ -266,7 +266,7 @@ func (s *Server) adminUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.settings.Set(r.Context(), g); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	// 街の一覧が含まれていればbuildingキャッシュへ同期する。
@@ -294,7 +294,7 @@ func writeContentErr(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, v.Message)
 		return
 	}
-	writeError(w, http.StatusInternalServerError, err.Error())
+	writeInternal(w, nil, err)
 }
 
 type createItemReq struct {
@@ -375,7 +375,7 @@ func (s *Server) listItems(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := s.content.ListItems(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, items)
@@ -468,7 +468,7 @@ func (s *Server) listJobs(w http.ResponseWriter, r *http.Request) {
 	}
 	jobs, err := s.content.ListJobs(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, jobs)
@@ -495,7 +495,7 @@ func (s *Server) adminListPlayers(w http.ResponseWriter, r *http.Request) {
 	}
 	players, err := s.players.AdminList(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	out := make([]adminPlayerSummaryResp, 0, len(players))
@@ -555,12 +555,12 @@ func (s *Server) adminUpdatePlayer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	p, err := s.players.Get(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, toResp(p))
@@ -579,7 +579,7 @@ func (s *Server) adminDeletePlayer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "player not found")
 		return
 	} else if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})

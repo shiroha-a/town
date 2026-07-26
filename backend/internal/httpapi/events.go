@@ -26,7 +26,7 @@ func (s *Server) eventRoll(w http.ResponseWriter, r *http.Request) {
 	}
 	p, outcome, err := s.actions.DoEventRoll(r.Context(), id, req.IdempotencyKey)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"player": toResp(p), "event": outcome})

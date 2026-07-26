@@ -18,11 +18,11 @@ func (s *Server) mailbox(w http.ResponseWriter, r *http.Request) {
 	}
 	mb, err := s.mail.GetMailbox(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	if err := s.mail.MarkChecked(r.Context(), id); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, mb)
@@ -36,7 +36,7 @@ func (s *Server) mailUnread(w http.ResponseWriter, r *http.Request) {
 	}
 	n, err := s.mail.UnreadCount(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]int{"unread": n})
@@ -119,6 +119,6 @@ func writeMailResult(w http.ResponseWriter, err error) {
 	case errors.As(err, &verr):
 		writeError(w, http.StatusUnprocessableEntity, verr.Message)
 	default:
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, nil, err)
 	}
 }

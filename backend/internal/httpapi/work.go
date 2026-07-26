@@ -61,7 +61,7 @@ func (s *Server) work(w http.ResponseWriter, r *http.Request) {
 			// ゲームロジック上の失敗(パワー不足等)は 422 で返す
 			writeError(w, http.StatusUnprocessableEntity, condErr.Message)
 		default:
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeInternal(w, r, err)
 		}
 		return
 	}

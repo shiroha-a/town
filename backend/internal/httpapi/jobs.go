@@ -15,7 +15,7 @@ import (
 func (s *Server) jobs(w http.ResponseWriter, r *http.Request) {
 	jobs, err := s.content.ListSelectableJobs(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, jobs)
@@ -51,7 +51,7 @@ func (s *Server) changeJob(w http.ResponseWriter, r *http.Request) {
 		case errors.As(err, &condErr):
 			writeError(w, http.StatusUnprocessableEntity, condErr.Message)
 		default:
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeInternal(w, r, err)
 		}
 		return
 	}

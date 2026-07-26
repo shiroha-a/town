@@ -21,7 +21,7 @@ func newsLimit(r *http.Request, def, max int) int {
 func (s *Server) townNews(w http.ResponseWriter, r *http.Request) {
 	list, err := s.news.ListTownWide(r.Context(), newsLimit(r, 100, 200))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, list)
@@ -37,7 +37,7 @@ func (s *Server) playerNews(w http.ResponseWriter, r *http.Request) {
 	}
 	list, err := s.news.ListByActor(r.Context(), id, newsLimit(r, 50, 200))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, list)
@@ -67,7 +67,7 @@ func (s *Server) townRanking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, res)

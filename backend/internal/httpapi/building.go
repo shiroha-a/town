@@ -21,7 +21,7 @@ func (s *Server) building(w http.ResponseWriter, r *http.Request) {
 	}
 	st, err := s.content.Building(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, st)
@@ -34,7 +34,7 @@ func (s *Server) building(w http.ResponseWriter, r *http.Request) {
 func (s *Server) publicHouses(w http.ResponseWriter, r *http.Request) {
 	list, err := s.content.ListHouses(r.Context(), 0)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, list)
@@ -48,7 +48,7 @@ func (s *Server) houses(w http.ResponseWriter, r *http.Request) {
 	}
 	list, err := s.content.ListHouses(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, list)
@@ -313,7 +313,7 @@ func (s *Server) houseShop(w http.ResponseWriter, r *http.Request) {
 	}
 	view, err := s.content.HouseShop(r.Context(), id, houseID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, view)
@@ -386,7 +386,7 @@ func (s *Server) yamiShop(w http.ResponseWriter, r *http.Request) {
 	}
 	view, err := s.content.Yami(r.Context(), id, houseID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, view)
@@ -401,7 +401,7 @@ func (s *Server) yamiInventory(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := s.content.YamiInventory(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, items)
@@ -483,7 +483,7 @@ func (s *Server) companyView(w http.ResponseWriter, r *http.Request) {
 	}
 	view, err := s.content.Company(r.Context(), id, houseID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, view)
@@ -703,7 +703,7 @@ func (s *Server) houseBbs(w http.ResponseWriter, r *http.Request) {
 	}
 	posts, err := s.content.HouseBbs(r.Context(), houseID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, posts)
@@ -792,7 +792,7 @@ func (s *Server) houseShopStock(w http.ResponseWriter, r *http.Request) {
 	}
 	view, err := s.content.ShopStock(r.Context(), id, houseID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, view)

@@ -45,7 +45,7 @@ func (s *Server) redeemSerial(w http.ResponseWriter, r *http.Request) {
 		case errors.As(err, &condErr):
 			writeError(w, http.StatusUnprocessableEntity, condErr.Message)
 		default:
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeInternal(w, r, err)
 		}
 		return
 	}
@@ -61,7 +61,7 @@ func (s *Server) adminListSerials(w http.ResponseWriter, r *http.Request) {
 	}
 	list, err := s.serial.List(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, list)
@@ -181,7 +181,7 @@ func (s *Server) adminDeleteSerial(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	} else if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
@@ -199,7 +199,7 @@ func (s *Server) adminSerialUses(w http.ResponseWriter, r *http.Request) {
 	}
 	uses, err := s.serial.Uses(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, uses)

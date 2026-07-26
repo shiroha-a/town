@@ -57,7 +57,7 @@ func (s *Server) moveTown(w http.ResponseWriter, r *http.Request) {
 		case errors.As(err, &condErr):
 			writeError(w, http.StatusUnprocessableEntity, condErr.Message)
 		default:
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeInternal(w, r, err)
 		}
 		return
 	}
@@ -106,7 +106,7 @@ func (s *Server) warp(w http.ResponseWriter, r *http.Request) {
 func (s *Server) facilityMenu(w http.ResponseWriter, r *http.Request) {
 	menu, err := s.content.ListFacilityMenu(r.Context(), r.PathValue("facility"))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, menu)
@@ -199,7 +199,7 @@ func writeFacilityResult(w http.ResponseWriter, p *player.Player, err error) {
 		case errors.As(err, &condErr):
 			writeError(w, http.StatusUnprocessableEntity, condErr.Message)
 		default:
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeInternal(w, nil, err)
 		}
 		return
 	}

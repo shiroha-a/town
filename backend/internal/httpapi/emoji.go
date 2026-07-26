@@ -37,7 +37,7 @@ func (s *Server) emojiList(w http.ResponseWriter, r *http.Request) {
 	// 既に判定済みのものはピッカー側で印を付けられるよう一緒に返す。
 	verdicts, err := s.emojis.Verdicts(r.Context(), host)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -87,7 +87,7 @@ func (s *Server) emojiResolve(w http.ResponseWriter, r *http.Request) {
 func (s *Server) emojiUsed(w http.ResponseWriter, r *http.Request) {
 	items, err := s.emojis.Used(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"emojis": items})

@@ -20,7 +20,7 @@ func (s *Server) greetings(w http.ResponseWriter, r *http.Request) {
 	}
 	list, err := s.greeting.List(r.Context(), limit)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, list)
@@ -63,7 +63,7 @@ func (s *Server) postGreeting(w http.ResponseWriter, r *http.Request) {
 		case errors.As(err, &condErr):
 			writeError(w, http.StatusUnprocessableEntity, condErr.Message)
 		default:
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeInternal(w, r, err)
 		}
 		return
 	}
@@ -83,7 +83,7 @@ func (s *Server) deleteGreeting(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.greeting.Delete(r.Context(), gid); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	s.greetHub.notify()

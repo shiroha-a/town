@@ -39,7 +39,7 @@ func writeActionResult(w http.ResponseWriter, p *player.Player, err error) {
 		case errors.As(err, &condErr):
 			writeError(w, http.StatusUnprocessableEntity, condErr.Message)
 		default:
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeInternal(w, nil, err)
 		}
 		return
 	}
@@ -80,7 +80,7 @@ func (s *Server) bankStatement(w http.ResponseWriter, r *http.Request) {
 		entries, err = s.actions.BankStatement(r.Context(), id)
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, entries)
@@ -145,7 +145,7 @@ func (s *Server) loanQuote(w http.ResponseWriter, r *http.Request) {
 	}
 	q, err := s.actions.LoanQuote(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, q)

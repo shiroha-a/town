@@ -17,12 +17,12 @@ import (
 func (s *Server) stocks(w http.ResponseWriter, r *http.Request) {
 	prices, err := s.stock.Prices(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	log, err := s.stock.EventLog(r.Context(), 30)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"prices": prices, "event_log": log})
@@ -37,12 +37,12 @@ func (s *Server) playerStocks(w http.ResponseWriter, r *http.Request) {
 	}
 	holdings, err := s.stock.Holdings(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	history, err := s.stock.History(r.Context(), id, stock.TradeLogKeep)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"holdings": holdings, "history": history})

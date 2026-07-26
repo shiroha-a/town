@@ -49,7 +49,7 @@ func writeItemActionResult(w http.ResponseWriter, p *player.Player, err error) {
 		case errors.As(err, &condErr):
 			writeError(w, http.StatusUnprocessableEntity, condErr.Message)
 		default:
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeInternal(w, nil, err)
 		}
 		return
 	}

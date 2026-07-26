@@ -13,7 +13,7 @@ import (
 func (s *Server) cleagueRanking(w http.ResponseWriter, r *http.Request) {
 	rank, err := s.cleague.Ranking(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, rank)
@@ -27,7 +27,7 @@ func (s *Server) getCharacter(w http.ResponseWriter, r *http.Request) {
 	}
 	c, err := s.cleague.GetCharacter(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, c)
@@ -93,7 +93,7 @@ func (s *Server) battle(w http.ResponseWriter, r *http.Request) {
 		case errors.As(err, &condErr):
 			writeError(w, http.StatusUnprocessableEntity, condErr.Message)
 		default:
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeInternal(w, r, err)
 		}
 		return
 	}
