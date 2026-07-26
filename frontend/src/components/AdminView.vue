@@ -762,6 +762,12 @@ function editSerial(c: import("../api").SerialCode) {
     serialOps.value = [];
   }
 }
+// 景品アイテムを選んだら、耐久を1個ぶん(その品の耐久)で埋める。0のままだと
+// 引き換えは成功するのに何も配られないため(サーバー側でも0は1個ぶんに補う)。
+function onSerialRewardChange() {
+  const it = items.value.find((x) => x.id === serialForm.reward_item_id);
+  serialForm.reward_item_uses = it ? it.durability : 0;
+}
 function resetSerial() {
   Object.assign(serialForm, blankSerial());
   serialOps.value = [];
@@ -2271,7 +2277,7 @@ async function deleteEdit() {
               <span class="hint">※空なら期間の制限なし</span>
               <label
                 >景品アイテム
-                <select v-model="serialForm.reward_item_id">
+                <select v-model="serialForm.reward_item_id" @change="onSerialRewardChange">
                   <option :value="null">なし</option>
                   <option
                     v-for="it in holdableItems"
@@ -2283,11 +2289,14 @@ async function deleteEdit() {
                 </select>
               </label>
               <label
-                >景品の個数(耐久)<input
+                >景品の耐久<input
                   type="number"
                   v-model.number="serialForm.reward_item_uses"
                   min="0"
               /></label>
+              <span class="hint">
+                ※持ち物の残り回数(日数)として渡す量。1個ぶん＝その品の耐久で、選ぶと自動で入ります。
+              </span>
               <div class="ops">
                 <div class="ops-head">ステータス等の効果</div>
                 <div v-for="(op, i) in serialOps" :key="i" class="op-row">

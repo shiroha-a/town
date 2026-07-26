@@ -48,6 +48,9 @@ type Item struct {
 	// Usable は「使う」ができるか。建築許可証・乗り物・カード類のように持って
 	// いること自体が意味を持つ品は false(使っても耐久が減るだけになるため)。
 	Usable bool `json:"usable"`
+	// Durability は1個あたりの耐久(使用回数/日数)。シリアルコードの景品で
+	// 「1個ぶん」の既定値として使う。
+	Durability int `json:"durability"`
 }
 
 // Job is a content job definition (含む給与体系, design 17.5)。
@@ -231,7 +234,7 @@ func (s *Service) DeleteItem(ctx context.Context, id int64) error {
 func (s *Service) ListItems(ctx context.Context) ([]Item, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, name, COALESCE(category, ''), price, effect, enabled, stock_master,
-		        COALESCE(facility, ''), is_gift, shop_listed, usable
+		        COALESCE(facility, ''), is_gift, shop_listed, usable, GREATEST(durability, 1)
 		 FROM content_items ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("list items: %w", err)
@@ -241,7 +244,7 @@ func (s *Service) ListItems(ctx context.Context) ([]Item, error) {
 	for rows.Next() {
 		var it Item
 		if err := rows.Scan(&it.ID, &it.Name, &it.Category, &it.Price, &it.Effect, &it.Enabled,
-			&it.StockMaster, &it.Facility, &it.IsGift, &it.ShopListed, &it.Usable); err != nil {
+			&it.StockMaster, &it.Facility, &it.IsGift, &it.ShopListed, &it.Usable, &it.Durability); err != nil {
 			return nil, fmt.Errorf("scan item: %w", err)
 		}
 		items = append(items, it)

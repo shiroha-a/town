@@ -5070,3 +5070,73 @@ func TestItemUsableFlag(t *testing.T) {
 		t.Errorf("効果のある品が使えない: status=%d", c)
 	}
 }
+
+// TestSerialRewardItem covers シリアルコードの景品配布: 耐久を書かずに景品
+// アイテムだけ選んでも1個ぶんが配られる(0のままだと引き換えは成功するのに
+// 何も渡らず、配布されていないように見えた)。
+func TestSerialRewardItem(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	admin := register(t, srv.URL, "misskey.example", "admin0") // 1人目=admin
+	alice := register(t, srv.URL, "misskey.example", "alice")
+
+	var permitID int64
+	var durability int
+	if err := pool.QueryRow(ctx,
+		`SELECT id, GREATEST(durability, 1) FROM content_items WHERE name = '建築許可証'`).
+		Scan(&permitID, &durability); err != nil {
+		t.Fatalf("permit lookup: %v", err)
+	}
+
+	// 管理画面の既定値どおり、耐久を0のまま発行する。
+	code, body := adminPost(t, srv.URL, "/api/v1/admin/serials", admin.ID, map[string]any{
+		"code": "PERMIT2X1", "message": "どうぞ", "effect": "[]",
+		"reward_item_id": permitID, "reward_item_uses": 0,
+		"max_uses": 0, "enabled": true,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("create serial: status=%d body=%s", code, body)
+	}
+	// 保存時に1個ぶん(その品の耐久)で補われる。
+	var savedUses int
+	if err := pool.QueryRow(ctx,
+		`SELECT reward_item_uses FROM serial_codes WHERE code = 'PERMIT2X1'`).Scan(&savedUses); err != nil {
+		t.Fatalf("read saved uses: %v", err)
+	}
+	if savedUses != durability {
+		t.Errorf("景品の耐久が補われていない: %d, want %d", savedUses, durability)
+	}
+
+	// 引き換えると実際に持ち物へ入る。
+	resp, err := http.Post(srv.URL+"/api/v1/players/"+strconv.FormatInt(alice.ID, 10)+"/serial/redeem",
+		"application/json", bytes.NewReader([]byte(`{"code":"PERMIT2X1","idempotency_key":"sr1"}`)))
+	if err != nil {
+		t.Fatalf("redeem: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("redeem status = %d", resp.StatusCode)
+	}
+	var got struct {
+		Result struct {
+			ItemName string `json:"item_name"`
+			ItemUses int    `json:"item_uses"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Result.ItemName != "建築許可証" || got.Result.ItemUses != durability {
+		t.Errorf("引き換え結果 = %q×%d, want 建築許可証×%d",
+			got.Result.ItemName, got.Result.ItemUses, durability)
+	}
+	var qty int
+	if err := pool.QueryRow(ctx,
+		`SELECT quantity FROM player_items WHERE player_id = $1 AND item_id = $2`,
+		alice.ID, permitID).Scan(&qty); err != nil {
+		t.Fatalf("read inventory: %v", err)
+	}
+	if qty != 1 {
+		t.Errorf("配られた個数 = %d, want 1", qty)
+	}
+}

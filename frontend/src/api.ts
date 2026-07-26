@@ -477,6 +477,8 @@ export interface AdminItem {
   shop_listed: boolean;
   /** 「使う」ができるか。持っていること自体が意味を持つ品は false。 */
   usable: boolean;
+  /** 1個あたりの耐久(使用回数/日数)。 */
+  durability: number;
 }
 export interface AdminJob {
   id: number;

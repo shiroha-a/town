@@ -152,6 +152,24 @@ func (s *Service) Uses(ctx context.Context, codeID int64) ([]Use, error) {
 	return out, rows.Err()
 }
 
+// fillRewardUses defaults the reward durability to one unit of the item.
+// 景品アイテムを選んでも耐久が0のままだと、引き換えは成功するのに何も配られない
+// (付与は remaining_uses を足す形なので0では持ち物が増えない)。管理画面の入力を
+// 0のまま保存できてしまうため、ここで1個ぶんに補う。
+func (s *Service) fillRewardUses(ctx context.Context, c *Code) error {
+	if c.RewardItemID == nil || c.RewardItemUses > 0 {
+		return nil
+	}
+	var durability int
+	if err := s.pool.QueryRow(ctx,
+		`SELECT GREATEST(durability, 1) FROM content_items WHERE id = $1`, *c.RewardItemID).
+		Scan(&durability); err != nil {
+		return fmt.Errorf("load reward item durability: %w", err)
+	}
+	c.RewardItemUses = durability
+	return nil
+}
+
 // Create issues a code. An empty Code field generates a random one.
 func (s *Service) Create(ctx context.Context, c Code) (*Code, error) {
 	code := Normalize(c.Code)
@@ -161,6 +179,9 @@ func (s *Service) Create(ctx context.Context, c Code) (*Code, error) {
 	effect := c.EffectRaw
 	if strings.TrimSpace(effect) == "" {
 		effect = "[]"
+	}
+	if err := s.fillRewardUses(ctx, &c); err != nil {
+		return nil, err
 	}
 	var id int64
 	err := s.pool.QueryRow(ctx,
@@ -184,6 +205,9 @@ func (s *Service) Update(ctx context.Context, c Code) (*Code, error) {
 	effect := c.EffectRaw
 	if strings.TrimSpace(effect) == "" {
 		effect = "[]"
+	}
+	if err := s.fillRewardUses(ctx, &c); err != nil {
+		return nil, err
 	}
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE serial_codes SET code = $2, label = $3, message = $4, effect = $5,
