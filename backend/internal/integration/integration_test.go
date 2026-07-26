@@ -120,11 +120,14 @@ func setup(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 		t.Fatalf("connect: %v", err)
 	}
 	// 各テスト前にワールド状態をまっさらにする(content_jobsのシードは残す)。
+	// serial_codesはテストが発行する一時的なものなので消す(残すとコードの
+	// UNIQUE制約で2回目の実行が落ちる)。
 	// shop_daily_stockはgame_date別に在庫を持つため、テスト間で在庫が持ち越されて
 	// 枯渇しないようリセット対象に含める。
 	if _, err := pool.Exec(ctx,
 		`TRUNCATE players, player_roles, player_status, status_history,
-		 ledger_entry, ledger_tx, action_log, worker_jobs, shop_daily_stock RESTART IDENTITY CASCADE`); err != nil {
+		 ledger_entry, ledger_tx, action_log, worker_jobs, shop_daily_stock,
+		 serial_codes RESTART IDENTITY CASCADE`); err != nil {
 		pool.Close()
 		t.Fatalf("truncate: %v", err)
 	}
@@ -142,7 +145,7 @@ func setup(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 	svc := player.New(pool, led, rng.New(1), st)
 	actions := action.New(pool, led, svc, rng.New(2), time.UTC, 5, st)
 	contentSvc := content.New(pool, time.UTC, 5, st)
-	tmap, err := townmap.NewStore(ctx, pool, townmap.Default())
+	tmap, err := townmap.NewStore(ctx, pool, townmap.Default(), townmap.DefaultAssets())
 	if err != nil {
 		pool.Close()
 		t.Fatalf("townmap: %v", err)

@@ -79,7 +79,7 @@ func Run(ctx context.Context, mode string, cfg *config.Config) error {
 	syncTowns(st.Get().Towns)
 
 	// 実行時に編集可能な街マップ(初回は既定の施設配置をシード)。webのみ使用。
-	tmap, err := townmap.NewStore(ctx, pool, townmap.Default())
+	tmap, err := townmap.NewStore(ctx, pool, townmap.Default(), townmap.DefaultAssets())
 	if err != nil {
 		return fmt.Errorf("load town map: %w", err)
 	}
