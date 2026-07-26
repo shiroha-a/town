@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+# 同じブランチへ続けてpushしたら、古い実行は打ち切る。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: バックエンド (Go)
+    runs-on: ubuntu-latest
+
+    # 統合テストは実物のPostgreSQLを使う(migrationもテスト内で流す)。
+    # イメージは deploy/compose.yaml と揃える。Redisはテストでは使わない。
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: town
+          POSTGRES_PASSWORD: town
+          POSTGRES_DB: town_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U town"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # バージョンは go.mod の go ディレクティブに従う(1か所で管理する)。
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: 整形の確認
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt がかかっていないファイル:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: テスト
+        env:
+          TOWN_TEST_DATABASE_URL: postgres://town:town@localhost:5432/town_test?sslmode=disable
+        run: go test ./...
+
+  frontend:
+    name: フロントエンド (Vue)
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # backend/Dockerfile のビルドステージと揃える。
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # --include=dev は保険。NODE_ENV=production の環境だと npm が
+      # devDependencies を飛ばし、vue-tsc が入らずビルドが落ちる。
+      - name: 依存の取得
+        run: npm ci --include=dev
+
+      # build は vue-tsc --noEmit を含むので、型チェックとビルドを兼ねる。
+      - name: 型チェックとビルド
+        run: npm run build
