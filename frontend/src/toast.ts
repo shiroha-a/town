@@ -1,5 +1,6 @@
 import { ref, onUnmounted } from 'vue';
 import { PARAM_ORDER, PARAM_FULL } from './params';
+import { projectedPower } from './power';
 import type { Player } from './api';
 
 // 画面上部トースト(iOS通知バナー風)の1件分のデータ。variantで色/アイコンの見た目を切り替える。
@@ -33,15 +34,46 @@ export function useToast() {
 
 const yen = (n: number) => n.toLocaleString('ja-JP');
 
+// パワーは時間で自然回復するため、行動前のスナップショットとそのまま比べると
+// 画面を開いていた時間ぶんの回復まで「効果」として出てしまう(特典コードのように
+// 何も起こさない行動でも「身体パワー +34」と出る)。行動時点まで先読みした値
+// (=画面のバーに見えていた値)と比べて、行動そのものの増減だけを出す。
+// 現在時刻はレスポンスのserver_nowを使う(クライアント時計のずれを持ち込まない)。
+function powerBefore(before: Player, after: Player): { energy: number; nou: number } {
+  const nowMs = Date.parse(after.server_now) || Date.now();
+  const s = before.status;
+  return {
+    energy: projectedPower(
+      {
+        value: s.energy,
+        max: s.energy_max,
+        nextAt: s.energy_next_at,
+        recoveryMs: s.energy_recovery_ms,
+      },
+      nowMs,
+    ),
+    nou: projectedPower(
+      {
+        value: s.nou_energy,
+        max: s.nou_energy_max,
+        nextAt: s.nou_energy_next_at,
+        recoveryMs: s.nou_recovery_ms,
+      },
+      nowMs,
+    ),
+  };
+}
+
 // 使用前後のプレイヤー状態の差分を、トースト行リストに整形する。
 // アイテム使用・食事・トレーニング・勉強など効果系アクションで共有する。
 export function buildEffectLines(before: Player, after: Player): string[] {
   const lines: string[] = [];
   const moneyDiff = after.money - before.money;
   if (moneyDiff !== 0) lines.push(`お金 ${moneyDiff > 0 ? '+' : ''}${yen(moneyDiff)}円`);
-  const eDiff = after.status.energy - before.status.energy;
+  const power = powerBefore(before, after);
+  const eDiff = after.status.energy - power.energy;
   if (eDiff !== 0) lines.push(`身体パワー ${eDiff > 0 ? '+' : ''}${eDiff}`);
-  const nDiff = after.status.nou_energy - before.status.nou_energy;
+  const nDiff = after.status.nou_energy - power.nou;
   if (nDiff !== 0) lines.push(`頭脳パワー ${nDiff > 0 ? '+' : ''}${nDiff}`);
   const sDiff = after.status.satiety - before.status.satiety;
   if (sDiff !== 0) lines.push(`満腹度 ${sDiff > 0 ? '+' : ''}${sDiff}`);
