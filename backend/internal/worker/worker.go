@@ -114,6 +114,13 @@ func (w *Worker) tick(ctx context.Context) {
 	} else if moved {
 		w.logger.Info("stock prices moved")
 	}
+	// お試しプレイ(ゲスト)の期限切れを掃除する。寿命が1時間なので日次では
+	// 遅すぎるため毎tickで見る(部分索引が効くので空振りは安い)。
+	if n, err := PurgeGuests(ctx, w.pool, cfg.GuestLifetimeMin); err != nil {
+		w.logger.Error("purge guests", "err", err)
+	} else if n > 0 {
+		w.logger.Info("guests purged", "players", n)
+	}
 	w.runDailyIfNeeded(ctx, time.Now())
 }
 

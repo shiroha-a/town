@@ -87,6 +87,8 @@ type playerResp struct {
 	LoanDaily     int64      `json:"loan_daily"`
 	LoanCount     int        `json:"loan_count"`
 	CurrentTown   int        `json:"current_town"`
+	IsGuest       bool       `json:"is_guest"`
+	GuestExpires  *time.Time `json:"guest_expires_at,omitempty"`
 	Status        statusResp `json:"status"`
 	Params        paramsResp `json:"params"`
 	Items         []itemResp `json:"items"`
@@ -138,6 +140,8 @@ func toResp(p *player.Player) playerResp {
 		LoanDaily:    p.LoanDaily,
 		LoanCount:    p.LoanCount,
 		CurrentTown:  p.CurrentTown,
+		IsGuest:      p.IsGuest,
+		GuestExpires: p.GuestExpiresAt,
 		Status: statusResp{
 			Energy:          p.Status.Energy,
 			EnergyMax:       p.Status.EnergyMax,

@@ -40,6 +40,10 @@ type Game struct {
 	MoveWalkSecs             int          `json:"move_walk_secs"`     // 徒歩の街移動にかかる秒数(0以下で既定10)
 	MoveBusSecs              int          `json:"move_bus_secs"`      // バスの街移動にかかる秒数(0以下で既定5)
 	Towns                    []TownConfig `json:"towns"`              // 街の一覧(名前・地価)。数は要素数
+	// GuestEnabled: お試しプレイ(ゲストログイン)を受け付けるか。
+	GuestEnabled bool `json:"guest_enabled"`
+	// GuestLifetimeMin: ゲストのデータを消すまでの分数。作成からの経過で数える。
+	GuestLifetimeMin int `json:"guest_lifetime_min"`
 	// InstancePolicy: 参加できるMisskeyインスタンスの方針。
 	// "blacklist"(既定)=blockリストに無ければ通す / "whitelist"=allowリストに有るものだけ通す。
 	InstancePolicy string `json:"instance_policy"`

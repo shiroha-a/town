@@ -4,6 +4,8 @@ package player
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -22,22 +24,26 @@ import (
 
 // Player is the aggregate returned to callers.
 type Player struct {
-	ID            int64
-	InstanceHost  string
-	RemoteUserID  string
-	DisplayName   string
-	Roles         []string
-	Money         int64
-	Savings       int64
-	SuperSavings  int64
-	LoanDaily     int64     // 住宅ローンの日額返済(なければ0)
-	LoanCount     int       // 住宅ローンの残り返済回数(なければ0)
-	CurrentTown   int       // 現在いる街(0=公園..4=謎の街)。街移動で変化
-	CreatedAt     time.Time // 入居日(役場の名鑑/プロフィールで在住日数を出す)
-	Status        Status
-	Params        Params
-	Items         []ItemStack
-	ItemKindLimit int // 所持できるアイテムの種類上限(0=無制限。表示用)
+	ID           int64
+	InstanceHost string
+	RemoteUserID string
+	DisplayName  string
+	Roles        []string
+	Money        int64
+	Savings      int64
+	SuperSavings int64
+	LoanDaily    int64     // 住宅ローンの日額返済(なければ0)
+	LoanCount    int       // 住宅ローンの残り返済回数(なければ0)
+	CurrentTown  int       // 現在いる街(0=公園..4=謎の街)。街移動で変化
+	CreatedAt    time.Time // 入居日(役場の名鑑/プロフィールで在住日数を出す)
+	// IsGuest はお試しプレイの一時アカウント。GuestExpiresAt はその期限
+	// (作成 + 設定の寿命)。本物の住民では nil。
+	IsGuest        bool
+	GuestExpiresAt *time.Time
+	Status         Status
+	Params         Params
+	Items          []ItemStack
+	ItemKindLimit  int // 所持できるアイテムの種類上限(0=無制限。表示用)
 }
 
 // Params holds the detailed player parameters shown on the main screen.
@@ -135,6 +141,84 @@ var ErrNotFound = errors.New("player not found")
 // (instance_host, remote_user_id) is already registered. The very first player
 // in the world is granted the admin role. New players receive the initial money
 // grant through the ledger (idempotent by ref).
+// GuestInitialMoney is what a guest starts with. 1時間で消える前提なので、
+// 本物の住民の初期金(設定値)とは別に多めに配る。
+const GuestInitialMoney int64 = 10_000_000
+
+// GuestHost is the instance_host stored for guests. 実在のホストと衝突しないよう
+// ドメインとして不正な値を使う。
+const GuestHost = "(guest)"
+
+// RegisterGuest creates a throwaway player for お試しプレイ. 住民としては数えず
+// (名鑑・ランキング・入居ニュースに出ない)、管理者にもならない。使える操作の
+// 制限は httpapi 側の認可で掛ける。
+func (s *Service) RegisterGuest(ctx context.Context, displayName string) (*Player, error) {
+	raw := make([]byte, 16)
+	if _, err := rand.Read(raw); err != nil {
+		return nil, fmt.Errorf("guest id: %w", err)
+	}
+	remoteID := hex.EncodeToString(raw)
+
+	var id int64
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx,
+			`INSERT INTO players (instance_host, remote_user_id, display_name, is_guest)
+			 VALUES ($1, $2, $3, TRUE) RETURNING id`,
+			GuestHost, remoteID, displayName).Scan(&id); err != nil {
+			return fmt.Errorf("insert guest: %w", err)
+		}
+		heightCm := 150 + s.rng.IntN(25)
+		weightG := (48 + s.rng.IntN(20)) * 1000
+		// お試しなので最初から一通り遊べる状態にする(全パラメータ100)。
+		// 育成の実感より「どの施設も試せる」ことを優先する。
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO player_status (player_id, height_cm, weight_g,
+			     kokugo, suugaku, rika, syakai, eigo, ongaku, bijutsu,
+			     looks, tairyoku, kenkou, speed, power, wanryoku, kyakuryoku, love, omoshirosa)
+			 VALUES ($1, $2, $3, 100,100,100,100,100,100,100, 100,100,100,100,100,100,100,100,100)`,
+			id, heightCm, weightG); err != nil {
+			return fmt.Errorf("insert player_status: %w", err)
+		}
+		if err := RefreshPowerMax(ctx, tx, id); err != nil {
+			return err
+		}
+		// パワーは満タンで始める(回復待ちからでは何も試せないため)。
+		if _, err := tx.Exec(ctx,
+			`UPDATE player_status SET energy = energy_max, nou_energy = nou_energy_max
+			  WHERE player_id = $1`, id); err != nil {
+			return fmt.Errorf("fill power: %w", err)
+		}
+		// ゲストは管理者にならない。入居ニュースも出さない(住民ではないため)。
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO player_roles (player_id, role) VALUES ($1, 'user')`, id); err != nil {
+			return fmt.Errorf("insert player_roles: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("register guest: %w", err)
+	}
+	// お試し用の所持金。1時間で消えるので、値段の高い買い物も試せる額にする。
+	ref := fmt.Sprintf("initial_grant:%d", id)
+	initialMoney := GuestInitialMoney
+	if err := s.ledger.Post(ctx, "initial_grant", ref, []ledger.Entry{
+		{Account: ledger.SystemAccount("initial_grant"), Delta: -initialMoney},
+		{Account: ledger.PlayerAccount(id), Delta: initialMoney},
+	}); err != nil {
+		return nil, fmt.Errorf("grant initial money: %w", err)
+	}
+	return s.Get(ctx, id)
+}
+
+// IsGuest reports whether the player is a お試しプレイ account.
+func (s *Service) IsGuest(ctx context.Context, id int64) (bool, error) {
+	var guest bool
+	if err := s.pool.QueryRow(ctx, `SELECT is_guest FROM players WHERE id = $1`, id).Scan(&guest); err != nil {
+		return false, fmt.Errorf("read guest flag: %w", err)
+	}
+	return guest, nil
+}
+
 func (s *Service) Register(ctx context.Context, instanceHost, remoteUserID, displayName string) (*Player, error) {
 	var (
 		id      int64
@@ -142,7 +226,9 @@ func (s *Service) Register(ctx context.Context, instanceHost, remoteUserID, disp
 	)
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var count int64
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM players`).Scan(&count); err != nil {
+		// ゲストは住民として数えない。ゲストが先に来ても、最初の本物の住民が
+		// 管理者になるようにする。
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM players WHERE NOT is_guest`).Scan(&count); err != nil {
 			return fmt.Errorf("count players: %w", err)
 		}
 
@@ -283,7 +369,7 @@ func (s *Service) ListPublic(ctx context.Context) ([]PublicSummary, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT p.id, p.display_name, ps.job, ps.job_level, p.created_at
 		 FROM players p JOIN player_status ps ON ps.player_id = p.id
-		 WHERE p.deleted_at IS NULL ORDER BY p.id`)
+		 WHERE p.deleted_at IS NULL AND NOT p.is_guest ORDER BY p.id`)
 	if err != nil {
 		return nil, fmt.Errorf("list players: %w", err)
 	}
@@ -312,6 +398,8 @@ type AdminPlayerSummary struct {
 	RemoteUserID string
 	// Username はプロフィールを取得済みのときだけ入る(未取得なら空)。
 	Username string
+	// IsGuest はお試しプレイの一時アカウント。
+	IsGuest bool
 }
 
 // Acct renders @user@host, or an empty string while the username is unknown.
@@ -327,7 +415,7 @@ func (s *Service) AdminList(ctx context.Context) ([]AdminPlayerSummary, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT p.id, p.display_name, ps.job, ps.job_level,
 		        COALESCE((SELECT array_agg(role ORDER BY role) FROM player_roles WHERE player_id = p.id), '{}'),
-		        p.instance_host, p.remote_user_id, COALESCE(mp.username, '')
+		        p.instance_host, p.remote_user_id, COALESCE(mp.username, ''), p.is_guest
 		 FROM players p
 		 JOIN player_status ps ON ps.player_id = p.id
 		 LEFT JOIN misskey_profiles mp ON mp.player_id = p.id
@@ -339,7 +427,7 @@ func (s *Service) AdminList(ctx context.Context) ([]AdminPlayerSummary, error) {
 	for rows.Next() {
 		var a AdminPlayerSummary
 		if err := rows.Scan(&a.ID, &a.DisplayName, &a.Job, &a.JobLevel, &a.Roles,
-			&a.InstanceHost, &a.RemoteUserID, &a.Username); err != nil {
+			&a.InstanceHost, &a.RemoteUserID, &a.Username, &a.IsGuest); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("scan admin player: %w", err)
 		}
@@ -471,14 +559,23 @@ func (s *Service) HasRole(ctx context.Context, id int64, role string) (bool, err
 func (s *Service) Get(ctx context.Context, id int64) (*Player, error) {
 	p := &Player{ID: id}
 	err := s.pool.QueryRow(ctx,
-		`SELECT instance_host, remote_user_id, display_name, current_town, created_at
+		`SELECT instance_host, remote_user_id, display_name, current_town, created_at, is_guest
 		 FROM players WHERE id = $1 AND deleted_at IS NULL`, id).
-		Scan(&p.InstanceHost, &p.RemoteUserID, &p.DisplayName, &p.CurrentTown, &p.CreatedAt)
+		Scan(&p.InstanceHost, &p.RemoteUserID, &p.DisplayName, &p.CurrentTown, &p.CreatedAt, &p.IsGuest)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get player: %w", err)
+	}
+	if p.IsGuest {
+		// 残り時間を画面に出せるよう、期限を計算して返す。
+		mins := s.settings.Get().GuestLifetimeMin
+		if mins <= 0 {
+			mins = 60
+		}
+		exp := p.CreatedAt.Add(time.Duration(mins) * time.Minute)
+		p.GuestExpiresAt = &exp
 	}
 
 	var energyRecoveredAt, nouRecoveredAt time.Time
@@ -661,7 +758,8 @@ func (s *Service) Participants(ctx context.Context) ([]Participant, error) {
 		 FROM players p
 		 JOIN (SELECT player_id, max(last_seen_at) AS seen FROM sessions
 		       WHERE expires_at > now() GROUP BY player_id) s ON s.player_id = p.id
-		 WHERE p.deleted_at IS NULL AND s.seen > now() - interval '20 minutes'
+		 WHERE p.deleted_at IS NULL AND NOT p.is_guest
+		   AND s.seen > now() - interval '20 minutes'
 		 ORDER BY s.seen ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("list participants: %w", err)

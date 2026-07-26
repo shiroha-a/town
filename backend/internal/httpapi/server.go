@@ -99,6 +99,7 @@ func NewServer(players *player.Service, actions *action.Service, contentSvc *con
 	mux.HandleFunc("POST /api/v1/auth/callback", s.authCallback)
 	mux.HandleFunc("GET /api/v1/auth/me", s.authMe)
 	mux.HandleFunc("POST /api/v1/auth/logout", s.authLogout)
+	mux.HandleFunc("POST /api/v1/auth/guest", s.authGuest)
 	mux.HandleFunc("GET /api/v1/players/{id}/bingo", s.bingo)
 	mux.HandleFunc("POST /api/v1/players/{id}/bingo/card", s.bingoTakeCard)
 	mux.HandleFunc("POST /api/v1/players/{id}/bingo/claim", s.bingoClaim)

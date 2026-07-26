@@ -132,7 +132,7 @@ WITH base AS (
   FROM players p
   JOIN player_status ps ON ps.player_id = p.id
   LEFT JOIN player_loans pl ON pl.player_id = p.id
-  WHERE p.deleted_at IS NULL
+  WHERE p.deleted_at IS NULL AND NOT p.is_guest
 ), ranked AS (
   SELECT id, display_name, job, job_level, value,
          RANK() OVER (ORDER BY value %[2]s%[3]s) AS rank,

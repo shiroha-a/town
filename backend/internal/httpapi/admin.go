@@ -486,6 +486,7 @@ type adminPlayerSummaryResp struct {
 	Acct         string `json:"acct"`
 	InstanceHost string `json:"instance_host"`
 	RemoteUserID string `json:"remote_user_id"`
+	IsGuest      bool   `json:"is_guest"`
 }
 
 func (s *Server) adminListPlayers(w http.ResponseWriter, r *http.Request) {
@@ -506,6 +507,7 @@ func (s *Server) adminListPlayers(w http.ResponseWriter, r *http.Request) {
 		out = append(out, adminPlayerSummaryResp{
 			ID: p.ID, DisplayName: p.DisplayName, Roles: roles, Money: p.Money, Job: p.Job, JobLevel: p.JobLevel,
 			Acct: p.Acct(), InstanceHost: p.InstanceHost, RemoteUserID: p.RemoteUserID,
+			IsGuest: p.IsGuest,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)

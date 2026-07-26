@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -184,6 +185,40 @@ func (s *Server) authCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	s.sessions.SetCookie(w, token)
 	writeJSON(w, http.StatusOK, toResp(p))
+}
+
+// authGuest starts a お試しプレイ: 使い捨ての住民を作ってセッションを張る。
+// Misskeyアカウントが無くても触れるようにするためのもので、作られた住民は
+// 名鑑・ランキングに出ず、一定時間で消える。使える操作は authGuard で絞る。
+func (s *Server) authGuest(w http.ResponseWriter, r *http.Request) {
+	if id := PlayerIDFrom(r.Context()); id != 0 {
+		writeError(w, http.StatusConflict, "すでにログインしています。")
+		return
+	}
+	if !s.settings.Get().GuestEnabled {
+		writeError(w, http.StatusForbidden, "お試しプレイは現在受け付けていません。")
+		return
+	}
+	p, err := s.players.RegisterGuest(r.Context(), guestName())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	token, err := s.sessions.Issue(r.Context(), p.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.sessions.SetCookie(w, token)
+	writeJSON(w, http.StatusOK, toResp(p))
+}
+
+// guestName makes a throwaway display name. 誰が誰か分かる必要はないが、
+// 画面上で区別できるよう番号を振る。
+func guestName() string {
+	var b [2]byte
+	_, _ = rand.Read(b[:])
+	return fmt.Sprintf("おためし%04d", int(b[0])<<8|int(b[1])%10000)
 }
 
 // authMe returns the logged-in player, or 401.

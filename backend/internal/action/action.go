@@ -143,7 +143,10 @@ func (s *Service) gameDate(now time.Time) time.Time {
 // consumeStock lazily creates today's shop-front stock for an item and decrements
 // it by qty. Items with stock_master = NULL (services etc.) are treated as
 // unlimited and skipped. Insufficient stock yields a ConditionError (売り切れ).
-func (s *Service) consumeStock(ctx context.Context, tx pgx.Tx, facility string, itemID int64, qty int) error {
+// お試しプレイ(ゲスト)は在庫を減らさない。ゲストはいくらでも作れるので、
+// 減らすと本物の住民の買い物を邪魔できてしまう。売り切れ判定だけは効かせる
+// (画面の表示と食い違わないようにするため)。
+func (s *Service) consumeStock(ctx context.Context, tx pgx.Tx, playerID int64, facility string, itemID int64, qty int) error {
 	var stockMaster *int
 	if err := tx.QueryRow(ctx,
 		`SELECT stock_master FROM content_items WHERE id = $1`, itemID).Scan(&stockMaster); err != nil {
@@ -164,6 +167,23 @@ func (s *Service) consumeStock(ctx context.Context, tx pgx.Tx, facility string, 
 		facility, itemID, date, *stockMaster, adjust); err != nil {
 		return fmt.Errorf("init stock: %w", err)
 	}
+	guest, err := isGuest(ctx, tx, playerID)
+	if err != nil {
+		return err
+	}
+	if guest {
+		var remaining int
+		if err := tx.QueryRow(ctx,
+			`SELECT remaining FROM shop_daily_stock
+			  WHERE facility = $1 AND item_id = $2 AND game_date = $3`,
+			facility, itemID, date).Scan(&remaining); err != nil {
+			return fmt.Errorf("read stock: %w", err)
+		}
+		if remaining < qty {
+			return &ConditionError{Message: "売り切れです。"}
+		}
+		return nil
+	}
 	tag, err := tx.Exec(ctx,
 		`UPDATE shop_daily_stock SET remaining = remaining - $4
 		 WHERE facility = $1 AND item_id = $2 AND game_date = $3 AND remaining >= $4`,
@@ -175,6 +195,15 @@ func (s *Service) consumeStock(ctx context.Context, tx pgx.Tx, facility string, 
 		return &ConditionError{Message: "売り切れです。"}
 	}
 	return nil
+}
+
+// isGuest reports whether the player is a お試しプレイ account.
+func isGuest(ctx context.Context, tx pgx.Tx, playerID int64) (bool, error) {
+	var guest bool
+	if err := tx.QueryRow(ctx, `SELECT is_guest FROM players WHERE id = $1`, playerID).Scan(&guest); err != nil {
+		return false, fmt.Errorf("read guest flag: %w", err)
+	}
+	return guest, nil
 }
 
 // runAction wraps the common per-action transaction: it claims the idempotency
@@ -1965,7 +1994,7 @@ func (s *Service) DoBuy(ctx context.Context, playerID int64, facility string, it
 		// 贈答専用商品(レガシーの効果列「ギフト」)は持ち物ではなくギフト箱へ入る。
 		// 自分では使えないので所持種類の上限にも数えない。
 		if isGift {
-			if err := s.consumeStock(ctx, tx, facility, itemID, sets); err != nil {
+			if err := s.consumeStock(ctx, tx, playerID, facility, itemID, sets); err != nil {
 				return err
 			}
 			if err := s.ledger.PostTx(ctx, tx, "buy", "", []ledger.Entry{
@@ -2004,7 +2033,7 @@ func (s *Service) DoBuy(ctx context.Context, playerID int64, facility string, it
 			}
 		}
 		// 在庫を減らす(デパートは facility=''、自販機は 'hanbai')。
-		if err := s.consumeStock(ctx, tx, facility, itemID, sets); err != nil {
+		if err := s.consumeStock(ctx, tx, playerID, facility, itemID, sets); err != nil {
 			return err
 		}
 		if err := s.ledger.PostTx(ctx, tx, "buy", "", []ledger.Entry{
@@ -2118,7 +2147,7 @@ func (s *Service) DoEat(ctx context.Context, playerID, foodID int64, idempotency
 			return &ConditionError{Message: "お金が足りません。"}
 		}
 		// 食堂メニューの在庫を1食ぶん減らす(売り切れなら食事不可)。
-		if err := s.consumeStock(ctx, tx, "syokudou", foodID, 1); err != nil {
+		if err := s.consumeStock(ctx, tx, playerID, "syokudou", foodID, 1); err != nil {
 			return err
 		}
 		if err := s.ledger.PostTx(ctx, tx, "eat", "", []ledger.Entry{
