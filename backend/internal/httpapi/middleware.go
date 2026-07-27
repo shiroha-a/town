@@ -108,9 +108,16 @@ func (s *Server) authGuard(mux *http.ServeMux) http.Handler {
 			return
 		}
 
-		playerID, err := s.sessions.Lookup(r.Context(), session.TokenFrom(r))
+		token := session.TokenFrom(r)
+		playerID, slid, err := s.sessions.Lookup(r.Context(), token)
 		if err != nil {
 			playerID = 0
+		}
+		// 有効期限が延びたらcookieも貼り直す。DBの行だけ延ばしてもブラウザは
+		// 発行時の期限で捨てるので、遊び続けても再ログインが要るままになる。
+		// Lookup側でtouchIntervalに間引かれているので毎回は出ない。
+		if slid {
+			s.sessions.SetCookie(w, token)
 		}
 		r = r.WithContext(context.WithValue(r.Context(), ctxPlayerID, playerID))
 

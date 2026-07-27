@@ -106,7 +106,7 @@ func Run(ctx context.Context, mode string, cfg *config.Config) error {
 	instanceRules := miauth.NewRules(pool)
 	// cookieのSecureはHTTPSでのみ有効にする。開発はTailscale等の素のHTTPで
 	// アクセスするため既定はオフで、TOWN_COOKIE_SECURE=1 で有効化する。
-	sessions := session.New(pool, os.Getenv("TOWN_COOKIE_SECURE") == "1")
+	sessions := session.New(pool, os.Getenv("TOWN_COOKIE_SECURE") == "1", st)
 	if key := os.Getenv("TOWN_TOKEN_KEY"); key != "" {
 		tc, err := miauth.NewTokenCipher(key)
 		if err != nil {

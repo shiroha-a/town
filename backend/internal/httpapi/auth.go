@@ -238,10 +238,14 @@ func guestName() string {
 
 // authMe returns the logged-in player, or 401.
 func (s *Server) authMe(w http.ResponseWriter, r *http.Request) {
-	id, err := s.sessions.Lookup(r.Context(), session.TokenFrom(r))
+	id, slid, err := s.sessions.Lookup(r.Context(), session.TokenFrom(r))
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "ログインしていません。")
 		return
+	}
+	if slid {
+		// 有効期限が延びたらcookieも貼り直す(ブラウザ側は自動では延びない)。
+		s.sessions.SetCookie(w, session.TokenFrom(r))
 	}
 	p, err := s.players.Get(r.Context(), id)
 	if err != nil {

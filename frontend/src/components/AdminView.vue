@@ -1119,6 +1119,16 @@ const SETTINGS_GROUPS: { title: string; fields: SettingField[] }[] = [
     ],
   },
   {
+    title: 'ログイン',
+    fields: [
+      {
+        key: 'session_ttl_days',
+        label: '有効期限',
+        hint: '最後に遊んでから何日でログインし直しになるか。遊ぶたびに延びる。短くするとMisskeyの連携アプリ一覧に使われないトークンが溜まりやすい',
+      },
+    ],
+  },
+  {
     title: 'お試しプレイ',
     fields: [
       {

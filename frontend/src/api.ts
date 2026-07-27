@@ -591,6 +591,8 @@ export interface GameSettings {
   guest_enabled: boolean;
   /** ゲストのデータを消すまでの分数。 */
   guest_lifetime_min: number;
+  /** ログインが切れるまでの日数。遊ぶたびに延びる(最後に遊んでからの日数)。 */
+  session_ttl_days: number;
   move_walk_secs: number;
   move_bus_secs: number;
   towns: TownConfig[]; // 街の一覧(round-trip用。編集は専用エディタ)

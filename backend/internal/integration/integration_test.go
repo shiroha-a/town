@@ -6,6 +6,7 @@ package integration
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -156,7 +157,7 @@ func setup(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 		pool.Close()
 		t.Fatalf("townmap set: %v", err)
 	}
-	sessions := session.New(pool, false)
+	sessions := session.New(pool, false, st)
 	// 認可ガード(自分のIDしか操作できない)を通すため、テストのHTTP呼び出しに
 	// ログインcookieを自動で付ける。テストは逐次実行なのでプロセス共有で足りる。
 	testPlayerSvc, testSessionStore, testTokens = svc, sessions, &sync.Map{}
@@ -187,9 +188,12 @@ func setup(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 // overrides whatever a prior test seeded).
 func newTestSettings(t *testing.T, ctx context.Context, pool *pgxpool.Pool, g settings.Game) *settings.Store {
 	t.Helper()
-	// テストは検証したい項目だけを書くので、必須の表示名は既定で補う。
+	// テストは検証したい項目だけを書くので、必須の項目は既定で補う。
 	if g.SiteTitle == "" {
 		g.SiteTitle = settings.Defaults().SiteTitle
+	}
+	if g.SessionTTLDays == 0 {
+		g.SessionTTLDays = settings.Defaults().SessionTTLDays
 	}
 	st, err := settings.NewStore(ctx, pool, g)
 	if err != nil {
@@ -5254,4 +5258,96 @@ func TestAdminItemFields(t *testing.T) {
 	if facility != "syokudou" {
 		t.Errorf("facility = %q, want syokudou", facility)
 	}
+}
+
+// TestSessionExpiry covers ログインの有効期限: 期限切れは弾かれ、遊べば延びる。
+// 延びたときはcookieも貼り直す(DBの行だけ延ばしてもブラウザは発行時の期限で
+// 捨てるため、遊び続けても再ログインが要るままになっていた)。
+func TestSessionExpiry(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	p := register(t, srv.URL, "misskey.example", "sessuser")
+
+	// 期限切れのセッションでは通らない。
+	expired := issueSessionWithExpiry(t, pool, p.ID, -time.Hour)
+	if code, _ := getWithSession(t, srv.URL+"/api/v1/auth/me", expired); code != http.StatusUnauthorized {
+		t.Errorf("期限切れのセッションが通った: status=%d, want 401", code)
+	}
+
+	// 生きているセッションは通り、last_seen_atが古ければ期限が延びてcookieも返る。
+	live := issueSessionWithExpiry(t, pool, p.ID, 24*time.Hour)
+	if _, err := pool.Exec(ctx,
+		`UPDATE sessions SET last_seen_at = now() - interval '10 minutes'
+		 WHERE token_hash = $1`, tokenHash(live)); err != nil {
+		t.Fatalf("age session: %v", err)
+	}
+	var before time.Time
+	if err := pool.QueryRow(ctx,
+		`SELECT expires_at FROM sessions WHERE token_hash = $1`, tokenHash(live)).Scan(&before); err != nil {
+		t.Fatalf("read expiry: %v", err)
+	}
+	code, setCookie := getWithSession(t, srv.URL+"/api/v1/auth/me", live)
+	if code != http.StatusOK {
+		t.Fatalf("生きているセッションが通らない: status=%d", code)
+	}
+	var after time.Time
+	if err := pool.QueryRow(ctx,
+		`SELECT expires_at FROM sessions WHERE token_hash = $1`, tokenHash(live)).Scan(&after); err != nil {
+		t.Fatalf("read expiry: %v", err)
+	}
+	if !after.After(before) {
+		t.Errorf("有効期限が延びていない: %v -> %v", before, after)
+	}
+	// 期限が延びたらcookieも貼り直す。
+	if !strings.Contains(setCookie, "town_session=") {
+		t.Errorf("期限を延ばしたのにcookieを返していない: %q", setCookie)
+	}
+
+	// 直後の2回目は延長が間引かれるので、Set-Cookieも出ない(毎回ヘッダを
+	// 積まないための間引き。ここが壊れると全レスポンスにcookieが乗る)。
+	code, setCookie = getWithSession(t, srv.URL+"/api/v1/auth/me", live)
+	if code != http.StatusOK {
+		t.Fatalf("2回目が通らない: status=%d", code)
+	}
+	if strings.Contains(setCookie, "town_session=") {
+		t.Errorf("延長していないのにcookieを返している: %q", setCookie)
+	}
+}
+
+// issueSessionWithExpiry inserts a session row with an explicit expiry and
+// returns the raw token. トークンのハッシュ化はsessionパッケージと同じSHA-256。
+// (pgcryptoを入れていないのでDB側のdigest()は使えない)
+func issueSessionWithExpiry(t *testing.T, pool *pgxpool.Pool, playerID int64, d time.Duration) string {
+	t.Helper()
+	token := fmt.Sprintf("tok-%d-%d", playerID, d)
+	if _, err := pool.Exec(context.Background(),
+		`INSERT INTO sessions (token_hash, player_id, expires_at)
+		 VALUES ($1, $2, now() + $3::interval)`,
+		tokenHash(token), playerID, d.String()); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+	return token
+}
+
+// tokenHash mirrors session.hash (未公開なのでテスト側で同じ計算をする)。
+func tokenHash(token string) []byte {
+	sum := sha256.Sum256([]byte(token))
+	return sum[:]
+}
+
+// getWithSession issues a GET with the session cookie and returns the status
+// and the Set-Cookie header.
+func getWithSession(t *testing.T, url, token string) (int, string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.AddCookie(&http.Cookie{Name: "town_session", Value: token})
+	resp, err := (&http.Client{}).Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode, resp.Header.Get("Set-Cookie")
 }
