@@ -103,6 +103,13 @@ export interface JobOption {
   energy_cost: number;
   nou_energy_cost: number;
   pay_interval: number;
+  /** 体格の条件。0は制限なし。 */
+  bmi_min: number;
+  bmi_max: number;
+  height_min: number;
+  /** 支給時の割増(%)と、1回働くごとの基本給の増加。 */
+  bonus_rate: number;
+  raise_rate: number;
 }
 
 export interface ShopItem {
