@@ -84,7 +84,7 @@ async function take(job: JobOption) {
       <div class="cap">
         必要パラメータ(不足は赤・達成は緑で表示)／ 身P・頭P消費(1回働くと消費するパワー)
       </div>
-      <div class="table-scroll">
+      <div class="table-scroll sticky-table">
         <table class="job-table">
           <thead>
             <tr>
@@ -190,6 +190,8 @@ async function take(job: JobOption) {
   margin-bottom: 4px;
 }
 .table-scroll {
+  --stick-line: #b0d0b0;
+  --stick-bg: #fff;
   overflow-x: auto;
 }
 .job-table {

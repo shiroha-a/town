@@ -97,7 +97,7 @@ async function buy(it: ShopItem) {
     <div v-if="message" :class="['message', kind]" data-test="message">{{ message }}</div>
 
     <div class="panel-white">
-      <div class="table-scroll">
+      <div class="table-scroll sticky-table">
         <table class="depart-table">
           <thead>
             <tr>
@@ -115,7 +115,9 @@ async function buy(it: ShopItem) {
           <template v-for="[cat, list] in grouped" :key="cat">
             <tbody>
               <tr class="cat-row">
-                <td :colspan="PARAM_COLUMNS.length + 7">●{{ cat }}</td>
+                <td :colspan="PARAM_COLUMNS.length + 7">
+                  <span class="cat-name">●{{ cat }}</span>
+                </td>
               </tr>
               <template v-for="it in list" :key="it.id">
                 <tr :data-test="`shop-${it.id}`">
@@ -160,7 +162,9 @@ async function buy(it: ShopItem) {
                 <!-- 特殊効果(体重/身長/病気)は列に収まらないので1行下にcolspanで出す
                    (レガシー depart.cgi の備考行と同じ方式)。 -->
                 <tr v-if="it.special" class="special-row" :data-test="`special-${it.id}`">
-                  <td :colspan="PARAM_COLUMNS.length + 4">【 効果 】{{ it.special }}</td>
+                  <td :colspan="PARAM_COLUMNS.length + 4">
+                    <span class="cat-name">【 効果 】{{ it.special }}</span>
+                  </td>
                 </tr>
               </template>
             </tbody>
@@ -223,6 +227,8 @@ async function buy(it: ShopItem) {
   padding: 8px;
 }
 .table-scroll {
+  --stick-line: #e0c080;
+  --stick-bg: #fffef0;
   overflow-x: auto;
 }
 .depart-table {

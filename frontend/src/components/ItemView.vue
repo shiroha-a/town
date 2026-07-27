@@ -131,7 +131,7 @@ async function use(it: ItemStack) {
 
     <div class="panel-white">
       <p v-if="player.items.length === 0" class="muted">持ち物はありません。</p>
-      <div v-else class="table-scroll">
+      <div v-else class="table-scroll sticky-table">
         <table class="item-table">
           <thead>
             <tr>
@@ -148,7 +148,9 @@ async function use(it: ItemStack) {
           <template v-for="[cat, list] in grouped" :key="cat">
             <tbody>
               <tr class="cat-row">
-                <td :colspan="PARAM_COLUMNS.length + 6">●{{ cat }}</td>
+                <td :colspan="PARAM_COLUMNS.length + 6">
+                  <span class="cat-name">●{{ cat }}</span>
+                </td>
               </tr>
               <template v-for="it in list" :key="it.item_id">
                 <tr :data-test="`item-${it.item_id}`">
@@ -203,7 +205,9 @@ async function use(it: ItemStack) {
                 <!-- 特殊効果(体重/身長/病気)は列に収まらないので、レガシー depart.cgi の
                    備考行と同じく1行下にcolspanで出す。 -->
                 <tr v-if="it.special" class="special-row" :data-test="`special-${it.item_id}`">
-                  <td :colspan="PARAM_COLUMNS.length + 3">【 効果 】{{ it.special }}</td>
+                  <td :colspan="PARAM_COLUMNS.length + 3">
+                    <span class="cat-name">【 効果 】{{ it.special }}</span>
+                  </td>
                 </tr>
               </template>
             </tbody>
@@ -266,6 +270,8 @@ async function use(it: ItemStack) {
   padding: 12px;
 }
 .table-scroll {
+  --stick-line: #e0c080;
+  --stick-bg: #fff;
   overflow-x: auto;
 }
 .item-table {

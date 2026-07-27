@@ -66,40 +66,42 @@ async function buy(it: ShopItem) {
 
     <div v-if="message" :class="['message', kind]" data-test="message">{{ message }}</div>
 
-    <div class="panel-white table-scroll">
-      <table class="menu-table">
-        <thead>
-          <tr>
-            <th class="l">品名</th>
-            <th>価格</th>
-            <th v-for="c in PARAM_COLUMNS" :key="c.key" class="p">{{ c.label }}</th>
-            <th>在庫</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="it in items" :key="it.id" :data-test="`hanbai-${it.id}`">
-            <td class="l">{{ it.name }}</td>
-            <td class="price">{{ yen(it.price) }}円</td>
-            <td
-              v-for="c in PARAM_COLUMNS"
-              :key="c.key"
-              class="p"
-              :class="{ up: (it.params[c.key] ?? 0) > 0 }"
-            >
-              {{ it.params[c.key] ?? 0 }}
-            </td>
-            <td class="stock" :class="{ soldout: it.stock === 0 }">
-              {{ it.stock < 0 ? '-' : it.stock === 0 ? '売切' : it.stock }}
-            </td>
-            <td class="buy">
-              <button class="btn" :disabled="busy || it.stock === 0" @click="buy(it)">
-                {{ it.stock === 0 ? '売切' : '買う' }}
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+    <div class="panel-white">
+      <div class="table-scroll sticky-table">
+        <table class="menu-table">
+          <thead>
+            <tr>
+              <th class="l">品名</th>
+              <th>価格</th>
+              <th v-for="c in PARAM_COLUMNS" :key="c.key" class="p">{{ c.label }}</th>
+              <th>在庫</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="it in items" :key="it.id" :data-test="`hanbai-${it.id}`">
+              <td class="l">{{ it.name }}</td>
+              <td class="price">{{ yen(it.price) }}円</td>
+              <td
+                v-for="c in PARAM_COLUMNS"
+                :key="c.key"
+                class="p"
+                :class="{ up: (it.params[c.key] ?? 0) > 0 }"
+              >
+                {{ it.params[c.key] ?? 0 }}
+              </td>
+              <td class="stock" :class="{ soldout: it.stock === 0 }">
+                {{ it.stock < 0 ? '-' : it.stock === 0 ? '売切' : it.stock }}
+              </td>
+              <td class="buy">
+                <button class="btn" :disabled="busy || it.stock === 0" @click="buy(it)">
+                  {{ it.stock === 0 ? '売切' : '買う' }}
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <div style="text-align: center; margin-top: 8px">
@@ -151,6 +153,8 @@ async function buy(it: ShopItem) {
   padding: 8px;
 }
 .table-scroll {
+  --stick-line: #a8c4e0;
+  --stick-bg: #fff;
   overflow-x: auto;
 }
 .menu-table {

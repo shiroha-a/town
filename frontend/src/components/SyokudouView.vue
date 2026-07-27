@@ -67,62 +67,64 @@ async function eat(food: ShopItem) {
 
     <div v-if="message" :class="['message', kind]" data-test="message">{{ message }}</div>
 
-    <div class="panel-white table-scroll">
-      <table class="menu-table">
-        <thead>
-          <tr>
-            <th class="l">メニュー</th>
-            <th>在庫</th>
-            <th></th>
-            <th>値段</th>
-            <th v-for="c in PARAM_COLUMNS_MAIN" :key="c.key" class="p">{{ c.label }}</th>
-            <th>ｶﾛﾘｰ</th>
-            <th v-for="c in PARAM_COLUMNS_POWER" :key="c.key" class="p">{{ c.label }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <template v-for="food in menu" :key="food.id">
-            <tr :data-test="`food-${food.id}`">
-              <!-- 効果行がある品はメニュー/在庫/食べるを2行にまたがせる(レガシー同様)。 -->
-              <td class="l" :rowspan="food.special ? 2 : 1">{{ food.name }}</td>
-              <td
-                class="stock"
-                :class="{ soldout: food.stock === 0 }"
-                :rowspan="food.special ? 2 : 1"
-              >
-                {{ food.stock < 0 ? '-' : food.stock === 0 ? '売切' : food.stock }}
-              </td>
-              <td class="eat" :rowspan="food.special ? 2 : 1">
-                <button class="btn" :disabled="busy || food.stock === 0" @click="eat(food)">
-                  {{ food.stock === 0 ? '売切' : '食べる' }}
-                </button>
-              </td>
-              <td class="price">{{ yen(food.price) }}円</td>
-              <td
-                v-for="c in PARAM_COLUMNS_MAIN"
-                :key="c.key"
-                class="p"
-                :class="{ up: (food.params[c.key] ?? 0) > 0 }"
-              >
-                {{ food.params[c.key] ?? 0 }}
-              </td>
-              <td class="cal">{{ food.calorie_g > 0 ? food.calorie_g : '-' }}</td>
-              <td
-                v-for="c in PARAM_COLUMNS_POWER"
-                :key="c.key"
-                class="p"
-                :class="{ up: (food.params[c.key] ?? 0) > 0 }"
-              >
-                {{ food.params[c.key] ?? 0 }}
-              </td>
+    <div class="panel-white">
+      <div class="table-scroll sticky-table">
+        <table class="menu-table">
+          <thead>
+            <tr>
+              <th class="l">メニュー</th>
+              <th>在庫</th>
+              <th></th>
+              <th>値段</th>
+              <th v-for="c in PARAM_COLUMNS_MAIN" :key="c.key" class="p">{{ c.label }}</th>
+              <th>ｶﾛﾘｰ</th>
+              <th v-for="c in PARAM_COLUMNS_POWER" :key="c.key" class="p">{{ c.label }}</th>
             </tr>
-            <!-- 特殊効果(体重/身長/病気)はレガシー同様に1行下へ出す。 -->
-            <tr v-if="food.special" class="special-row" :data-test="`special-${food.id}`">
-              <td :colspan="PARAM_COLUMNS.length + 2">【 効果 】{{ food.special }}</td>
-            </tr>
-          </template>
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            <template v-for="food in menu" :key="food.id">
+              <tr :data-test="`food-${food.id}`">
+                <!-- 効果行がある品はメニュー/在庫/食べるを2行にまたがせる(レガシー同様)。 -->
+                <td class="l" :rowspan="food.special ? 2 : 1">{{ food.name }}</td>
+                <td
+                  class="stock"
+                  :class="{ soldout: food.stock === 0 }"
+                  :rowspan="food.special ? 2 : 1"
+                >
+                  {{ food.stock < 0 ? '-' : food.stock === 0 ? '売切' : food.stock }}
+                </td>
+                <td class="eat" :rowspan="food.special ? 2 : 1">
+                  <button class="btn" :disabled="busy || food.stock === 0" @click="eat(food)">
+                    {{ food.stock === 0 ? '売切' : '食べる' }}
+                  </button>
+                </td>
+                <td class="price">{{ yen(food.price) }}円</td>
+                <td
+                  v-for="c in PARAM_COLUMNS_MAIN"
+                  :key="c.key"
+                  class="p"
+                  :class="{ up: (food.params[c.key] ?? 0) > 0 }"
+                >
+                  {{ food.params[c.key] ?? 0 }}
+                </td>
+                <td class="cal">{{ food.calorie_g > 0 ? food.calorie_g : '-' }}</td>
+                <td
+                  v-for="c in PARAM_COLUMNS_POWER"
+                  :key="c.key"
+                  class="p"
+                  :class="{ up: (food.params[c.key] ?? 0) > 0 }"
+                >
+                  {{ food.params[c.key] ?? 0 }}
+                </td>
+              </tr>
+              <!-- 特殊効果(体重/身長/病気)はレガシー同様に1行下へ出す。 -->
+              <tr v-if="food.special" class="special-row" :data-test="`special-${food.id}`">
+                <td :colspan="PARAM_COLUMNS.length + 2">【 効果 】{{ food.special }}</td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <div style="text-align: center; margin-top: 8px">
@@ -175,6 +177,8 @@ async function eat(food: ShopItem) {
   padding: 8px;
 }
 .table-scroll {
+  --stick-line: #e0e080;
+  --stick-bg: #fff;
   overflow-x: auto;
 }
 .menu-table {

@@ -284,6 +284,63 @@ body {
   max-width: 64px;
 }
 
+/* 一覧表(デパート・職安・持ち物など)の見出し・品名・カテゴリを、スクロールしても
+   見失わないようにする。パラメータ列が16個あって表が画面より広くなるため、狭い画面では
+   横に振ると「どの品の行か」、縦に送ると「どの列か」が分からなくなっていた。
+
+   使う側は .table-scroll に .sticky-table を足し、色だけを変数で渡す。
+   固定した要素は下の内容が透けるので、背景と端の線を必ず指定する。 */
+.sticky-table {
+  /* 見出し行の高さ。カテゴリ行をこの下に置くので決め打ちにする(実測に頼ると
+     端末のフォント差でカテゴリ行が見出しの裏に潜る)。 */
+  --stick-head-h: 22px;
+  --stick-line: #ccc; /* 固定した端に引く線 */
+  --stick-bg: #fff; /* 固定した列・行の背景 */
+  max-height: 62vh;
+  overflow-y: auto;
+  /* 端まで来ても背後のページが釣られて動かないようにする。 */
+  overscroll-behavior: contain;
+}
+/* 見出し行(縦スクロール時)。border-collapse の表は固定中に枠線が消えるので影で描く。 */
+.sticky-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  height: var(--stick-head-h);
+  box-sizing: border-box;
+  box-shadow: 0 1px 0 var(--stick-line);
+}
+/* 品名列(横スクロール時)。見出しとの交差は見出し側を前に出す。 */
+.sticky-table th.l {
+  left: 0;
+  z-index: 4;
+  box-shadow:
+    1px 0 0 var(--stick-line),
+    0 1px 0 var(--stick-line);
+}
+.sticky-table td.l {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--stick-bg);
+  box-shadow: 1px 0 0 var(--stick-line);
+}
+/* カテゴリ行。行は見出しの下に、名前はセルの中で左端に留める。
+   セル自体は colspan で表の全幅ぶんあり動く余地が無いので、中身の span を固定する。 */
+.sticky-table tr.cat-row td {
+  position: sticky;
+  top: var(--stick-head-h);
+  z-index: 2;
+  box-shadow: 0 1px 0 var(--stick-line);
+}
+/* カテゴリ名と、行の下に出る特殊効果の説明。どちらも colspan のセルに入っていて
+   横に振ると文字だけが流れていくため、中身を左端に留める。 */
+.sticky-table .cat-name {
+  display: inline-block;
+  position: sticky;
+  left: 6px;
+}
+
 .ticker {
   color: #cc0033;
   text-align: center;
