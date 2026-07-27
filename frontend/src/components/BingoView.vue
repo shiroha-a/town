@@ -73,7 +73,9 @@ async function claim(card: BingoCard) {
     <div class="bingo-header">
       <div class="lead">
         ビンゴ会場です。街のみんなで同じ番号を見ながら進めます。<br />
-        番号は毎日少しずつ公開されます。{{ state?.lines_to_win ?? 2 }}ライン揃うと上がりで、賞金は上がった順に決まります。
+        番号は毎日少しずつ公開されます。{{
+          state?.lines_to_win ?? 2
+        }}ライン揃うと上がりで、賞金は上がった順に決まります。
       </div>
       <div class="title">ビンゴ</div>
     </div>
@@ -87,10 +89,19 @@ async function claim(card: BingoCard) {
     <template v-else-if="state">
       <div class="panel-white">
         <div class="status">
-          <span><b>{{ state.day }}</b> / {{ state.days }}日目</span>
-          <span>公開済み <b>{{ state.drawn.length }}</b> / {{ state.total }}個</span>
-          <span>上がった人 <b>{{ state.finished_count }}</b>人</span>
-          <span class="prize">次の賞金 <b>{{ yen(state.next_prize) }}円</b></span>
+          <span
+            ><b>{{ state.day }}</b> / {{ state.days }}日目</span
+          >
+          <span
+            >公開済み <b>{{ state.drawn.length }}</b> / {{ state.total }}個</span
+          >
+          <span
+            >上がった人 <b>{{ state.finished_count }}</b
+            >人</span
+          >
+          <span class="prize"
+            >次の賞金 <b>{{ yen(state.next_prize) }}円</b></span
+          >
         </div>
         <div class="drawn" data-test="drawn">
           <span v-for="n in state.drawn" :key="n" class="ball">{{ n }}</span>
@@ -112,7 +123,9 @@ async function claim(card: BingoCard) {
           </button>
         </div>
 
-        <div v-if="!state.cards.length" class="note">まだカードがありません。もらってから参加してください。</div>
+        <div v-if="!state.cards.length" class="note">
+          まだカードがありません。もらってから参加してください。
+        </div>
 
         <div class="cards">
           <div v-for="c in state.cards" :key="c.id" class="card" :data-test="`card-${c.id}`">

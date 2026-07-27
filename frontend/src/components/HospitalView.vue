@@ -68,7 +68,8 @@ async function treat() {
             <th>診断</th>
             <td data-test="diagnosis">
               <template v-if="isSick">
-                <span class="sick">{{ diseaseName }}</span>にかかっています。
+                <span class="sick">{{ diseaseName }}</span
+                >にかかっています。
               </template>
               <template v-else>健康です。</template>
             </td>

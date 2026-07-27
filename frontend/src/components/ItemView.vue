@@ -86,6 +86,8 @@ const cooldowns = computed<Record<number, Cooldown>>(() => {
 async function use(it: ItemStack) {
   // クールタイム中はボタンをグレーアウトしているが、二重の安全策として弾く。
   if (cooldowns.value[it.item_id]?.active) return;
+  // 持つだけの品(建築許可証・乗り物・カード類)は使えない。
+  if (!it.usable) return;
   busy.value = true;
   const before = props.player;
   try {
@@ -117,15 +119,19 @@ async function use(it: ItemStack) {
     <div class="item-header">
       <div class="lead">
         持っているアイテムを使うことができます。<br />
-        ●身体パワー：<span class="pw">{{ player.status.energy }}/{{ player.status.energy_max }}</span><br />
-        ●頭脳パワー：<span class="pw">{{ player.status.nou_energy }}/{{ player.status.nou_energy_max }}</span>
+        ●身体パワー：<span class="pw"
+          >{{ player.status.energy }}/{{ player.status.energy_max }}</span
+        ><br />
+        ●頭脳パワー：<span class="pw"
+          >{{ player.status.nou_energy }}/{{ player.status.nou_energy_max }}</span
+        >
       </div>
       <div class="title">アイテム使用</div>
     </div>
 
     <div class="panel-white">
       <p v-if="player.items.length === 0" class="muted">持ち物はありません。</p>
-      <div v-else class="table-scroll">
+      <div v-else class="table-scroll sticky-table">
         <table class="item-table">
           <thead>
             <tr>
@@ -142,50 +148,67 @@ async function use(it: ItemStack) {
           <template v-for="[cat, list] in grouped" :key="cat">
             <tbody>
               <tr class="cat-row">
-                <td :colspan="PARAM_COLUMNS.length + 6">●{{ cat }}</td>
+                <td :colspan="PARAM_COLUMNS.length + 6">
+                  <span class="cat-name">●{{ cat }}</span>
+                </td>
               </tr>
               <template v-for="it in list" :key="it.item_id">
-              <tr :data-test="`item-${it.item_id}`">
-                <!-- 効果行がある品は、品名/使用可/使うを2行にまたがせてどの品の効果か分かるようにする
+                <tr :data-test="`item-${it.item_id}`">
+                  <!-- 効果行がある品は、品名/使用可/使うを2行にまたがせてどの品の効果か分かるようにする
                      (レガシー depart.cgi の rowspan=2 と同じ)。 -->
-                <td class="l" :rowspan="it.special ? 2 : 1">○{{ it.name }}</td>
-                <td
-                  class="cooldown"
-                  :class="{
-                    ok: !cooldowns[it.item_id].active,
-                    soon: cooldowns[it.item_id].active && cooldowns[it.item_id].soon,
-                    wait: cooldowns[it.item_id].active && !cooldowns[it.item_id].soon,
-                  }"
-                  :data-test="`cooldown-${it.item_id}`"
-                  :rowspan="it.special ? 2 : 1"
-                >
-                  {{ cooldowns[it.item_id].label }}
-                </td>
-                <td :rowspan="it.special ? 2 : 1">
-                  <button
-                    class="btn"
-                    :disabled="busy || cooldowns[it.item_id].active"
-                    :data-test="`use-${it.item_id}`"
-                    @click="use(it)"
+                  <td class="l" :rowspan="it.special ? 2 : 1">○{{ it.name }}</td>
+                  <td
+                    class="cooldown"
+                    :class="{
+                      ok: it.usable && !cooldowns[it.item_id].active,
+                      soon: it.usable && cooldowns[it.item_id].active && cooldowns[it.item_id].soon,
+                      wait:
+                        it.usable && cooldowns[it.item_id].active && !cooldowns[it.item_id].soon,
+                      hold: !it.usable,
+                    }"
+                    :data-test="`cooldown-${it.item_id}`"
+                    :rowspan="it.special ? 2 : 1"
                   >
-                    使う
-                  </button>
-                </td>
-                <td>{{ it.remaining_uses }}{{ it.durability_unit === 'day' ? '日' : '回' }}</td>
-                <td v-for="c in PARAM_COLUMNS_MAIN" :key="c.key" class="p" :class="{ up: (it.params[c.key] ?? 0) > 0 }">
-                  {{ it.params[c.key] ?? 0 }}
-                </td>
-                <td>{{ it.calorie_g > 0 ? it.calorie_g : '-' }}</td>
-                <td v-for="c in PARAM_COLUMNS_POWER" :key="c.key" class="p" :class="{ up: (it.params[c.key] ?? 0) > 0 }">
-                  {{ it.params[c.key] ?? 0 }}
-                </td>
-                <td class="interval">{{ it.interval_min > 0 ? `${it.interval_min}分` : '-' }}</td>
-              </tr>
-              <!-- 特殊効果(体重/身長/病気)は列に収まらないので、レガシー depart.cgi の
+                    {{ it.usable ? cooldowns[it.item_id].label : '－' }}
+                  </td>
+                  <td :rowspan="it.special ? 2 : 1">
+                    <button
+                      v-if="it.usable"
+                      class="btn"
+                      :disabled="busy || cooldowns[it.item_id].active"
+                      :data-test="`use-${it.item_id}`"
+                      @click="use(it)"
+                    >
+                      使う
+                    </button>
+                  </td>
+                  <td>{{ it.remaining_uses }}{{ it.durability_unit === 'day' ? '日' : '回' }}</td>
+                  <td
+                    v-for="c in PARAM_COLUMNS_MAIN"
+                    :key="c.key"
+                    class="p"
+                    :class="{ up: (it.params[c.key] ?? 0) > 0 }"
+                  >
+                    {{ it.params[c.key] ?? 0 }}
+                  </td>
+                  <td>{{ it.calorie_g > 0 ? it.calorie_g : '-' }}</td>
+                  <td
+                    v-for="c in PARAM_COLUMNS_POWER"
+                    :key="c.key"
+                    class="p"
+                    :class="{ up: (it.params[c.key] ?? 0) > 0 }"
+                  >
+                    {{ it.params[c.key] ?? 0 }}
+                  </td>
+                  <td class="interval">{{ it.interval_min > 0 ? `${it.interval_min}分` : '-' }}</td>
+                </tr>
+                <!-- 特殊効果(体重/身長/病気)は列に収まらないので、レガシー depart.cgi の
                    備考行と同じく1行下にcolspanで出す。 -->
-              <tr v-if="it.special" class="special-row" :data-test="`special-${it.item_id}`">
-                <td :colspan="PARAM_COLUMNS.length + 3">【 効果 】{{ it.special }}</td>
-              </tr>
+                <tr v-if="it.special" class="special-row" :data-test="`special-${it.item_id}`">
+                  <td :colspan="PARAM_COLUMNS.length + 3">
+                    <span class="cat-name">【 効果 】{{ it.special }}</span>
+                  </td>
+                </tr>
               </template>
             </tbody>
           </template>
@@ -203,7 +226,12 @@ async function use(it: ItemStack) {
 .item-page {
   background-color: #ffcc66;
   /* 旧command_bak.gifのCSS再現: 6px周期の1pxライン */
-  background-image: repeating-linear-gradient(180deg, transparent 0 2px, #ffcc33 2px 3px, transparent 3px 6px);
+  background-image: repeating-linear-gradient(
+    180deg,
+    transparent 0 2px,
+    #ffcc33 2px 3px,
+    transparent 3px 6px
+  );
   padding: 6px;
   min-height: 80vh;
 }
@@ -242,6 +270,8 @@ async function use(it: ItemStack) {
   padding: 12px;
 }
 .table-scroll {
+  --stick-line: #e0c080;
+  --stick-bg: #fff;
   overflow-x: auto;
 }
 .item-table {
@@ -286,6 +316,12 @@ async function use(it: ItemStack) {
 }
 .item-table td.cooldown.ok {
   color: #060;
+}
+/* 持っていること自体が意味を持つ品(建築許可証・乗り物・カード類)。
+   使っても何も起きず耐久だけ減るので「使う」ボタンを出さない。 */
+.item-table td.cooldown.hold {
+  color: #aaa;
+  font-weight: normal;
 }
 .item-table td.cooldown.soon {
   color: #0a7d2c;

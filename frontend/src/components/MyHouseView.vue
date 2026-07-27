@@ -73,7 +73,12 @@ function syncDrafts() {
   const rows: { kind: string; title: string; url: string; comment: string }[] = [];
   for (let s = 0; s < h.slots; s++) {
     const c = h.contents.find((x) => x.slot === s);
-    rows.push({ kind: c?.kind ?? '', title: c?.title ?? '', url: c?.url ?? '', comment: c?.comment ?? '' });
+    rows.push({
+      kind: c?.kind ?? '',
+      title: c?.title ?? '',
+      url: c?.url ?? '',
+      comment: c?.comment ?? '',
+    });
   }
   contentDraft.value = rows;
   shopDraft.value = {
@@ -97,17 +102,27 @@ const TUIKA_NAMES: Record<number, string> = { 1: '運営', 2: '株式会社', 3:
 
 // 店設定フォームを出すか: コンテンツ枠に「お店」があるか、既に店がある家。
 const shopConfigured = computed(
-  () => (house.value?.contents.some((c) => c.kind === 'shop') ?? false) || (house.value?.has_shop ?? false),
+  () =>
+    (house.value?.contents.some((c) => c.kind === 'shop') ?? false) ||
+    (house.value?.has_shop ?? false),
 );
 // 家主掲示板の投稿フォームを出すか(レガシーは家の設定側から投稿する)。
-const nushiConfigured = computed(() => house.value?.contents.some((c) => c.kind === 'nushi') ?? false);
+const nushiConfigured = computed(
+  () => house.value?.contents.some((c) => c.kind === 'nushi') ?? false,
+);
 const nushiTitle = ref('');
 const nushiBody = ref('');
 async function postNushi() {
   const h = house.value;
   if (!h || !nushiBody.value.trim()) return;
   await run(async () => {
-    const after = await api.postBbs(props.player.id, h.id, 'nushi', nushiBody.value, nushiTitle.value);
+    const after = await api.postBbs(
+      props.player.id,
+      h.id,
+      'nushi',
+      nushiBody.value,
+      nushiTitle.value,
+    );
     emit('update', after);
     nushiTitle.value = '';
     nushiBody.value = '';
@@ -146,7 +161,13 @@ async function saveContents() {
   const h = house.value;
   if (!h) return;
   await run(async () => {
-    const contents = contentDraft.value.map((r, s) => ({ slot: s, kind: r.kind, title: r.title, url: r.url, comment: r.comment }));
+    const contents = contentDraft.value.map((r, s) => ({
+      slot: s,
+      kind: r.kind,
+      title: r.title,
+      url: r.url,
+      comment: r.comment,
+    }));
     const after = await api.setHouseContents(props.player.id, h.id, contents);
     emit('update', after);
     await refresh();
@@ -197,7 +218,12 @@ async function doShiire(it: OrosiItem) {
     const after = await api.shiire(props.player.id, h.id, it.item_id, qty);
     emit('update', after);
     orosiState.value = await api.orosi(props.player.id, h.id);
-    showToast({ variant: 'item', title: '仕入れました', lines: [`${it.name} を${qty}個`], icon: 'item' });
+    showToast({
+      variant: 'item',
+      title: '仕入れました',
+      lines: [`${it.name} を${qty}個`],
+      icon: 'item',
+    });
   });
 }
 
@@ -225,7 +251,12 @@ async function savePrice(it: ShopStockItem) {
     const after = await api.setHouseShopPrice(props.player.id, h.id, it.item_id, price);
     emit('update', after);
     priceStock.value = await api.houseShopStock(props.player.id, h.id);
-    showToast({ variant: 'item', title: '価格を設定しました', lines: [`${it.name}: ${yen(price)}円`], icon: 'item' });
+    showToast({
+      variant: 'item',
+      title: '価格を設定しました',
+      lines: [`${it.name}: ${yen(price)}円`],
+      icon: 'item',
+    });
   });
 }
 
@@ -233,21 +264,38 @@ async function savePrice(it: ShopStockItem) {
 const rebuildOpen = ref(false);
 const rebuildExterior = ref('');
 const rebuildInterior = ref(0);
+// 建て替えでは家の大きさを変えられない(占有マスの取り直しになるうえ、1マスの家を
+// 建ててから許可証なしで大邸宅へ化けさせる抜け道になる)。同じ幅の外装だけ出す。
+const houseSpan = computed(() => house.value?.span_w ?? 1);
+const rebuildExteriors = computed(
+  () => state.value?.exteriors.filter((e) => (e.span > 1 ? e.span : 1) === houseSpan.value) ?? [],
+);
 const rebuildCost = computed(() => {
   const ext = state.value?.exteriors.find((e) => e.key === rebuildExterior.value);
   const inte = state.value?.interiors.find((i) => i.rank === rebuildInterior.value);
   if (!ext || !inte) return 0;
-  return ext.price * inte.multiplier * 10000;
+  const factor = houseSpan.value > 1 ? (state.value?.cost_factor ?? 1) : 1;
+  return ext.price * inte.multiplier * factor * 10000;
 });
 async function doRebuild() {
   const h = house.value;
   if (!h) return;
   await run(async () => {
-    const after = await api.rebuildHouse(props.player.id, h.id, rebuildExterior.value, rebuildInterior.value);
+    const after = await api.rebuildHouse(
+      props.player.id,
+      h.id,
+      rebuildExterior.value,
+      rebuildInterior.value,
+    );
     emit('update', after);
     await refresh();
     rebuildOpen.value = false;
-    showToast({ variant: 'item', title: '家を建て替えた', lines: [`費用 ${yen(rebuildCost.value)}円(現金)`], icon: 'item' });
+    showToast({
+      variant: 'item',
+      title: '家を建て替えた',
+      lines: [`費用 ${yen(rebuildCost.value)}円(現金)`],
+      icon: 'item',
+    });
   });
 }
 
@@ -256,13 +304,15 @@ const sellRefund = computed(() => {
   const h = house.value;
   if (!h) return 0;
   const t = state.value?.towns.find((x) => x.no === h.town);
-  return t ? t.land_price * 10000 : 0;
+  // 返金は地価×マス数。外装・内装費と建築許可証は戻らない。
+  return t ? t.land_price * (h.span_w ?? 1) * 10000 : 0;
 });
 async function doSell() {
   const h = house.value;
   if (!h) return;
   const ok = window.confirm(
-    `${townName(h.town)}／${rowLabel(h.row)}${h.col}の家を売却しますか？\n地価分 ${yen(sellRefund.value)}円が現金で戻ります(外装・内装費は戻りません)。`,
+    `${townName(h.town)}／${rowLabel(h.row)}${h.col}の家を売却しますか？\n地価分 ${yen(sellRefund.value)}円が現金で戻ります(外装・内装費は戻りません)。` +
+      (houseSpan.value > 1 ? '\n建築許可証は戻りません。' : ''),
   );
   if (!ok) return;
   await run(async () => {
@@ -304,11 +354,25 @@ async function doSell() {
       </div>
 
       <div class="house-summary panel-white">
-        <img :src="`/img/svg/${house.exterior}.svg`" :alt="house.exterior" />
+        <img
+          :src="`/img/svg/${house.exterior}.svg`"
+          :alt="house.exterior"
+          :class="{ wide: houseSpan > 1 }"
+        />
         <div>
-          <div class="hs-loc">{{ townName(house.town) }}／{{ rowLabel(house.row) }}{{ house.col }}</div>
-          <div v-if="house.tuika !== 0" class="hs-sub">外装 {{ house.exterior }}・種別 {{ TUIKA_NAMES[house.tuika] ?? '?' }}</div>
-          <div v-else class="hs-sub">外装 {{ house.exterior }}・内装{{ ['A','B','C','D'][house.interior_rank] ?? '?' }}ランク（コンテンツ枠{{ house.slots }}）</div>
+          <div class="hs-loc">
+            {{ townName(house.town) }}／{{ rowLabel(house.row) }}{{ house.col }}
+          </div>
+          <div v-if="house.tuika !== 0" class="hs-sub">
+            外装 {{ house.exterior }}・種別 {{ TUIKA_NAMES[house.tuika] ?? '?' }}
+          </div>
+          <div v-else class="hs-sub">
+            外装 {{ house.exterior }}・内装{{
+              ['A', 'B', 'C', 'D'][house.interior_rank] ?? '?'
+            }}ランク（コンテンツ枠{{ house.slots }}）<template v-if="houseSpan > 1"
+              >・2マス</template
+            >
+          </div>
         </div>
       </div>
 
@@ -316,20 +380,33 @@ async function doSell() {
       <div v-if="shopConfigured" class="panel-white sec">
         <div class="sec-head">■お店の設定</div>
         <div class="row-line">
-          <label class="fld">店名<input v-model="shopDraft.title" maxlength="50" class="inp" /></label>
-          <label class="fld">種類
+          <label class="fld"
+            >店名<input v-model="shopDraft.title" maxlength="50" class="inp"
+          /></label>
+          <label class="fld"
+            >種類
             <select v-model="shopDraft.syubetu">
               <option v-for="k in state!.shop_kinds" :key="k" :value="k">{{ k }}</option>
             </select>
           </label>
-          <label class="fld">販売掛け率
-            <input v-model.number="shopDraft.markup" type="number" step="0.1" min="0.3" max="3" class="inp-num" />倍
+          <label class="fld"
+            >販売掛け率
+            <input
+              v-model.number="shopDraft.markup"
+              type="number"
+              step="0.1"
+              min="0.3"
+              max="3"
+              class="inp-num"
+            />倍
           </label>
           <button class="btn mini primary-btn" :disabled="busy" @click="saveShop">
             {{ house.has_shop ? '店設定を保存' : '店を開く' }}
           </button>
         </div>
-        <div class="note">掛け率は0.3超〜3倍まで。スーパーは全種類を扱えますが仕入れ値が1.5倍になります。種類を変えると在庫は消えます。</div>
+        <div class="note">
+          掛け率は0.3超〜3倍まで。スーパーは全種類を扱えますが仕入れ値が1.5倍になります。種類を変えると在庫は消えます。
+        </div>
         <div v-if="house.has_shop" class="row-line">
           <button class="btn mini" :disabled="busy" @click="openOrosi">卸問屋で仕入れる</button>
           <button class="btn mini" :disabled="busy" @click="openPrice">商品リスト・価格設定</button>
@@ -339,23 +416,54 @@ async function doSell() {
         <div v-if="orosiState" class="sub-panel">
           <div class="sub-head">
             <span class="sub-title">卸問屋（{{ orosiState.syubetu }}）</span>
-            <span class="sub-info">普通口座 {{ yen(orosiState.savings) }}円／在庫種類 {{ orosiState.stock_kinds }}／{{ orosiState.max_kinds }}</span>
+            <span class="sub-info"
+              >普通口座 {{ yen(orosiState.savings) }}円／在庫種類 {{ orosiState.stock_kinds }}／{{
+                orosiState.max_kinds
+              }}</span
+            >
             <button class="btn mini" @click="closeOrosi">閉じる</button>
           </div>
-          <div v-if="orosiState.items.length === 0" class="empty">仕入れられる商品がありません。</div>
+          <div v-if="orosiState.items.length === 0" class="empty">
+            仕入れられる商品がありません。
+          </div>
           <div v-else class="scroll">
             <table class="tbl">
               <thead>
-                <tr><th class="l">品名</th><th>種類</th><th>仕入れ値</th><th>店在庫</th><th>数量</th><th></th></tr>
+                <tr>
+                  <th class="l">品名</th>
+                  <th>種類</th>
+                  <th>仕入れ値</th>
+                  <th>店在庫</th>
+                  <th>数量</th>
+                  <th></th>
+                </tr>
               </thead>
               <tbody>
                 <tr v-for="it in orosiState.items" :key="it.item_id">
                   <td class="l">{{ it.name }}</td>
                   <td>{{ it.category }}</td>
                   <td class="price">{{ yen(it.buy_price) }}円</td>
-                  <td :class="{ full: it.in_stock >= orosiState.max_stock }">{{ it.in_stock }}/{{ orosiState.max_stock }}</td>
-                  <td><input v-model.number="shiireQty[it.item_id]" type="number" min="1" :max="orosiState.max_stock" class="inp-num" /></td>
-                  <td><button class="btn mini" :disabled="busy || it.in_stock >= orosiState.max_stock" @click="doShiire(it)">仕入れる</button></td>
+                  <td :class="{ full: it.in_stock >= orosiState.max_stock }">
+                    {{ it.in_stock }}/{{ orosiState.max_stock }}
+                  </td>
+                  <td>
+                    <input
+                      v-model.number="shiireQty[it.item_id]"
+                      type="number"
+                      min="1"
+                      :max="orosiState.max_stock"
+                      class="inp-num"
+                    />
+                  </td>
+                  <td>
+                    <button
+                      class="btn mini"
+                      :disabled="busy || it.in_stock >= orosiState.max_stock"
+                      @click="doShiire(it)"
+                    >
+                      仕入れる
+                    </button>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -366,23 +474,46 @@ async function doSell() {
         <div v-if="priceStock && priceStock.has_shop" class="sub-panel">
           <div class="sub-head">
             <span class="sub-title">商品リスト・価格設定</span>
-            <span class="sub-info">掛け率{{ priceStock.markup }}倍／0円で掛け率に戻す。販売価格は仕入れ値の3倍まで</span>
+            <span class="sub-info"
+              >掛け率{{ priceStock.markup }}倍／0円で掛け率に戻す。販売価格は仕入れ値の3倍まで</span
+            >
             <button class="btn mini" @click="closePrice">閉じる</button>
           </div>
-          <div v-if="priceStock.items.length === 0" class="empty">在庫がありません。まず仕入れてください。</div>
+          <div v-if="priceStock.items.length === 0" class="empty">
+            在庫がありません。まず仕入れてください。
+          </div>
           <div v-else class="scroll">
             <table class="tbl">
               <thead>
-                <tr><th class="l">品名</th><th>仕入れ値</th><th>上限(×3)</th><th>店頭価格</th><th>新価格</th><th></th></tr>
+                <tr>
+                  <th class="l">品名</th>
+                  <th>仕入れ値</th>
+                  <th>上限(×3)</th>
+                  <th>店頭価格</th>
+                  <th>新価格</th>
+                  <th></th>
+                </tr>
               </thead>
               <tbody>
                 <tr v-for="it in priceStock.items" :key="it.item_id">
                   <td class="l">{{ it.name }}</td>
                   <td class="price">{{ yen(it.buy_price) }}円</td>
                   <td>{{ yen(it.max_price) }}円</td>
-                  <td class="price">{{ yen(it.shelf) }}円{{ it.sell_price === null ? '(掛率)' : '' }}</td>
-                  <td><input v-model.number="priceDraft[it.item_id]" type="number" min="0" :max="it.max_price" class="inp-num wide" /></td>
-                  <td><button class="btn mini" :disabled="busy" @click="savePrice(it)">設定</button></td>
+                  <td class="price">
+                    {{ yen(it.shelf) }}円{{ it.sell_price === null ? '(掛率)' : '' }}
+                  </td>
+                  <td>
+                    <input
+                      v-model.number="priceDraft[it.item_id]"
+                      type="number"
+                      min="0"
+                      :max="it.max_price"
+                      class="inp-num wide"
+                    />
+                  </td>
+                  <td>
+                    <button class="btn mini" :disabled="busy" @click="savePrice(it)">設定</button>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -403,22 +534,41 @@ async function doSell() {
       <!-- コンテンツ選択(レガシー: ●コンテンツ選択)。追加種別の家は機能固定で枠なし。 -->
       <div v-if="house.tuika !== 0" class="panel-white sec">
         <div class="sec-head">●{{ TUIKA_NAMES[house.tuika] ?? '追加種別' }}</div>
-        <div class="note">この家は{{ TUIKA_NAMES[house.tuika] ?? '追加種別' }}です。コンテンツ枠はありません。</div>
+        <div class="note">
+          この家は{{ TUIKA_NAMES[house.tuika] ?? '追加種別' }}です。コンテンツ枠はありません。
+        </div>
       </div>
       <div v-else class="panel-white sec">
         <div class="sec-head">●コンテンツ選択</div>
         <div class="note">
           設置するコンテンツを選択してください。後で変更も可能です。タイトルは訪問画面のボタンに表示されます。<br />
-          <template v-if="house.slots > 1">ここで一番上にあるコンテンツが家に入ったとき最初に表示されます。</template>
+          <template v-if="house.slots > 1"
+            >ここで一番上にあるコンテンツが家に入ったとき最初に表示されます。</template
+          >
         </div>
         <div v-for="(row, s) in contentDraft" :key="s" class="slot-row">
           <span class="slot-no">○{{ s + 1 }}つめのコンテンツ</span>
           <select v-model="row.kind">
-            <option v-for="k in CONTENT_KINDS" :key="k.value" :value="k.value">{{ k.label }}</option>
+            <option v-for="k in CONTENT_KINDS" :key="k.value" :value="k.value">
+              {{ k.label }}
+            </option>
           </select>
-          <label v-if="row.kind" class="fld">タイトル<input v-model="row.title" maxlength="20" class="inp" /></label>
-          <input v-if="row.kind" v-model="row.comment" maxlength="100" class="inp lead" placeholder="タイトル下コメント(省略可)" />
-          <input v-if="row.kind === 'url'" v-model="row.url" class="inp url" placeholder="https://…(埋め込むURL)" />
+          <label v-if="row.kind" class="fld"
+            >タイトル<input v-model="row.title" maxlength="20" class="inp"
+          /></label>
+          <input
+            v-if="row.kind"
+            v-model="row.comment"
+            maxlength="100"
+            class="inp lead"
+            placeholder="タイトル下コメント(省略可)"
+          />
+          <input
+            v-if="row.kind === 'url'"
+            v-model="row.url"
+            class="inp url"
+            placeholder="https://…(埋め込むURL)"
+          />
         </div>
         <button class="btn mini primary-btn" :disabled="busy" @click="saveContents">決定</button>
       </div>
@@ -435,21 +585,35 @@ async function doSell() {
       <!-- 家の外観、内装の変更(レガシー: house_change 選択画面) -->
       <div class="panel-white sec">
         <div class="sec-head">●家の外観、内装（コンテンツ枠数）の変更</div>
-        <div class="note">建て替え費用は「外装×内装ランク倍率」×10000円を現金から支払います（地価は不要）。</div>
-        <button v-if="!rebuildOpen" class="btn mini" :disabled="busy" @click="rebuildOpen = true">選択画面へ</button>
+        <div class="note">
+          建て替え費用は「外装×内装ランク倍率」×10000円を現金から支払います（地価は不要）。<template
+            v-if="houseSpan > 1"
+            >2マスの家なので費用は{{
+              state?.cost_factor ?? 1
+            }}倍、外装も2マスのものだけ選べます。</template
+          >
+        </div>
+        <button v-if="!rebuildOpen" class="btn mini" :disabled="busy" @click="rebuildOpen = true">
+          選択画面へ
+        </button>
         <template v-else>
           <div class="rebuild-ext">
             <div class="fld">外装</div>
-            <ExteriorPicker v-model="rebuildExterior" :exteriors="state!.exteriors" />
+            <ExteriorPicker v-model="rebuildExterior" :exteriors="rebuildExteriors" />
           </div>
           <div class="row-line">
-            <label class="fld">内装
+            <label class="fld"
+              >内装
               <select v-model.number="rebuildInterior">
-                <option v-for="i in state!.interiors" :key="i.rank" :value="i.rank">{{ i.name }}（費用×{{ i.multiplier }}・枠{{ i.slots }}）</option>
+                <option v-for="i in state!.interiors" :key="i.rank" :value="i.rank">
+                  {{ i.name }}（費用×{{ i.multiplier }}・枠{{ i.slots }}）
+                </option>
               </select>
             </label>
             <span class="cost">費用 {{ yen(rebuildCost) }}円（現金）</span>
-            <button class="btn mini primary-btn" :disabled="busy" @click="doRebuild">建て替える</button>
+            <button class="btn mini primary-btn" :disabled="busy" @click="doRebuild">
+              建て替える
+            </button>
             <button class="btn mini" :disabled="busy" @click="rebuildOpen = false">やめる</button>
           </div>
         </template>
@@ -459,7 +623,9 @@ async function doSell() {
       <div class="panel-white sec">
         <div class="sec-head">●家の売却</div>
         <div class="note">
-          家の場所を変更したい場合は、一度家を売却してから再度購入してください。売却で得られるのは土地の価格（{{ yen(sellRefund) }}円）だけです。
+          家の場所を変更したい場合は、一度家を売却してから再度購入してください。売却で得られるのは土地の価格（{{
+            yen(sellRefund)
+          }}円）だけです。
         </div>
         <button class="btn mini danger" :disabled="busy" @click="doSell">家の売却</button>
       </div>
@@ -536,6 +702,10 @@ async function doSell() {
   width: 36px;
   height: 36px;
   object-fit: contain;
+}
+/* 2マスの家は横長のまま出す(正方形の枠だと上下に余白ができて小さく見える)。 */
+.house-summary img.wide {
+  width: 72px;
 }
 .hs-loc {
   font-weight: bold;

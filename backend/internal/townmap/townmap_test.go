@@ -165,3 +165,72 @@ func TestValidateAssets(t *testing.T) {
 		})
 	}
 }
+
+// TestDefaultMap guards the embedded initial layout (default_map.json). 管理画面で
+// 組んだ盤面を書き出したものなので、書き出しミスやマスの重なりが混ざると新規
+// インストールの街が壊れる。埋め込みJSONなのでビルドでは気付けない。
+func TestDefaultMap(t *testing.T) {
+	facilities := Default()
+	assets := DefaultAssets()
+
+	if err := ValidateAssets(assets); err != nil {
+		t.Fatalf("既定マップの背景が不正: %v", err)
+	}
+	if len(assets) == 0 {
+		t.Fatal("既定マップに背景アセットが無い")
+	}
+
+	// 公園(0)とシー・リゾート(1)の2つだけが入っていること。
+	byTown := map[int]int{}
+	for _, f := range facilities {
+		byTown[f.Town]++
+	}
+	for _, town := range []int{0, 1} {
+		if byTown[town] == 0 {
+			t.Errorf("街%dに施設が無い", town)
+		}
+	}
+	for town := range byTown {
+		if town != 0 && town != 1 {
+			t.Errorf("街%dの施設が混ざっている(既定は街0と1だけ)", town)
+		}
+	}
+
+	// 遊べる状態か。カジノは既定マップから漏れていた実績があるので名指しで見る。
+	keys := map[string]bool{}
+	for _, f := range facilities {
+		keys[f.Key] = true
+	}
+	for _, key := range []string{
+		"bank", "depart", "syokudou", "hanbai", "gym", "onsen", "school", "kyushitu",
+		"hospital", "yakuba", "jobchange", "kabu", "keiba", "kentiku", "tsuri",
+		"gifutoya", "tokuten", "bingo", "prof", "casino", "akichi",
+	} {
+		if !keys[key] {
+			t.Errorf("既定マップに施設 %q が無い", key)
+		}
+	}
+
+	// 街0と街1を行き来できること。
+	moveFrom := map[int]bool{}
+	for _, f := range facilities {
+		if f.Key == "walk" || f.Key == "bus" {
+			moveFrom[f.Town] = true
+		}
+	}
+	for _, town := range []int{0, 1} {
+		if !moveFrom[town] {
+			t.Errorf("街%dに移動施設(徒歩/バス)が無い", town)
+		}
+	}
+
+	// 返す配列は毎回コピーで、呼び出し側の書き換えが既定値に漏れないこと。
+	facilities[0].Key = "broken"
+	if Default()[0].Key == "broken" {
+		t.Error("Default()が内部配列を共有している")
+	}
+	assets[0].Img = "broken"
+	if DefaultAssets()[0].Img == "broken" {
+		t.Error("DefaultAssets()が内部配列を共有している")
+	}
+}

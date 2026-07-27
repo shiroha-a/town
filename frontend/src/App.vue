@@ -25,6 +25,7 @@ import AshiatoView from './components/AshiatoView.vue';
 import CLeagueView from './components/CLeagueView.vue';
 import YakubaView from './components/YakubaView.vue';
 import ProfileView from './components/ProfileView.vue';
+import UserSettingsView from './components/UserSettingsView.vue';
 import TsuriView from './components/TsuriView.vue';
 import GiftShopView from './components/GiftShopView.vue';
 import TokutenView from './components/TokutenView.vue';
@@ -89,6 +90,12 @@ const guestRemainMin = computed(() => {
   const left = new Date(at).getTime() - now.value;
   return left > 0 ? Math.ceil(left / 60000) : 0;
 });
+
+// 退会したら未ログインに戻す(セッションはサーバー側で無効になっている)。
+function onRetired() {
+  player.value = null;
+  view.value = 'town';
+}
 
 // 家訪問(view='house')で開く家のID。街の家クリックからnavigate経由で渡される。
 const houseId = ref<number | null>(null);
@@ -181,16 +188,44 @@ const facilityTitles: Record<string, string> = {
       お試しプレイ中<span v-if="guestRemainMin !== null">（残り約{{ guestRemainMin }}分）</span>
       — データは保存されません。家の建築・銀行・あいさつ・メールは使えません。
     </div>
-    <TownView v-if="view === 'town'" :player="player" @navigate="navigate" @reload="reload" @logout="onLogout" />
+    <TownView
+      v-if="view === 'town'"
+      :player="player"
+      @navigate="navigate"
+      @reload="reload"
+      @logout="onLogout"
+    />
     <GameView v-else-if="view === 'casino'" :player="player" @update="onUpdate" @back="back" />
     <DepartView v-else-if="view === 'depart'" :player="player" @update="onUpdate" @back="back" />
     <BankView v-else-if="view === 'bank'" :player="player" @update="onUpdate" @back="back" />
     <ItemView v-else-if="view === 'item'" :player="player" @update="onUpdate" @back="back" />
-    <JobChangeView v-else-if="view === 'jobchange'" :player="player" @update="onUpdate" @back="back" />
-    <SyokudouView v-else-if="view === 'syokudou'" :player="player" @update="onUpdate" @back="back" />
+    <JobChangeView
+      v-else-if="view === 'jobchange'"
+      :player="player"
+      @update="onUpdate"
+      @back="back"
+    />
+    <SyokudouView
+      v-else-if="view === 'syokudou'"
+      :player="player"
+      @update="onUpdate"
+      @back="back"
+    />
     <HanbaiView v-else-if="view === 'hanbai'" :player="player" @update="onUpdate" @back="back" />
-    <KentikuView v-else-if="view === 'kentiku'" :player="player" :initial-target="kentikuTarget" @update="onUpdate" @back="back" />
-    <HouseView v-else-if="view === 'house' && houseId" :player="player" :house-id="houseId" @update="onUpdate" @back="back" />
+    <KentikuView
+      v-else-if="view === 'kentiku'"
+      :player="player"
+      :initial-target="kentikuTarget"
+      @update="onUpdate"
+      @back="back"
+    />
+    <HouseView
+      v-else-if="view === 'house' && houseId"
+      :player="player"
+      :house-id="houseId"
+      @update="onUpdate"
+      @back="back"
+    />
     <MyHouseView v-else-if="view === 'myhouse'" :player="player" @update="onUpdate" @back="back" />
     <FacilityMenuView
       v-else-if="view === 'gym'"
@@ -213,7 +248,12 @@ const facilityTitles: Record<string, string> = {
       @back="back"
     />
     <OnsenView v-else-if="view === 'onsen'" :player="player" @update="onUpdate" @back="back" />
-    <HospitalView v-else-if="view === 'hospital'" :player="player" @update="onUpdate" @back="back" />
+    <HospitalView
+      v-else-if="view === 'hospital'"
+      :player="player"
+      @update="onUpdate"
+      @back="back"
+    />
     <SchoolView v-else-if="view === 'school'" :player="player" @update="onUpdate" @back="back" />
     <KabuView v-else-if="view === 'kabu'" :player="player" @update="onUpdate" @back="back" />
     <KeibaView v-else-if="view === 'keiba'" :player="player" @update="onUpdate" @back="back" />
@@ -221,11 +261,23 @@ const facilityTitles: Record<string, string> = {
     <AshiatoView v-else-if="view === 'ashiato'" :player="player" @back="back" />
     <CLeagueView v-else-if="view === 'doukyo'" :player="player" @update="onUpdate" @back="back" />
     <TsuriView v-else-if="view === 'tsuri'" :player="player" @update="onUpdate" @back="back" />
-    <GiftShopView v-else-if="view === 'gifutoya'" :player="player" @update="onUpdate" @back="back" />
+    <GiftShopView
+      v-else-if="view === 'gifutoya'"
+      :player="player"
+      @update="onUpdate"
+      @back="back"
+    />
     <TokutenView v-else-if="view === 'tokuten'" :player="player" @update="onUpdate" @back="back" />
     <BingoView v-else-if="view === 'bingo'" :player="player" @update="onUpdate" @back="back" />
     <YakubaView v-else-if="view === 'yakuba'" :player="player" @back="back" />
     <ProfileView v-else-if="view === 'prof'" :player="player" @back="back" />
+    <UserSettingsView
+      v-else-if="view === 'usersettings'"
+      :player="player"
+      @update="onUpdate"
+      @back="back"
+      @retired="onRetired"
+    />
     <AdminView v-else-if="view === 'admin'" :player="player" @back="back" />
     <PlaceholderView v-else :title="facilityTitles[view] ?? view" @back="back" />
   </template>

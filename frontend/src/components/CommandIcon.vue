@@ -82,5 +82,12 @@ defineProps<{ name: string }>();
       <line x1="9" y1="9.5" x2="9.01" y2="9.5" />
       <line x1="15" y1="9.5" x2="15.01" y2="9.5" />
     </g>
+    <!-- ユーザー設定(スライダー) -->
+    <g v-else-if="name === 'usersettings'">
+      <line x1="4" y1="7" x2="20" y2="7" />
+      <circle cx="9" cy="7" r="2.5" />
+      <line x1="4" y1="17" x2="20" y2="17" />
+      <circle cx="15" cy="17" r="2.5" />
+    </g>
   </svg>
 </template>

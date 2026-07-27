@@ -1955,7 +1955,7 @@ func (s *Service) DoOnsenTick(ctx context.Context, playerID int64) (*player.Play
 func (s *Service) loadOnsenBath(ctx context.Context, bathID int64) (price int64, multiplier int, err error) {
 	err = s.pool.QueryRow(ctx,
 		`SELECT price, power_multiplier FROM content_items
-		 WHERE id = $1 AND enabled AND facility = 'onsen'`, bathID).Scan(&price, &multiplier)
+		 WHERE id = $1 AND enabled AND shop_listed AND facility = 'onsen'`, bathID).Scan(&price, &multiplier)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, 0, ErrItemNotFound
 	}
@@ -2182,7 +2182,7 @@ func (s *Service) loadFood(ctx context.Context, foodID int64) (int64, effects.Ef
 	args := append([]any{foodID}, extra...)
 	err := s.pool.QueryRow(ctx,
 		`SELECT price, effect FROM content_items
-		 WHERE id = $1 AND enabled AND facility = 'syokudou'`+cond, args...).Scan(&price, &effJSON)
+		 WHERE id = $1 AND enabled AND shop_listed AND facility = 'syokudou'`+cond, args...).Scan(&price, &effJSON)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, effects.Effect{}, ErrItemNotFound
 	}
@@ -2253,7 +2253,7 @@ func (s *Service) loadFacilityMenuItem(ctx context.Context, facility string, men
 	)
 	err := s.pool.QueryRow(ctx,
 		`SELECT price, effect, use_interval_min FROM content_items
-		 WHERE id = $1 AND enabled AND facility = $2`, menuID, facility).
+		 WHERE id = $1 AND enabled AND shop_listed AND facility = $2`, menuID, facility).
 		Scan(&price, &effJSON, &intervalMin)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, effects.Effect{}, 0, ErrItemNotFound
@@ -3222,7 +3222,7 @@ func (s *Service) loadItemBuy(ctx context.Context, facility string, itemID int64
 	args := append([]any{itemID, facility}, extra...)
 	err = s.pool.QueryRow(ctx,
 		`SELECT price, durability, max_sets, is_gift FROM content_items
-		 WHERE id = $1 AND enabled AND facility = $2`+cond, args...).Scan(&price, &durability, &maxSets, &isGift)
+		 WHERE id = $1 AND enabled AND shop_listed AND facility = $2`+cond, args...).Scan(&price, &durability, &maxSets, &isGift)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, 0, 0, false, ErrItemNotFound
 	}
@@ -3240,6 +3240,7 @@ func (s *Service) loadItemUse(ctx context.Context, itemID int64) (effects.Effect
 		intervalMin  int
 		fillsSatiety bool
 		durUnit      string
+		usable       bool
 	)
 	// enabledは購入カタログの掲載可否であり、所持済みアイテムの使用は妨げない
 	// (マスタを無効化しても手持ちが使えなくならないように)。
@@ -3247,14 +3248,19 @@ func (s *Service) loadItemUse(ctx context.Context, itemID int64) (effects.Effect
 	err := s.pool.QueryRow(ctx,
 		`SELECT effect, use_interval_min,
 		        (fills_satiety OR category IN ('食料品', 'ファーストフード')),
-		        durability_unit
+		        durability_unit, usable
 		 FROM content_items WHERE id = $1`,
-		itemID).Scan(&effJSON, &intervalMin, &fillsSatiety, &durUnit)
+		itemID).Scan(&effJSON, &intervalMin, &fillsSatiety, &durUnit, &usable)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return effects.Effect{}, 0, false, "", ErrItemNotFound
 	}
 	if err != nil {
 		return effects.Effect{}, 0, false, "", fmt.Errorf("load item: %w", err)
+	}
+	// 持っていること自体が意味を持つ品(建築許可証・乗り物・カード類)は使えない。
+	// 使っても何も起きず耐久だけ減るため、誤操作で失うのを防ぐ。
+	if !usable {
+		return effects.Effect{}, 0, false, "", &ConditionError{Message: "この持ち物は使うものではありません。"}
 	}
 	eff, err := effects.ParseEffect(effJSON)
 	if err != nil {

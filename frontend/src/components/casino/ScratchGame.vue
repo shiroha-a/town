@@ -49,8 +49,11 @@ async function open(card: number, cell: number) {
   <div v-if="state" class="cg">
     <h3 class="cg-title">{{ game === 'sukuratti' ? 'スクラッチ2' : 'スクラッチ' }}</h3>
     <p class="cg-lead">
-      1日{{ state.cards.length }}枚。各カード{{ state.open_max }}マスまで開けられ、{{ state.atari_max }}以下が当たり(1マス
-      +{{ yen(100000) }}円)。開けた{{ state.open_max }}マスが全て当たりならボーナス+{{ yen(300000) }}円。無料。
+      1日{{ state.cards.length }}枚。各カード{{ state.open_max }}マスまで開けられ、{{
+        state.atari_max
+      }}以下が当たり(1マス +{{ yen(100000) }}円)。開けた{{
+        state.open_max
+      }}マスが全て当たりならボーナス+{{ yen(300000) }}円。無料。
     </p>
 
     <div

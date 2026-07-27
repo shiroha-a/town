@@ -14,7 +14,8 @@ const message = ref('');
 const suits = ['♠', '♥', '♦', '♣'];
 function cardLabel(card: number): string {
   const rank = (card % 13) + 1;
-  const r = rank === 1 ? 'A' : rank === 11 ? 'J' : rank === 12 ? 'Q' : rank === 13 ? 'K' : String(rank);
+  const r =
+    rank === 1 ? 'A' : rank === 11 ? 'J' : rank === 12 ? 'Q' : rank === 13 ? 'K' : String(rank);
   return `${suits[Math.floor(card / 13)]}${r}`;
 }
 const isRed = (card: number) => Math.floor(card / 13) === 1 || Math.floor(card / 13) === 2;
@@ -64,7 +65,9 @@ const cashout = () => run(() => api.pokerCashout(props.player.id));
       5000円で5ポイント購入。配札→キープするカードを選んで交換→役でポイント増減。清算で1000円/ポイント換金(1点は手数料)。
     </p>
 
-    <div class="pts">所持ポイント：<span class="pv">{{ state.points }}</span></div>
+    <div class="pts">
+      所持ポイント：<span class="pv">{{ state.points }}</span>
+    </div>
 
     <div
       v-if="state.result >= 0"
@@ -78,7 +81,9 @@ const cashout = () => run(() => api.pokerCashout(props.player.id));
     <div v-if="state.phase === 'dealt'" class="hand">
       <div v-for="(c, i) in state.hand" :key="i" class="cardwrap">
         <span class="card" :class="{ red: isRed(c) }">{{ cardLabel(c) }}</span>
-        <label class="keep"><input type="checkbox" v-model="hold[i]" :data-test="`hold-${i}`" /> キープ</label>
+        <label class="keep"
+          ><input type="checkbox" v-model="hold[i]" :data-test="`hold-${i}`" /> キープ</label
+        >
       </div>
     </div>
 
@@ -86,10 +91,22 @@ const cashout = () => run(() => api.pokerCashout(props.player.id));
       <button v-if="!state.active" class="btn" :disabled="busy" data-test="buy" @click="buy">
         5000円で購入（5ポイント）
       </button>
-      <button v-if="state.phase === 'ready'" class="btn" :disabled="busy" data-test="deal" @click="deal">
+      <button
+        v-if="state.phase === 'ready'"
+        class="btn"
+        :disabled="busy"
+        data-test="deal"
+        @click="deal"
+      >
         配札する
       </button>
-      <button v-if="state.phase === 'dealt'" class="btn" :disabled="busy" data-test="draw" @click="draw">
+      <button
+        v-if="state.phase === 'dealt'"
+        class="btn"
+        :disabled="busy"
+        data-test="draw"
+        @click="draw"
+      >
         交換して勝負
       </button>
       <button

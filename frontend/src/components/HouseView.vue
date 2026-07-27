@@ -185,11 +185,19 @@ async function doBuy() {
   if (!it) return;
   busy.value = true;
   try {
-    const after = await api.buyFromHouseShop(props.player.id, house.value.id, it.item_id, buyQtySel.value, payMethod.value);
+    const after = await api.buyFromHouseShop(
+      props.player.id,
+      house.value.id,
+      it.item_id,
+      buyQtySel.value,
+      payMethod.value,
+    );
     emit('update', after);
     shop.value = await api.houseShop(props.player.id, house.value.id);
     const br = after.buy_result;
-    const lines = [`${it.name} を${buyQtySel.value}個（${br.method === 'credit' ? 'クレジット・普通口座' : '現金'} ${yen(br.paid)}円）`];
+    const lines = [
+      `${it.name} を${buyQtySel.value}個（${br.method === 'credit' ? 'クレジット・普通口座' : '現金'} ${yen(br.paid)}円）`,
+    ];
     if (br.cashback > 0) lines.push(`ご近所キャッシュバック ${yen(br.cashback)}円引き`);
     showToast({ variant: 'item', title: '買いました', lines, icon: 'item' });
   } catch (e) {
@@ -241,8 +249,12 @@ const bbsPageThreads = computed(() =>
 const nushiPagePosts = computed(() =>
   nushiPosts.value.slice(nushiPage.value * NUSHI_PER_PAGE, (nushiPage.value + 1) * NUSHI_PER_PAGE),
 );
-const bbsMaxPage = computed(() => Math.max(0, Math.ceil(bbsThreads.value.length / BBS_PER_PAGE) - 1));
-const nushiMaxPage = computed(() => Math.max(0, Math.ceil(nushiPosts.value.length / NUSHI_PER_PAGE) - 1));
+const bbsMaxPage = computed(() =>
+  Math.max(0, Math.ceil(bbsThreads.value.length / BBS_PER_PAGE) - 1),
+);
+const nushiMaxPage = computed(() =>
+  Math.max(0, Math.ceil(nushiPosts.value.length / NUSHI_PER_PAGE) - 1),
+);
 // 本文中のURLをリンク化するためのトークン分割(レガシーの自動リンク)。
 // 絵文字ピッカー。開いた入力欄を覚えておき、選ばれたショートコードを差し込む。
 const emojiFor = ref<string | null>(null);
@@ -299,7 +311,10 @@ async function doPostBbs(body: string, parentNo = 0) {
 const delArticleNo = ref('');
 const delThreadNo = ref('');
 const delNushiNo = ref('');
-async function doDeleteBbs(kind: string, opts: { articleNo?: number; threadNo?: number; all?: boolean }) {
+async function doDeleteBbs(
+  kind: string,
+  opts: { articleNo?: number; threadNo?: number; all?: boolean },
+) {
   if (!house.value) return;
   if (opts.all && !window.confirm('全記事を削除します。よろしいですか？')) return;
   busy.value = true;
@@ -357,7 +372,12 @@ async function doDeleteBbs(kind: string, opts: { articleNo?: number; threadNo?: 
       </div>
 
       <!-- 追加種別の家: 持ち物販売店=闇市 / 運営・株式会社=社員教育。 -->
-      <YamiShop v-if="house.tuika === 3" :player="player" :house-id="house.id" @update="emit('update', $event)" />
+      <YamiShop
+        v-if="house.tuika === 3"
+        :player="player"
+        :house-id="house.id"
+        @update="emit('update', $event)"
+      />
       <CompanyPanel
         v-else-if="house.tuika === 1 || house.tuika === 2"
         :player="player"
@@ -385,10 +405,21 @@ async function doDeleteBbs(kind: string, opts: { articleNo?: number; threadNo?: 
               <hr class="thread-hr" />
               <div class="thread-no">NO.{{ t.parent.thread_no }}</div>
               <div>
-                <span class="bbs-author">{{ t.parent.author_name }}<span v-if="t.parent.author_job" class="bbs-job">（{{ t.parent.author_job }}）</span></span>：<span class="bbs-body-inline"><RichText :text="t.parent.body" /></span>（{{ fmtDate(t.parent.created_at) }}）<span class="bbs-no">記事no.{{ t.parent.id }}</span>
+                <span class="bbs-author"
+                  >{{ t.parent.author_name
+                  }}<span v-if="t.parent.author_job" class="bbs-job"
+                    >（{{ t.parent.author_job }}）</span
+                  ></span
+                >：<span class="bbs-body-inline"><RichText :text="t.parent.body" /></span>（{{
+                  fmtDate(t.parent.created_at)
+                }}）<span class="bbs-no">記事no.{{ t.parent.id }}</span>
               </div>
               <div class="reply-form">
-                <textarea v-model="replyBodies[t.parent.thread_no]" rows="2" class="reply-area"></textarea>
+                <textarea
+                  v-model="replyBodies[t.parent.thread_no]"
+                  rows="2"
+                  class="reply-area"
+                ></textarea>
                 <span class="btn-row">
                   <button
                     class="btn emoji-btn"
@@ -397,11 +428,22 @@ async function doDeleteBbs(kind: string, opts: { articleNo?: number; threadNo?: 
                   >
                     <CommandIcon name="emoji" />
                   </button>
-                  <button class="btn" :disabled="busy" @click="doPostBbs(replyBodies[t.parent.thread_no] ?? '', t.parent.thread_no)">レス</button>
+                  <button
+                    class="btn"
+                    :disabled="busy"
+                    @click="doPostBbs(replyBodies[t.parent.thread_no] ?? '', t.parent.thread_no)"
+                  >
+                    レス
+                  </button>
                 </span>
               </div>
               <div v-for="p in t.replies" :key="p.id" class="bbs-reply">
-                <span class="bbs-author">{{ p.author_name }}<span v-if="p.author_job" class="bbs-job">（{{ p.author_job }}）</span></span>：<span class="bbs-body-inline"><RichText :text="p.body" /></span>（{{ fmtDate(p.created_at) }}）<span class="bbs-no">記事no.{{ p.id }}</span>
+                <span class="bbs-author"
+                  >{{ p.author_name
+                  }}<span v-if="p.author_job" class="bbs-job">（{{ p.author_job }}）</span></span
+                >：<span class="bbs-body-inline"><RichText :text="p.body" /></span>（{{
+                  fmtDate(p.created_at)
+                }}）<span class="bbs-no">記事no.{{ p.id }}</span>
               </div>
             </div>
           </div>
@@ -415,11 +457,25 @@ async function doDeleteBbs(kind: string, opts: { articleNo?: number; threadNo?: 
           <div>
             記事no.
             <input v-model="delArticleNo" size="8" class="del-input" />
-            <button class="btn" :disabled="busy" @click="doDeleteBbs('normal', { articleNo: Number(delArticleNo) || 0 })">削除</button>
+            <button
+              class="btn"
+              :disabled="busy"
+              @click="doDeleteBbs('normal', { articleNo: Number(delArticleNo) || 0 })"
+            >
+              削除
+            </button>
             親記事no.
             <input v-model="delThreadNo" size="8" class="del-input" />
-            <button class="btn" :disabled="busy" @click="doDeleteBbs('normal', { threadNo: Number(delThreadNo) || 0 })">削除</button>
-            <button class="btn" :disabled="busy" @click="doDeleteBbs('normal', { all: true })">全記事削除</button>
+            <button
+              class="btn"
+              :disabled="busy"
+              @click="doDeleteBbs('normal', { threadNo: Number(delThreadNo) || 0 })"
+            >
+              削除
+            </button>
+            <button class="btn" :disabled="busy" @click="doDeleteBbs('normal', { all: true })">
+              全記事削除
+            </button>
           </div>
           <br />
           ※ゲーム管理者のみ「記事no.」を指定して記事を削除することができます。<br />
@@ -436,19 +492,31 @@ async function doDeleteBbs(kind: string, opts: { articleNo?: number; threadNo?: 
             <div v-if="nushiPosts.length === 0" class="bbs-empty">まだ記事はありません。</div>
             <div v-for="p in nushiPagePosts" :key="p.id" class="nushi-article">
               <div class="nushi-daimei">{{ p.title || '(無題)' }}</div>
-              <div class="nushi-body">{{ p.body }}（{{ fmtDate(p.created_at) }}）<span class="bbs-no">記事no.{{ p.id }}</span></div>
+              <div class="nushi-body">
+                {{ p.body }}（{{ fmtDate(p.created_at) }}）<span class="bbs-no"
+                  >記事no.{{ p.id }}</span
+                >
+              </div>
             </div>
           </div>
           <div v-if="nushiMaxPage > 0" class="pager">
             <button class="btn" :disabled="nushiPage <= 0" @click="nushiPage--">BACK</button>
-            <button class="btn" :disabled="nushiPage >= nushiMaxPage" @click="nushiPage++">NEXT</button>
+            <button class="btn" :disabled="nushiPage >= nushiMaxPage" @click="nushiPage++">
+              NEXT
+            </button>
           </div>
         </div>
         <div class="del-form">
           <div>
             記事no.
             <input v-model="delNushiNo" size="8" class="del-input" />
-            <button class="btn" :disabled="busy" @click="doDeleteBbs('nushi', { articleNo: Number(delNushiNo) || 0 })">削除</button>
+            <button
+              class="btn"
+              :disabled="busy"
+              @click="doDeleteBbs('nushi', { articleNo: Number(delNushiNo) || 0 })"
+            >
+              削除
+            </button>
           </div>
           ※記事を書いた本人とゲーム管理者のみ「記事no.」を指定して記事を削除することができます。
         </div>
@@ -496,7 +564,9 @@ async function doDeleteBbs(kind: string, opts: { articleNo?: number; threadNo?: 
                       :value="it.item_id"
                       name="syo_hinmoku"
                     />
-                    <span :class="{ motteru: it.owned > 0 }">{{ it.name }}<template v-if="it.owned > 0">({{ it.owned }})</template></span>
+                    <span :class="{ motteru: it.owned > 0 }"
+                      >{{ it.name }}<template v-if="it.owned > 0">({{ it.owned }})</template></span
+                    >
                   </td>
                   <td class="r">{{ yen(it.price) }}円</td>
                   <td class="r">{{ it.stock }}</td>
@@ -517,10 +587,16 @@ async function doDeleteBbs(kind: string, opts: { articleNo?: number; threadNo?: 
                   支払い方法
                   <select v-model="payMethod">
                     <option value="cash">現金</option>
-                    <option value="credit" :disabled="!hasCreditCard">クレジット（普通口座）</option>
+                    <option value="credit" :disabled="!hasCreditCard">
+                      クレジット（普通口座）
+                    </option>
                   </select>
-                  <button class="btn" :disabled="busy || selectedItemId === null" @click="doBuy">購入する</button>
-                  <span v-if="neighborDiscount" class="neighbor-note">※この街の住人は単価10%引き</span>
+                  <button class="btn" :disabled="busy || selectedItemId === null" @click="doBuy">
+                    購入する
+                  </button>
+                  <span v-if="neighborDiscount" class="neighbor-note"
+                    >※この街の住人は単価10%引き</span
+                  >
                 </td>
               </tr>
             </table>

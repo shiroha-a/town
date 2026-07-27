@@ -1,11 +1,13 @@
 // Package townmap holds the runtime-editable town map: the placement of
-// facilities on the main-screen grid. It is seeded with a legacy-faithful
-// default at first boot, persisted as a single JSONB row, and editable by
-// admins. Every player fetches it to render the map; only admins may change it.
+// facilities and background assets on the main-screen grid. It is seeded from
+// the embedded default_map.json at first boot, persisted as a single JSONB row,
+// and editable by admins. Every player fetches it to render the map; only
+// admins may change it.
 package townmap
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -47,30 +49,43 @@ type Asset struct {
 	Row  int    `json:"row"`  // 0..Rows-1
 }
 
-// Default is the legacy-faithful initial layout, mirroring the placement that
-// used to be hardcoded in TownView.vue.
-func Default() []Facility {
-	return []Facility{
-		{Key: "kabu", Img: "kabu", Alt: "株取引場", Col: 2, Row: 3, Ready: true},
-		{Key: "depart", Img: "depart", Alt: "中央デパート", Col: 8, Row: 3, Ready: true},
-		{Key: "bank", Img: "bank", Alt: "銀行", Col: 6, Row: 4, Ready: true},
-		{Key: "syokudou", Img: "syokudou", Alt: "セントラル食堂", Col: 9, Row: 5, Ready: true},
-		{Key: "gym", Img: "gym", Alt: "ジム", Col: 11, Row: 9, Ready: true},
-		{Key: "keiba", Img: "keiba", Alt: "競馬場", Col: 13, Row: 9, Ready: true},
-		{Key: "jobchange", Img: "work", Alt: "職業安定所", Col: 2, Row: 6, Ready: true},
-		{Key: "onsen", Img: "onsen", Alt: "温泉", Col: 4, Row: 7, Ready: true},
-		{Key: "hospital", Img: "hospital", Alt: "中央病院", Col: 12, Row: 6, Ready: true},
-		{Key: "school", Img: "school", Alt: "学校", Col: 10, Row: 7, Ready: true},
-		{Key: "kyushitu", Img: "school", Alt: "教室", Col: 8, Row: 9, Ready: true},
-		{Key: "kentiku", Img: "kentiku", Alt: "建設会社", Col: 13, Row: 4, Ready: true},
-		{Key: "hanbai", Img: "hanbai", Alt: "自動販売機", Col: 4, Row: 4, Ready: true},
-		{Key: "yakuba", Img: "yakuba", Alt: "役場（住民名鑑）", Col: 6, Row: 7, Ready: true},
-		{Key: "tsuri", Img: "tsuri", Alt: "釣りゲーム", Col: 2, Row: 9, Ready: true},
-		{Key: "gifutoya", Img: "gifutoya", Alt: "ギフト屋", Col: 12, Row: 9, Ready: true},
-		{Key: "tokuten", Img: "tokuten", Alt: "特典交換所", Col: 6, Row: 9, Ready: true},
-		{Key: "bingo", Img: "bingo", Alt: "ビンゴ会場", Col: 9, Row: 9, Ready: true},
-		{Key: "prof", Img: "prof", Alt: "プロフィール", Col: 14, Row: 11, Ready: true},
+// defaultMapJSON is the initial layout of 公園(街0) と シー・リゾート(街1):
+// 施設・空き地・街移動と、道や草木といった背景アセット。管理画面で組んだ盤面を
+// そのまま書き出したもので、Goのリテラルで持つと600行近くになり差分も読めない
+// ため埋め込みJSONにしてある。他の街は空のまま(管理画面で組む)。
+//
+//go:embed default_map.json
+var defaultMapJSON []byte
+
+type defaultMap struct {
+	Facilities []Facility `json:"facilities"`
+	Assets     []Asset    `json:"assets"`
+}
+
+// loadDefaultMap parses the embedded layout once. 埋め込みなので壊れていれば
+// 起動時に必ず落ちる(=ビルド時の資産として扱う)。
+var loadDefaultMap = sync.OnceValue(func() defaultMap {
+	var m defaultMap
+	if err := json.Unmarshal(defaultMapJSON, &m); err != nil {
+		panic(fmt.Sprintf("townmap: parse default_map.json: %v", err))
 	}
+	return m
+})
+
+// Default is the initial facility layout for a fresh installation.
+func Default() []Facility {
+	src := loadDefaultMap().Facilities
+	out := make([]Facility, len(src))
+	copy(out, src)
+	return out
+}
+
+// DefaultAssets is the initial background layer for a fresh installation.
+func DefaultAssets() []Asset {
+	src := loadDefaultMap().Assets
+	out := make([]Asset, len(src))
+	copy(out, src)
+	return out
 }
 
 // Store is a thread-safe, DB-backed holder of the current town map.
@@ -92,15 +107,20 @@ type FacilityPreset struct {
 }
 
 // NewStore loads the map from the DB, seeding it from defaults if absent.
-func NewStore(ctx context.Context, pool *pgxpool.Pool, defaults []Facility) (*Store, error) {
-	s := &Store{pool: pool, facilities: defaults, assets: []Asset{}, presets: []FacilityPreset{}}
+func NewStore(ctx context.Context, pool *pgxpool.Pool, defaults []Facility, defaultAssets []Asset) (*Store, error) {
+	if defaultAssets == nil {
+		defaultAssets = []Asset{}
+	}
+	s := &Store{pool: pool, facilities: defaults, assets: defaultAssets, presets: []FacilityPreset{}}
 	var facData, assetData, presetData []byte
 	err := pool.QueryRow(ctx, `SELECT facilities, assets, facility_presets FROM town_map WHERE id = 1`).
 		Scan(&facData, &assetData, &presetData)
 	if errors.Is(err, pgx.ErrNoRows) {
-		b, _ := json.Marshal(defaults)
+		fb, _ := json.Marshal(defaults)
+		ab, _ := json.Marshal(defaultAssets)
 		if _, e := pool.Exec(ctx,
-			`INSERT INTO town_map (id, facilities) VALUES (1, $1) ON CONFLICT (id) DO NOTHING`, b); e != nil {
+			`INSERT INTO town_map (id, facilities, assets) VALUES (1, $1, $2) ON CONFLICT (id) DO NOTHING`,
+			fb, ab); e != nil {
 			return nil, fmt.Errorf("seed town map: %w", e)
 		}
 		return s, nil

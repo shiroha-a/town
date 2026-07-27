@@ -40,7 +40,10 @@ async function buy() {
   busy.value = true;
   message.value = '';
   try {
-    state.value = await api.loto6Buy(props.player.id, [...picked.value].sort((a, b) => a - b));
+    state.value = await api.loto6Buy(
+      props.player.id,
+      [...picked.value].sort((a, b) => a - b),
+    );
     emit('update', await api.getPlayer(props.player.id));
     picked.value = [];
   } catch (e) {
@@ -55,8 +58,9 @@ async function buy() {
   <div class="cg" v-if="state">
     <h3 class="cg-title">ロト6</h3>
     <p class="cg-lead">
-      1〜36から6個選んで購入(1口{{ yen(state.cost) }}円、1日{{ state.daily_limit }}口まで)。毎日AM5:00に抽選し、
-      一致数に応じた賞金が銀行普通口座へ振り込まれます。
+      1〜36から6個選んで購入(1口{{ yen(state.cost) }}円、1日{{
+        state.daily_limit
+      }}口まで)。毎日AM5:00に抽選し、 一致数に応じた賞金が銀行普通口座へ振り込まれます。
     </p>
 
     <div v-if="state.last_draw" class="last-draw">

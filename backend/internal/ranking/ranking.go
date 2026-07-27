@@ -177,6 +177,9 @@ ORDER BY rn`, valueExpr, dir, tie, where)
 // Balances come from the ledger (there are no money columns); the correlated
 // sums read the same accounts as ledger.PlayerAccount / SavingsAccount /
 // SuperSavingsAccount.
+//
+// 一覧は players を p、ローンを pl として結合済みなので列を直接参照する。
+// 1人ぶんを引くときは同じ式のプレイヤーID版 ledger.TotalAssetsSQL を使う。
 const assetsExpr = `
   COALESCE((SELECT SUM(e.delta) FROM ledger_entry e WHERE e.account = 'player:'        || p.id), 0)
 + COALESCE((SELECT SUM(e.delta) FROM ledger_entry e WHERE e.account = 'savings:'       || p.id), 0)

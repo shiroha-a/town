@@ -52,6 +52,13 @@ type Game struct {
 	// InstancePolicy: 参加できるMisskeyインスタンスの方針。
 	// "blacklist"(既定)=blockリストに無ければ通す / "whitelist"=allowリストに有るものだけ通す。
 	InstancePolicy string `json:"instance_policy"`
+	// SessionTTLDays: ログインが切れるまでの日数。遊ぶたびに延びる(ローリング)ので、
+	// 「最後に遊んでから何日でログインし直しになるか」を意味する。
+	// 短くするほど再ログインが増えるが、MiAuthは再ログインのたびに新しいアクセス
+	// トークンをインスタンス側へ作り、こちらから取り消せない(i/revoke-tokenは
+	// secure:trueでアクセストークンからは呼べない)。連携アプリ一覧にゴミが
+	// 溜まるので、短くしすぎない方がよい。
+	SessionTTLDays int `json:"session_ttl_days"`
 }
 
 // TownConfig is one configurable town: its name and land price (万円)。街番号は
@@ -84,6 +91,7 @@ func Defaults() Game {
 		MoveMaigoEnabled:         false,  // 徒歩移動の迷子(レガシー既定OFF)
 		MoveWalkSecs:             10,     // 徒歩の街移動にかかる秒数
 		MoveBusSecs:              5,      // バスの街移動にかかる秒数
+		SessionTTLDays:           30,     // ログインは最後に遊んでから30日で切れる
 		SiteTitle:                "ＴＯＷＮ",
 		SiteTagline:              "働いて、買って、暮らす街",
 		GuestEnabled:             true, // お試しプレイを受け付ける
@@ -118,6 +126,11 @@ func (g Game) Validate() error {
 	}
 	if len([]rune(g.SiteTitle)) > 40 || len([]rune(g.SiteTagline)) > 80 {
 		return fmt.Errorf("%w: ゲーム名は40字、副題は80字までです", ErrInvalid)
+	}
+	// 0以下だと発行した瞬間に切れて誰もログインできなくなる。上限は「実質無期限」
+	// として置ける程度に大きく取る。
+	if g.SessionTTLDays < 1 || g.SessionTTLDays > 3650 {
+		return fmt.Errorf("%w: ログインの有効期限は1〜3650日で指定してください", ErrInvalid)
 	}
 	return nil
 }

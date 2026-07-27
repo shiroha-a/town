@@ -117,9 +117,7 @@ async function play(box: { key: string; cost: number }) {
       </button>
     </div>
 
-    <p class="cg-note">
-      スペシャルは全ての宝から抽選される(安い宝も高級な宝も等確率)。
-    </p>
+    <p class="cg-note">スペシャルは全ての宝から抽選される(安い宝も高級な宝も等確率)。</p>
 
     <div v-if="message" class="message error">{{ message }}</div>
   </div>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import ToggleSwitch from './ToggleSwitch.vue';
+import ItemFields from './ItemFields.vue';
 import { ref, reactive, computed, onMounted } from 'vue';
 import {
   api,
@@ -9,6 +10,7 @@ import {
   type EffectOp,
   type Condition,
   type AdminItem,
+  type AdminItemInput,
   type AdminJob,
   type JobPayload,
   type SimResult,
@@ -29,7 +31,18 @@ const emit = defineEmits<{ back: [] }>();
 const isAdmin = computed(() => props.player.roles.includes('admin'));
 
 // 各セクションの開閉。既定は折りたたみ(false)。
-const open = reactive({ item: false, job: false, user: false, settings: false, towns: false, map: false, events: false, serials: false, bingo: false, instances: false });
+const open = reactive({
+  item: false,
+  job: false,
+  user: false,
+  settings: false,
+  towns: false,
+  map: false,
+  events: false,
+  serials: false,
+  bingo: false,
+  instances: false,
+});
 
 // 効果/条件で対象にできるパラメータ。
 const PARAM_OPTIONS = [
@@ -54,19 +67,33 @@ const PARAM_OPTIONS = [
   'omoshirosa',
 ];
 
-const item = reactive<{
-  name: string;
-  category: string;
-  price: number;
-  effect: EffectOp[];
-  stock_master: number | null;
-}>({
-  name: '',
-  category: '',
-  price: 0,
-  effect: [],
-  stock_master: null,
-});
+// アイテムの初期値。content_items の既定値と揃える。
+function blankItem(): AdminItemInput {
+  return {
+    name: '',
+    category: '',
+    facility: '',
+    price: 0,
+    effect: [],
+    enabled: true,
+    stock_master: null,
+    shop_listed: true,
+    usable: true,
+    is_gift: false,
+    durability: 1,
+    durability_unit: 'use',
+    use_interval_min: 0,
+    fills_satiety: false,
+    calorie_g: 0,
+    max_sets: 5,
+    power_multiplier: 0,
+    body_cost: 0,
+    nou_cost: 0,
+    enables_credit: false,
+    build_span: 0,
+  };
+}
+const item = reactive<AdminItemInput>(blankItem());
 function emptyJob(): JobPayload {
   return {
     name: '',
@@ -168,7 +195,27 @@ const KEY_PRESETS: { key: string; label: string }[] = [
 const MOVE_KEYS = ['walk', 'bus'];
 // 施設用に用意されているgif(public/img)。
 const IMG_PRESETS = [
-  'depart', 'bank', 'syokudou', 'gym', 'onsen', 'hospital', 'work', 'yakuba', 'kabu', 'keiba', 'kentiku', 'game', 'tsuri', 'gifutoya', 'tokuten', 'bingo', 'prof', 'mail', 'mati_link', 'bus', 'akiti',
+  'depart',
+  'bank',
+  'syokudou',
+  'gym',
+  'onsen',
+  'hospital',
+  'work',
+  'yakuba',
+  'kabu',
+  'keiba',
+  'kentiku',
+  'game',
+  'tsuri',
+  'gifutoya',
+  'tokuten',
+  'bingo',
+  'prof',
+  'mail',
+  'mati_link',
+  'bus',
+  'akiti',
 ];
 
 // 施設レイヤーで編集中の街(0..4)。施設はマルチ街化済み。
@@ -281,7 +328,12 @@ const stdFacPresets = computed<FacilityPreset[]>(() => [
 const facPresets = ref<FacilityPreset[]>([]);
 // パレット全体 = 標準(削除不可) + カスタム(保存済み)。D&Dはこの通し番号を使う。
 const allFacPresets = computed(() => [...stdFacPresets.value, ...facPresets.value]);
-const presetDraft = ref<FacilityPreset>({ key: 'depart', img: 'depart', alt: '', dest: 0 });
+const presetDraft = ref<FacilityPreset>({
+  key: 'depart',
+  img: 'depart',
+  alt: '',
+  dest: 0,
+});
 const presetFormOpen = ref(false);
 async function savePreset() {
   if (!presetDraft.value.alt.trim()) {
@@ -412,10 +464,27 @@ const assets = ref<TownAsset[]>([]);
 const mapLayer = ref<'facility' | 'asset'>('facility');
 // 背景アセットのパレット(組み込みのSVG地形素材)。
 const BG_PRESETS = [
-  'kusa', 'tuti', 'sima', 'umi', 'oki',
-  'michi_yoko', 'michi_tate', 'michi_kado1', 'michi_kado2', 'michi_kado3', 'michi_kado4',
-  'michi_t1', 'michi_t2', 'michi_t3', 'michi_t4', 'michi_juji',
-  'tree1', 'tree2', 'tree3', 'tree4', 'yama',
+  'kusa',
+  'tuti',
+  'sima',
+  'umi',
+  'oki',
+  'michi_yoko',
+  'michi_tate',
+  'michi_kado1',
+  'michi_kado2',
+  'michi_kado3',
+  'michi_kado4',
+  'michi_t1',
+  'michi_t2',
+  'michi_t3',
+  'michi_t4',
+  'michi_juji',
+  'tree1',
+  'tree2',
+  'tree3',
+  'tree4',
+  'yama',
 ];
 // アップロードされた画像名(背景に追加できる)。'u:'接頭辞でimg値に使う。
 const uploadedAssets = ref<string[]>([]);
@@ -444,7 +513,9 @@ function assetImgsAt(col: number, rowIdx: number): string[] {
 }
 // 指定した街の背景アセット画像(施設レイヤーで背景を薄く参照表示するのに使う)。
 function assetImgsForTown(col: number, rowIdx: number, town: number): string[] {
-  return assets.value.filter((x) => x.town === town && x.col === col && x.row === rowIdx).map((x) => x.img);
+  return assets.value
+    .filter((x) => x.town === town && x.col === col && x.row === rowIdx)
+    .map((x) => x.img);
 }
 // マスをクリックで背景を配置(常に連続配置)。最上層と同じ筆なら除去、
 // 消しゴムなら最上層を剥がし、それ以外は最上層に積む(上限あり)。
@@ -464,7 +535,12 @@ function paintAsset(col: number, rowIdx: number) {
     kind.value = 'error';
     return;
   }
-  assets.value.push({ img: assetBrush.value, town: assetTown.value, col, row: rowIdx });
+  assets.value.push({
+    img: assetBrush.value,
+    town: assetTown.value,
+    col,
+    row: rowIdx,
+  });
 }
 async function saveTownAssets() {
   busy.value = true;
@@ -483,7 +559,10 @@ async function saveTownAssets() {
 // 背景アセットの画像アップロード。ファイル名からスラッグを作り、base64で送る。
 function slugFromFilename(fn: string): string {
   const base = fn.replace(/\.[^.]+$/, '');
-  const slug = base.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  const slug = base
+    .replace(/[^a-zA-Z0-9_-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
   return slug.slice(0, 40) || 'asset';
 }
 async function onUploadAsset(e: Event) {
@@ -580,7 +659,11 @@ function onBgDrop(col: number, rowIdx: number) {
 
 // 参加できるインスタンスの許可/拒否リスト(MiAuthログインの入口を制御する)。
 const instanceData = ref<import('../api').InstanceRules | null>(null);
-const instForm = reactive({ host: '', kind: 'block' as 'block' | 'allow', note: '' });
+const instForm = reactive({
+  host: '',
+  kind: 'block' as 'block' | 'allow',
+  note: '',
+});
 async function loadInstances() {
   try {
     instanceData.value = await api.adminInstances();
@@ -615,7 +698,12 @@ async function deleteInstance(host: string) {
 }
 
 // ビンゴ大会の開催(街全体の共有イベント。開始すると新しい抽選番号が確定する)。
-const bingoCfg = reactive({ max_number: 60, per_day: 20, days: 3, lines_to_win: 2 });
+const bingoCfg = reactive({
+  max_number: 60,
+  per_day: 20,
+  days: 3,
+  lines_to_win: 2,
+});
 async function startBingo() {
   if (!window.confirm('新しいビンゴ大会を開始します。よろしいですか?')) return;
   busy.value = true;
@@ -633,10 +721,20 @@ async function startBingo() {
 // シリアルコード管理(特典の発行/編集/削除と使用者の確認)。
 const serials = ref<import('../api').SerialCode[]>([]);
 const blankSerial = () => ({
-  id: 0, code: '', label: '', message: '', effect: '[]',
-  reward_item_id: null as number | null, reward_item_name: '', reward_item_uses: 0,
-  max_uses: 1, used_count: 0, starts_at: null as string | null, ends_at: null as string | null,
-  enabled: true, created_at: '',
+  id: 0,
+  code: '',
+  label: '',
+  message: '',
+  effect: '[]',
+  reward_item_id: null as number | null,
+  reward_item_name: '',
+  reward_item_uses: 0,
+  max_uses: 1,
+  used_count: 0,
+  starts_at: null as string | null,
+  ends_at: null as string | null,
+  enabled: true,
+  created_at: '',
 });
 const serialForm = reactive(blankSerial());
 // 効果はopの配列として編集し、保存時にJSON文字列へ直す。
@@ -659,6 +757,12 @@ function editSerial(c: import('../api').SerialCode) {
   } catch {
     serialOps.value = [];
   }
+}
+// 景品アイテムを選んだら、耐久を1個ぶん(その品の耐久)で埋める。0のままだと
+// 引き換えは成功するのに何も配られないため(サーバー側でも0は1個ぶんに補う)。
+function onSerialRewardChange() {
+  const it = items.value.find((x) => x.id === serialForm.reward_item_id);
+  serialForm.reward_item_uses = it ? it.durability : 0;
 }
 function resetSerial() {
   Object.assign(serialForm, blankSerial());
@@ -704,9 +808,25 @@ async function showSerialUses(sid: number) {
 // カスタムイベント管理(ランダムイベントの追加/編集/削除)。
 const adminEvents = ref<import('../api').AdminEvent[]>([]);
 const EV_PARAM_OPTIONS = [
-  'kokugo', 'suugaku', 'rika', 'syakai', 'eigo', 'ongaku', 'bijutsu', 'looks',
-  'tairyoku', 'kenkou', 'speed', 'power', 'wanryoku', 'kyakuryoku', 'love', 'omoshirosa',
-  'energy', 'nou_energy', 'satiety',
+  'kokugo',
+  'suugaku',
+  'rika',
+  'syakai',
+  'eigo',
+  'ongaku',
+  'bijutsu',
+  'looks',
+  'tairyoku',
+  'kenkou',
+  'speed',
+  'power',
+  'wanryoku',
+  'kyakuryoku',
+  'love',
+  'omoshirosa',
+  'energy',
+  'nou_energy',
+  'satiety',
 ];
 const EV_DISEASES: { label: string; value: number | null }[] = [
   { label: 'なし', value: null },
@@ -729,8 +849,18 @@ const EV_COND_PREDS: { value: string; label: string }[] = [
 ];
 function emptyEvent(): import('../api').AdminEvent {
   return {
-    id: 0, name: '', message: '', good: true, money_min: 0, money_max: 0,
-    params: {}, disease_set: null, weight_g: 0, weight: 1, enabled: true, conditions: [],
+    id: 0,
+    name: '',
+    message: '',
+    good: true,
+    money_min: 0,
+    money_max: 0,
+    params: {},
+    disease_set: null,
+    weight_g: 0,
+    weight: 1,
+    enabled: true,
+    conditions: [],
   };
 }
 const evForm = ref(emptyEvent());
@@ -738,7 +868,10 @@ const evParamRows = ref<{ key: string; value: number }[]>([]);
 const evCondRows = ref<import('../api').EventCond[]>([]);
 function evEdit(e: import('../api').AdminEvent) {
   evForm.value = { ...e, params: { ...e.params } };
-  evParamRows.value = Object.entries(e.params).map(([key, value]) => ({ key, value }));
+  evParamRows.value = Object.entries(e.params).map(([key, value]) => ({
+    key,
+    value,
+  }));
   evCondRows.value = (e.conditions ?? []).map((c) => ({ ...c }));
 }
 function evReset() {
@@ -837,62 +970,189 @@ type SettingField = {
   maxlength?: number;
 };
 
+// 配ったり所持条件にできる品だけを出す。
+// - 食堂・ジム・温泉・学校・教室の行はその場で消費するメニューで持ち物にならない
+// - ギフト(贈答品カテゴリと、ギフト屋で包んだ状態の品)は人に贈るための形なので
+//   直接配る対象にしない
+const HOLDABLE_FACILITIES = ['', 'hanbai'];
+const GIFT_CATEGORY = 'ギフト';
+const FACILITY_LABEL: Record<string, string> = {
+  '': '店',
+  hanbai: '自販機',
+  syokudou: '食堂',
+  gym: 'ジム',
+  onsen: '温泉',
+  school: '学校',
+  kyushitu: '教室',
+};
+const holdableItems = computed(() =>
+  items.value.filter(
+    (i) => HOLDABLE_FACILITIES.includes(i.facility) && !i.is_gift && i.category !== GIFT_CATEGORY,
+  ),
+);
+
 const SETTINGS_GROUPS: { title: string; fields: SettingField[] }[] = [
   {
     title: '表示',
     fields: [
-      { key: 'site_title', label: 'ゲーム名', type: 'text', maxlength: 40, hint: '入口の看板・タブ・街の見出しに出る' },
-      { key: 'site_tagline', label: '副題', type: 'text', maxlength: 80, hint: '看板でゲーム名の下に出る(空なら非表示)' },
+      {
+        key: 'site_title',
+        label: 'ゲーム名',
+        type: 'text',
+        maxlength: 40,
+        hint: '入口の看板・タブ・街の見出しに出る',
+      },
+      {
+        key: 'site_tagline',
+        label: '副題',
+        type: 'text',
+        maxlength: 80,
+        hint: '看板でゲーム名の下に出る(空なら非表示)',
+      },
     ],
   },
   {
     title: '時間',
     fields: [
-      { key: 'timezone', label: 'タイムゾーン', type: 'text', hint: '例: Asia/Tokyo。反映には再起動が必要' },
-      { key: 'day_boundary_hour', label: '日付の切り替わり', hint: '利息や日次リセットが走る時刻(時)。反映には再起動が必要' },
-      { key: 'energy_recovery_sec', label: '身体P回復間隔', hint: '身体パワーが1回復する秒数' },
-      { key: 'nou_recovery_sec', label: '頭脳P回復間隔', hint: '頭脳パワーが1回復する秒数' },
-      { key: 'satiety_decay_sec', label: '満腹度減少間隔', hint: '満腹度が1減少する秒数' },
-      { key: 'condition_eval_interval_min', label: '病気評価間隔', hint: '病気指数を再評価する間隔(分)' },
-      { key: 'work_interval_min', label: '仕事間隔', hint: '連続して働けるようになるまでの分数' },
+      {
+        key: 'timezone',
+        label: 'タイムゾーン',
+        type: 'text',
+        hint: '例: Asia/Tokyo。反映には再起動が必要',
+      },
+      {
+        key: 'day_boundary_hour',
+        label: '日付の切り替わり',
+        hint: '利息や日次リセットが走る時刻(時)。反映には再起動が必要',
+      },
+      {
+        key: 'energy_recovery_sec',
+        label: '身体P回復間隔',
+        hint: '身体パワーが1回復する秒数',
+      },
+      {
+        key: 'nou_recovery_sec',
+        label: '頭脳P回復間隔',
+        hint: '頭脳パワーが1回復する秒数',
+      },
+      {
+        key: 'satiety_decay_sec',
+        label: '満腹度減少間隔',
+        hint: '満腹度が1減少する秒数',
+      },
+      {
+        key: 'condition_eval_interval_min',
+        label: '病気評価間隔',
+        hint: '病気指数を再評価する間隔(分)',
+      },
+      {
+        key: 'work_interval_min',
+        label: '仕事間隔',
+        hint: '連続して働けるようになるまでの分数',
+      },
     ],
   },
   {
     title: 'お金',
     fields: [
-      { key: 'initial_money', label: '初期所持金', hint: '新規登録時に付与される金額(円)' },
-      { key: 'daily_interest_permille', label: '日次利息', hint: '貯金に対する1日あたりの利息(‰/千分率)' },
+      {
+        key: 'initial_money',
+        label: '初期所持金',
+        hint: '新規登録時に付与される金額(円)',
+      },
+      {
+        key: 'daily_interest_permille',
+        label: '日次利息',
+        hint: '貯金に対する1日あたりの利息(‰/千分率)',
+      },
     ],
   },
   {
     title: '店',
     fields: [
-      { key: 'depart_daily_count', label: 'デパート日次件数', hint: '0で全件(日次ローテ無効)' },
-      { key: 'syokudou_daily_count', label: '食堂日次件数', hint: '0で全件(日次ローテ無効)' },
-      { key: 'hanbai_daily_count', label: '自販機日次件数', hint: '0で全件(日次ローテ無効)' },
-      { key: 'item_kind_limit', label: '所持アイテム種類上限', hint: '0で無制限(旧TOWN 25品目)' },
-      { key: 'stock_adjust', label: '店頭在庫倍率', hint: '実在庫=ceil(標準在庫÷倍率)。大きいほど品薄' },
+      {
+        key: 'depart_daily_count',
+        label: 'デパート日次件数',
+        hint: '0で全件(日次ローテ無効)',
+      },
+      {
+        key: 'syokudou_daily_count',
+        label: '食堂日次件数',
+        hint: '0で全件(日次ローテ無効)',
+      },
+      {
+        key: 'hanbai_daily_count',
+        label: '自販機日次件数',
+        hint: '0で全件(日次ローテ無効)',
+      },
+      {
+        key: 'item_kind_limit',
+        label: '所持アイテム種類上限',
+        hint: '0で無制限(旧TOWN 25品目)',
+      },
+      {
+        key: 'stock_adjust',
+        label: '店頭在庫倍率',
+        hint: '実在庫=ceil(標準在庫÷倍率)。大きいほど品薄',
+      },
     ],
   },
   {
     title: '街の移動',
     fields: [
-      { key: 'move_walk_secs', label: '徒歩の移動時間', hint: '街移動(徒歩)にかかる秒数。0以下で既定10秒' },
-      { key: 'move_bus_secs', label: 'バスの移動時間', hint: '街移動(バス)にかかる秒数。0以下で既定5秒' },
-      { key: 'move_maigo_enabled', label: '迷子', type: 'checkbox', chk: '徒歩移動で迷子(ダウンタウンへ)を有効化' },
+      {
+        key: 'move_walk_secs',
+        label: '徒歩の移動時間',
+        hint: '街移動(徒歩)にかかる秒数。0以下で既定10秒',
+      },
+      {
+        key: 'move_bus_secs',
+        label: 'バスの移動時間',
+        hint: '街移動(バス)にかかる秒数。0以下で既定5秒',
+      },
+      {
+        key: 'move_maigo_enabled',
+        label: '迷子',
+        type: 'checkbox',
+        chk: '徒歩移動で迷子(ダウンタウンへ)を有効化',
+      },
+    ],
+  },
+  {
+    title: 'ログイン',
+    fields: [
+      {
+        key: 'session_ttl_days',
+        label: '有効期限',
+        hint: '最後に遊んでから何日でログインし直しになるか。遊ぶたびに延びる。短くするとMisskeyの連携アプリ一覧に使われないトークンが溜まりやすい',
+      },
     ],
   },
   {
     title: 'お試しプレイ',
     fields: [
-      { key: 'guest_enabled', label: '受け付ける', type: 'checkbox', chk: 'アカウント無しの体験ログインを許可する' },
-      { key: 'guest_lifetime_min', label: '寿命', hint: 'ゲストのデータを消すまでの分数(作成からの経過)' },
+      {
+        key: 'guest_enabled',
+        label: '受け付ける',
+        type: 'checkbox',
+        chk: 'アカウント無しの体験ログインを許可する',
+      },
+      {
+        key: 'guest_lifetime_min',
+        label: '寿命',
+        hint: 'ゲストのデータを消すまでの分数(作成からの経過)',
+      },
     ],
   },
   {
     title: '開発',
     fields: [
-      { key: 'debug_no_cooldown', label: '間隔ゼロ', type: 'checkbox', chk: '仕事/使用/食事などの間隔制限を無視する(本番ではオフ)' },
+      {
+        key: 'debug_no_cooldown',
+        label: '間隔ゼロ',
+        type: 'checkbox',
+        chk: '仕事/使用/食事などの間隔制限を無視する(本番ではオフ)',
+      },
     ],
   },
 ];
@@ -1026,20 +1286,10 @@ async function createItem() {
   busy.value = true;
   message.value = '';
   try {
-    await api.adminCreateItem({
-      name: item.name,
-      category: item.category,
-      price: item.price,
-      effect: item.effect,
-      stock_master: item.stock_master,
-    });
+    await api.adminCreateItem({ ...item, effect: item.effect });
     message.value = `アイテム「${item.name}」を作成しました。`;
     kind.value = 'ok';
-    item.name = '';
-    item.category = '';
-    item.price = 0;
-    item.effect = [];
-    item.stock_master = null;
+    Object.assign(item, blankItem());
     await refresh();
   } catch (e) {
     fail(e);
@@ -1137,14 +1387,8 @@ async function saveEdit() {
   busy.value = true;
   message.value = '';
   try {
-    await api.adminUpdateItem(editing.value.id, {
-      name: editing.value.name,
-      category: editing.value.category,
-      price: editing.value.price,
-      effect: editing.value.effect,
-      enabled: editing.value.enabled,
-      stock_master: editing.value.stock_master,
-    });
+    const { id: _id, ...payload } = editing.value;
+    await api.adminUpdateItem(editing.value.id, payload);
     message.value = `アイテム「${editing.value.name}」を更新しました。`;
     kind.value = 'ok';
     closeEdit();
@@ -1178,14 +1422,18 @@ async function deleteEdit() {
   <div class="facility-page admin-page">
     <button class="btn back" @click="emit('back')">街に戻る</button>
     <div class="admin-header">
-      <div class="lead">管理者用のコンテンツ作成画面です。アイテム・職業の追加と効果の試算ができます。</div>
+      <div class="lead">
+        管理者用のコンテンツ作成画面です。アイテム・職業の追加と効果の試算ができます。
+      </div>
       <div class="title">管理者</div>
     </div>
 
     <div v-if="!isAdmin" class="message error">この画面は管理者のみ利用できます。</div>
 
     <template v-else>
-      <div v-if="message" :class="['message', kind]" data-test="message">{{ message }}</div>
+      <div v-if="message" :class="['message', kind]" data-test="message">
+        {{ message }}
+      </div>
 
       <div class="admin-sections">
         <!-- ユーザー -->
@@ -1198,15 +1446,32 @@ async function deleteEdit() {
               <h3>ユーザー一覧<span class="hint"> ※行をクリックで確認/編集</span></h3>
               <div class="table-scroll">
                 <table class="list-table">
-                  <thead><tr><th>ID</th><th class="l">名前</th><th class="l">Misskey</th><th>職業</th><th>Lv</th><th>所持金</th><th>権限</th></tr></thead>
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th class="l">名前</th>
+                      <th class="l">Misskey</th>
+                      <th>職業</th>
+                      <th>Lv</th>
+                      <th>所持金</th>
+                      <th>権限</th>
+                    </tr>
+                  </thead>
                   <tbody>
-                    <tr v-for="u in players" :key="u.id" class="clickable" @click="openEditPlayer(u.id)">
-                      <td>{{ u.id }}</td><td class="l">{{ u.display_name }}</td>
+                    <tr
+                      v-for="u in players"
+                      :key="u.id"
+                      class="clickable"
+                      @click="openEditPlayer(u.id)"
+                    >
+                      <td>{{ u.id }}</td>
+                      <td class="l">{{ u.display_name }}</td>
                       <td class="l acct" :title="`${u.instance_host} / ${u.remote_user_id}`">
                         {{ u.acct || `(${u.instance_host})` }}
                       </td>
                       <td>{{ u.job }}</td>
-                      <td>{{ u.job_level }}</td><td class="r">{{ u.money.toLocaleString('ja-JP') }}円</td>
+                      <td>{{ u.job_level }}</td>
+                      <td class="r">{{ u.money.toLocaleString('ja-JP') }}円</td>
                       <td>{{ u.roles.includes('admin') ? '管理者' : '' }}</td>
                     </tr>
                   </tbody>
@@ -1224,10 +1489,7 @@ async function deleteEdit() {
           <div v-if="open.item" class="fold-body">
             <section class="panel">
               <h3>アイテム作成</h3>
-              <label>品名<input v-model="item.name" placeholder="例: 特製栄養ドリンク" /></label>
-              <label>カテゴリ<input v-model="item.category" placeholder="例: ドリンク" /></label>
-              <label>値段<input type="number" v-model.number="item.price" /></label>
-              <label>標準在庫数<input type="number" v-model.number="item.stock_master" placeholder="空=無制限" /></label>
+              <ItemFields :item="item" />
               <div class="ops">
                 <div class="ops-head">使用効果</div>
                 <div v-for="(op, i) in item.effect" :key="i" class="op-row">
@@ -1239,9 +1501,15 @@ async function deleteEdit() {
                     <option value="add_disease">病気指数</option>
                   </select>
                   <select v-if="op.op === 'add_param'" v-model="op.param">
-                    <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">{{ PARAM_FULL[p] ?? p }}</option>
+                    <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">
+                      {{ PARAM_FULL[p] ?? p }}
+                    </option>
                   </select>
-                  <select v-else-if="op.op === 'add_disease'" v-model="op.disease" title="空=万能(どの病気にも効く)">
+                  <select
+                    v-else-if="op.op === 'add_disease'"
+                    v-model="op.disease"
+                    title="空=万能(どの病気にも効く)"
+                  >
                     <option value="">万能</option>
                     <option v-for="d in DISEASE_OPTIONS" :key="d" :value="d">{{ d }}のみ</option>
                   </select>
@@ -1252,25 +1520,58 @@ async function deleteEdit() {
               </div>
               <div class="actions">
                 <button class="btn" :disabled="busy" @click="simulate">効果を試算</button>
-                <button class="btn primary" :disabled="busy || !item.name" @click="createItem">作成</button>
+                <button class="btn primary" :disabled="busy || !item.name" @click="createItem">
+                  作成
+                </button>
               </div>
               <div v-if="sim" class="sim-box">
                 <div class="ops-head">試算結果</div>
-                <div v-if="sim.plan.money_delta !== 0">お金: {{ sim.plan.money_delta > 0 ? '+' : '' }}{{ sim.plan.money_delta }}円</div>
-                <div v-for="pc in sim.plan.params" :key="pc.name">{{ pc.name }}: {{ pc.old_value }} → {{ pc.new_value }}</div>
-                <div v-if="!sim.plan.params.length && sim.plan.money_delta === 0" class="muted">変化なし</div>
+                <div v-if="sim.plan.money_delta !== 0">
+                  お金: {{ sim.plan.money_delta > 0 ? '+' : '' }}{{ sim.plan.money_delta }}円
+                </div>
+                <div v-for="pc in sim.plan.params" :key="pc.name">
+                  {{ pc.name }}: {{ pc.old_value }} → {{ pc.new_value }}
+                </div>
+                <div v-if="!sim.plan.params.length && sim.plan.money_delta === 0" class="muted">
+                  変化なし
+                </div>
                 <div v-for="(w, i) in sim.warnings" :key="i" class="warn">⚠ {{ w }}</div>
               </div>
             </section>
             <section class="panel">
-              <h3>既存アイテム（{{ items.length }}）<span class="hint"> ※行をクリックで編集</span></h3>
+              <h3>
+                既存アイテム（{{ items.length }}）<span class="hint"> ※行をクリックで編集</span>
+              </h3>
               <div class="table-scroll">
                 <table class="list-table">
-                  <thead><tr><th>ID</th><th class="l">品名</th><th>カテゴリ</th><th>値段</th><th>有効</th></tr></thead>
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th class="l">品名</th>
+                      <th>扱い</th>
+                      <th>カテゴリ</th>
+                      <th>値段</th>
+                      <th>店頭</th>
+                      <th>使用</th>
+                      <th>有効</th>
+                    </tr>
+                  </thead>
                   <tbody>
                     <tr v-for="it in items" :key="it.id" class="clickable" @click="openEdit(it)">
-                      <td>{{ it.id }}</td><td class="l">{{ it.name }}</td><td>{{ it.category }}</td>
-                      <td class="r">{{ it.price }}</td><td :class="{ off: !it.enabled }">{{ it.enabled ? '○' : '×' }}</td>
+                      <td>{{ it.id }}</td>
+                      <td class="l">{{ it.name }}</td>
+                      <td>{{ FACILITY_LABEL[it.facility] ?? it.facility }}</td>
+                      <td>{{ it.category }}</td>
+                      <td class="r">{{ it.price }}</td>
+                      <td :class="{ off: !it.shop_listed }">
+                        {{ it.shop_listed ? '○' : '×' }}
+                      </td>
+                      <td :class="{ off: !it.usable }">
+                        {{ it.usable ? '○' : '×' }}
+                      </td>
+                      <td :class="{ off: !it.enabled }">
+                        {{ it.enabled ? '○' : '×' }}
+                      </td>
                     </tr>
                   </tbody>
                 </table>
@@ -1296,13 +1597,17 @@ async function deleteEdit() {
                 <label>ランク<input type="number" v-model.number="job.rank" /></label>
                 <label>身体消費<input type="number" v-model.number="job.body_cost" /></label>
                 <label>頭脳消費<input type="number" v-model.number="job.nou_cost" /></label>
-                <label class="wide2">前提マスター職<input v-model="job.require_master" placeholder="なし" /></label>
+                <label class="wide2"
+                  >前提マスター職<input v-model="job.require_master" placeholder="なし"
+                /></label>
               </div>
               <div class="ops">
                 <div class="ops-head">就くための必要条件(以上)</div>
                 <div v-for="(req, i) in job.requirements" :key="i" class="op-row">
                   <select v-model="req.param">
-                    <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">{{ PARAM_FULL[p] ?? p }}</option>
+                    <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">
+                      {{ PARAM_FULL[p] ?? p }}
+                    </option>
                   </select>
                   <span class="ge">≧</span>
                   <input type="number" v-model.number="req.value" />
@@ -1321,9 +1626,15 @@ async function deleteEdit() {
                     <option value="add_disease">病気指数</option>
                   </select>
                   <select v-if="op.op === 'add_param'" v-model="op.param">
-                    <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">{{ PARAM_FULL[p] ?? p }}</option>
+                    <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">
+                      {{ PARAM_FULL[p] ?? p }}
+                    </option>
                   </select>
-                  <select v-else-if="op.op === 'add_disease'" v-model="op.disease" title="空=万能(どの病気にも効く)">
+                  <select
+                    v-else-if="op.op === 'add_disease'"
+                    v-model="op.disease"
+                    title="空=万能(どの病気にも効く)"
+                  >
                     <option value="">万能</option>
                     <option v-for="d in DISEASE_OPTIONS" :key="d" :value="d">{{ d }}のみ</option>
                   </select>
@@ -1333,19 +1644,35 @@ async function deleteEdit() {
                 <button class="btn mini" @click="addOp(job.effect)">＋効果を追加</button>
               </div>
               <div class="actions">
-                <button class="btn primary" :disabled="busy || !job.name" @click="createJob">作成</button>
+                <button class="btn primary" :disabled="busy || !job.name" @click="createJob">
+                  作成
+                </button>
               </div>
             </section>
             <section class="panel">
               <h3>既存職業（{{ jobs.length }}）<span class="hint"> ※行をクリックで編集</span></h3>
               <div class="table-scroll">
                 <table class="list-table">
-                  <thead><tr><th>ID</th><th class="l">職業名</th><th>給料</th><th>ランク</th><th>前提職</th><th>有効</th></tr></thead>
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th class="l">職業名</th>
+                      <th>給料</th>
+                      <th>ランク</th>
+                      <th>前提職</th>
+                      <th>有効</th>
+                    </tr>
+                  </thead>
                   <tbody>
                     <tr v-for="j in jobs" :key="j.id" class="clickable" @click="openEditJob(j)">
-                      <td>{{ j.id }}</td><td class="l">{{ j.name }}</td><td class="r">{{ j.salary }}</td>
-                      <td>{{ j.rank }}</td><td class="l">{{ j.require_master }}</td>
-                      <td :class="{ off: !j.enabled }">{{ j.enabled ? '○' : '×' }}</td>
+                      <td>{{ j.id }}</td>
+                      <td class="l">{{ j.name }}</td>
+                      <td class="r">{{ j.salary }}</td>
+                      <td>{{ j.rank }}</td>
+                      <td class="l">{{ j.require_master }}</td>
+                      <td :class="{ off: !j.enabled }">
+                        {{ j.enabled ? '○' : '×' }}
+                      </td>
                     </tr>
                   </tbody>
                 </table>
@@ -1357,7 +1684,8 @@ async function deleteEdit() {
         <!-- カスタムイベント -->
         <section class="fold">
           <button class="fold-head" @click="open.events = !open.events">
-            <span class="caret">{{ open.events ? '▼' : '▶' }}</span> イベント（{{ adminEvents.length }}）
+            <span class="caret">{{ open.events ? '▼' : '▶' }}</span>
+            イベント（{{ adminEvents.length }}）
           </button>
           <div v-if="open.events" class="fold-body">
             <section class="panel">
@@ -1366,31 +1694,49 @@ async function deleteEdit() {
                 <span class="hint"> ※組み込みイベントと同じ抽選(発生率1/12)に合流します</span>
               </h3>
               <label>名前<input v-model="evForm.name" placeholder="例: 落とし穴" /></label>
-              <label>メッセージ<input v-model="evForm.message" class="wide" placeholder="例: 落とし穴に落ちて{money}円落としました。" /></label>
-              <span class="hint">※プレースホルダー: {money}=実際の増減額 {name}=プレイヤー名 {job}=職業 {town}=今いる街</span>
+              <label
+                >メッセージ<input
+                  v-model="evForm.message"
+                  class="wide"
+                  placeholder="例: 落とし穴に落ちて{money}円落としました。"
+              /></label>
+              <span class="hint"
+                >※プレースホルダー: {money}=実際の増減額 {name}=プレイヤー名 {job}=職業
+                {town}=今いる街</span
+              >
               <ToggleSwitch v-model="evForm.good" label="良いイベント（トーストの色）" />
               <label>お金(最小)<input type="number" v-model.number="evForm.money_min" /></label>
               <label>お金(最大)<input type="number" v-model.number="evForm.money_max" /></label>
-              <span class="hint">※増減額は最小〜最大の一様乱数。マイナスで支払い。固定額は同値に</span>
+              <span class="hint"
+                >※増減額は最小〜最大の一様乱数。マイナスで支払い。固定額は同値に</span
+              >
               <div class="ops">
                 <div class="ops-head">パラメータ増減</div>
                 <div v-for="(r, i) in evParamRows" :key="i" class="op-row">
                   <select v-model="r.key">
-                    <option v-for="p in EV_PARAM_OPTIONS" :key="p" :value="p">{{ PARAM_FULL[p] ?? p }}</option>
+                    <option v-for="p in EV_PARAM_OPTIONS" :key="p" :value="p">
+                      {{ PARAM_FULL[p] ?? p }}
+                    </option>
                   </select>
                   <input type="number" v-model.number="r.value" />
                   <button class="btn mini" @click="evParamRows.splice(i, 1)">×</button>
                 </div>
-                <button class="btn mini" @click="evParamRows.push({ key: 'kokugo', value: 1 })">＋パラメータを追加</button>
+                <button class="btn mini" @click="evParamRows.push({ key: 'kokugo', value: 1 })">
+                  ＋パラメータを追加
+                </button>
               </div>
               <div class="ops">
                 <div class="ops-head">発生条件（すべて満たすプレイヤーにだけ発生。空=全員）</div>
                 <div v-for="(c, i) in evCondRows" :key="i" class="op-row">
                   <select v-model="c.pred">
-                    <option v-for="p in EV_COND_PREDS" :key="p.value" :value="p.value">{{ p.label }}</option>
+                    <option v-for="p in EV_COND_PREDS" :key="p.value" :value="p.value">
+                      {{ p.label }}
+                    </option>
                   </select>
                   <select v-if="c.pred === 'param_gte' || c.pred === 'param_lte'" v-model="c.param">
-                    <option v-for="p in EV_PARAM_OPTIONS" :key="p" :value="p">{{ PARAM_FULL[p] ?? p }}</option>
+                    <option v-for="p in EV_PARAM_OPTIONS" :key="p" :value="p">
+                      {{ PARAM_FULL[p] ?? p }}
+                    </option>
                   </select>
                   <input
                     v-if="c.pred !== 'has_item' && c.pred !== 'job_is'"
@@ -1399,49 +1745,96 @@ async function deleteEdit() {
                     placeholder="値"
                   />
                   <select v-if="c.pred === 'has_item'" v-model.number="c.item_id">
-                    <option v-for="it in items" :key="it.id" :value="it.id">{{ it.name }}</option>
+                    <option v-for="it in holdableItems" :key="it.id" :value="it.id">
+                      {{ it.name }}
+                    </option>
                   </select>
                   <select v-if="c.pred === 'job_is'" v-model="c.job">
-                    <option v-for="j in jobs" :key="j.id" :value="j.name">{{ j.name }}</option>
+                    <option v-for="j in jobs" :key="j.id" :value="j.name">
+                      {{ j.name }}
+                    </option>
                   </select>
                   <button class="btn mini" @click="evCondRows.splice(i, 1)">×</button>
                 </div>
-                <button class="btn mini" @click="evCondRows.push({ pred: 'money_gte', param: 'kokugo', value: 0 })">
+                <button
+                  class="btn mini"
+                  @click="
+                    evCondRows.push({
+                      pred: 'money_gte',
+                      param: 'kokugo',
+                      value: 0,
+                    })
+                  "
+                >
                   ＋条件を追加
                 </button>
               </div>
-              <label>病気にする
+              <label
+                >病気にする
                 <select v-model="evForm.disease_set">
-                  <option v-for="d in EV_DISEASES" :key="String(d.value)" :value="d.value">{{ d.label }}</option>
+                  <option v-for="d in EV_DISEASES" :key="String(d.value)" :value="d.value">
+                    {{ d.label }}
+                  </option>
                 </select>
               </label>
               <label>体重増減(g)<input type="number" v-model.number="evForm.weight_g" /></label>
-              <label>抽選の重み<input type="number" v-model.number="evForm.weight" min="1" max="100" /></label>
+              <label
+                >抽選の重み<input type="number" v-model.number="evForm.weight" min="1" max="100"
+              /></label>
               <span class="hint">※組み込みイベントは各1。2にすると2倍出やすい</span>
               <ToggleSwitch v-model="evForm.enabled" label="有効" />
               <div class="actions">
-                <button class="btn primary" :disabled="busy || !evForm.name || !evForm.message" @click="evSave">
+                <button
+                  class="btn primary"
+                  :disabled="busy || !evForm.name || !evForm.message"
+                  @click="evSave"
+                >
                   {{ evForm.id > 0 ? '更新' : '作成' }}
                 </button>
-                <button v-if="evForm.id > 0" class="btn danger" :disabled="busy" @click="evDelete">削除</button>
+                <button v-if="evForm.id > 0" class="btn danger" :disabled="busy" @click="evDelete">
+                  削除
+                </button>
                 <button v-if="evForm.id > 0" class="btn" @click="evReset">新規作成に戻る</button>
               </div>
             </section>
             <section class="panel">
-              <h3>既存イベント（{{ adminEvents.length }}）<span class="hint"> ※行をクリックで編集</span></h3>
+              <h3>
+                既存イベント（{{ adminEvents.length }}）<span class="hint">
+                  ※行をクリックで編集</span
+                >
+              </h3>
               <div class="table-scroll">
                 <table class="list-table">
-                  <thead><tr><th>ID</th><th class="l">名前</th><th class="l">メッセージ</th><th>お金</th><th>重み</th><th>有効</th></tr></thead>
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th class="l">名前</th>
+                      <th class="l">メッセージ</th>
+                      <th>お金</th>
+                      <th>重み</th>
+                      <th>有効</th>
+                    </tr>
+                  </thead>
                   <tbody>
                     <tr v-for="e in adminEvents" :key="e.id" class="clickable" @click="evEdit(e)">
                       <td>{{ e.id }}</td>
                       <td class="l">{{ e.name }}</td>
                       <td class="l">{{ e.message }}</td>
-                      <td class="r">{{ e.money_min === e.money_max ? e.money_min : `${e.money_min}〜${e.money_max}` }}</td>
+                      <td class="r">
+                        {{
+                          e.money_min === e.money_max
+                            ? e.money_min
+                            : `${e.money_min}〜${e.money_max}`
+                        }}
+                      </td>
                       <td class="r">{{ e.weight }}</td>
-                      <td :class="{ off: !e.enabled }">{{ e.enabled ? '○' : '×' }}</td>
+                      <td :class="{ off: !e.enabled }">
+                        {{ e.enabled ? '○' : '×' }}
+                      </td>
                     </tr>
-                    <tr v-if="!adminEvents.length"><td colspan="6" class="muted">まだカスタムイベントがありません。</td></tr>
+                    <tr v-if="!adminEvents.length">
+                      <td colspan="6" class="muted">まだカスタムイベントがありません。</td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
@@ -1453,7 +1846,9 @@ async function deleteEdit() {
         <section class="fold">
           <button class="fold-head" @click="open.instances = !open.instances">
             <span class="caret">{{ open.instances ? '▼' : '▶' }}</span>
-            参加インスタンス（{{ instanceData?.policy === 'whitelist' ? 'ホワイトリスト' : 'ブラックリスト' }}・{{ instanceData?.rules.length ?? 0 }}件）
+            参加インスタンス（{{
+              instanceData?.policy === 'whitelist' ? 'ホワイトリスト' : 'ブラックリスト'
+            }}・{{ instanceData?.rules.length ?? 0 }}件）
           </button>
           <div v-if="open.instances" class="fold-body">
             <section class="panel">
@@ -1462,23 +1857,44 @@ async function deleteEdit() {
                 <span class="hint"> ※方針は「サーバー設定」の instance_policy で切り替えます</span>
               </h3>
               <p class="hint">
-                現在: <b>{{ instanceData?.policy === 'whitelist' ? 'ホワイトリスト方式(allowに登録したインスタンスだけ参加可)' : 'ブラックリスト方式(blockに登録した以外は参加可)' }}</b><br />
+                現在:
+                <b>{{
+                  instanceData?.policy === 'whitelist'
+                    ? 'ホワイトリスト方式(allowに登録したインスタンスだけ参加可)'
+                    : 'ブラックリスト方式(blockに登録した以外は参加可)'
+                }}</b
+                ><br />
                 ※2つのリストは別々に保持されるので、ホワイトリストを準備してから切り替えられます。
               </p>
             </section>
 
             <section class="panel">
               <h3>ルールを追加</h3>
-              <label>インスタンス<input v-model="instForm.host" placeholder="misskey.io" data-test="inst-host" /></label>
-              <label>種別
+              <label
+                >インスタンス<input
+                  v-model="instForm.host"
+                  placeholder="misskey.io"
+                  data-test="inst-host"
+              /></label>
+              <label
+                >種別
                 <select v-model="instForm.kind" data-test="inst-kind">
                   <option value="block">block（拒否リスト）</option>
                   <option value="allow">allow（許可リスト）</option>
                 </select>
               </label>
-              <label>メモ<input v-model="instForm.note" class="wide" placeholder="なぜ登録したか" /></label>
+              <label
+                >メモ<input v-model="instForm.note" class="wide" placeholder="なぜ登録したか"
+              /></label>
               <div class="actions">
-                <button class="btn primary" :disabled="busy" data-test="inst-save" @click="saveInstance">追加</button>
+                <button
+                  class="btn primary"
+                  :disabled="busy"
+                  data-test="inst-save"
+                  @click="saveInstance"
+                >
+                  追加
+                </button>
               </div>
             </section>
 
@@ -1487,16 +1903,31 @@ async function deleteEdit() {
               <div class="table-scroll">
                 <table class="admin-table" data-test="inst-table">
                   <thead>
-                    <tr><th class="l">インスタンス</th><th>種別</th><th class="l">メモ</th><th></th></tr>
+                    <tr>
+                      <th class="l">インスタンス</th>
+                      <th>種別</th>
+                      <th class="l">メモ</th>
+                      <th></th>
+                    </tr>
                   </thead>
                   <tbody>
                     <tr v-for="r in instanceData?.rules ?? []" :key="r.host">
                       <td class="l mono">{{ r.host }}</td>
                       <td :class="{ off: r.kind === 'block' }">{{ r.kind }}</td>
                       <td class="l">{{ r.note }}</td>
-                      <td><button class="btn mini danger" :disabled="busy" @click="deleteInstance(r.host)">削除</button></td>
+                      <td>
+                        <button
+                          class="btn mini danger"
+                          :disabled="busy"
+                          @click="deleteInstance(r.host)"
+                        >
+                          削除
+                        </button>
+                      </td>
                     </tr>
-                    <tr v-if="!instanceData?.rules.length"><td colspan="4" class="muted">まだルールがありません。</td></tr>
+                    <tr v-if="!instanceData?.rules.length">
+                      <td colspan="4" class="muted">まだルールがありません。</td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
@@ -1513,15 +1944,38 @@ async function deleteEdit() {
             <section class="panel">
               <h3>
                 大会を開始
-                <span class="hint"> ※街全体の共有イベント。開始すると抽選番号が確定し、日ごとに公開されます</span>
+                <span class="hint">
+                  ※街全体の共有イベント。開始すると抽選番号が確定し、日ごとに公開されます</span
+                >
               </h3>
-              <label>数字の範囲(1〜)<input type="number" v-model.number="bingoCfg.max_number" min="25" max="99" /></label>
-              <label>1日に公開する個数<input type="number" v-model.number="bingoCfg.per_day" min="1" /></label>
+              <label
+                >数字の範囲(1〜)<input
+                  type="number"
+                  v-model.number="bingoCfg.max_number"
+                  min="25"
+                  max="99"
+              /></label>
+              <label
+                >1日に公開する個数<input type="number" v-model.number="bingoCfg.per_day" min="1"
+              /></label>
               <label>開催日数<input type="number" v-model.number="bingoCfg.days" min="1" /></label>
-              <label>成立ライン数<input type="number" v-model.number="bingoCfg.lines_to_win" min="1" max="12" /></label>
+              <label
+                >成立ライン数<input
+                  type="number"
+                  v-model.number="bingoCfg.lines_to_win"
+                  min="1"
+                  max="12"
+              /></label>
               <span class="hint">※既定はレガシーと同じ 60個 / 20個ずつ / 3日 / 2ライン</span>
               <div class="actions">
-                <button class="btn primary" :disabled="busy" data-test="bingo-start" @click="startBingo">開始する</button>
+                <button
+                  class="btn primary"
+                  :disabled="busy"
+                  data-test="bingo-start"
+                  @click="startBingo"
+                >
+                  開始する
+                </button>
               </div>
             </section>
           </div>
@@ -1530,29 +1984,61 @@ async function deleteEdit() {
         <!-- シリアルコード(特典) -->
         <section class="fold">
           <button class="fold-head" @click="open.serials = !open.serials">
-            <span class="caret">{{ open.serials ? '▼' : '▶' }}</span> シリアルコード（{{ serials.length }}）
+            <span class="caret">{{ open.serials ? '▼' : '▶' }}</span>
+            シリアルコード（{{ serials.length }}）
           </button>
           <div v-if="open.serials" class="fold-body">
             <section class="panel">
               <h3>
                 {{ serialForm.id > 0 ? `コード編集 #${serialForm.id}` : 'コード発行' }}
-                <span class="hint"> ※特典交換所でプレイヤーが入力します。1つのコードにつき1人1回まで</span>
+                <span class="hint">
+                  ※特典交換所でプレイヤーが入力します。1つのコードにつき1人1回まで</span
+                >
               </h3>
-              <label>コード<input v-model="serialForm.code" class="mono" placeholder="空にすると自動発行" data-test="serial-code-input" /></label>
-              <label>用途メモ<input v-model="serialForm.label" class="wide" placeholder="例: 建築許可証の配布" /></label>
-              <label>受け取り時の文言<input v-model="serialForm.message" class="wide" placeholder="例: 建築許可証をお届けします" /></label>
-              <label>使える回数<input type="number" v-model.number="serialForm.max_uses" min="0" /></label>
+              <label
+                >コード<input
+                  v-model="serialForm.code"
+                  class="mono"
+                  placeholder="空にすると自動発行"
+                  data-test="serial-code-input"
+              /></label>
+              <label
+                >用途メモ<input
+                  v-model="serialForm.label"
+                  class="wide"
+                  placeholder="例: 建築許可証の配布"
+              /></label>
+              <label
+                >受け取り時の文言<input
+                  v-model="serialForm.message"
+                  class="wide"
+                  placeholder="例: 建築許可証をお届けします"
+              /></label>
+              <label
+                >使える回数<input type="number" v-model.number="serialForm.max_uses" min="0"
+              /></label>
               <span class="hint">※0で無制限。1人1回の制限は回数と別に常に効きます</span>
               <label>開始日時<input type="datetime-local" v-model="serialForm.starts_at" /></label>
               <label>終了日時<input type="datetime-local" v-model="serialForm.ends_at" /></label>
               <span class="hint">※空なら期間の制限なし</span>
-              <label>景品アイテム
-                <select v-model="serialForm.reward_item_id">
+              <label
+                >景品アイテム
+                <select v-model="serialForm.reward_item_id" @change="onSerialRewardChange">
                   <option :value="null">なし</option>
-                  <option v-for="it in items" :key="it.id" :value="it.id">{{ it.name }}</option>
+                  <option v-for="it in holdableItems" :key="it.id" :value="it.id">
+                    {{ it.name }}
+                  </option>
                 </select>
               </label>
-              <label>景品の個数(耐久)<input type="number" v-model.number="serialForm.reward_item_uses" min="0" /></label>
+              <label
+                >景品の耐久<input
+                  type="number"
+                  v-model.number="serialForm.reward_item_uses"
+                  min="0"
+              /></label>
+              <span class="hint">
+                ※持ち物の残り回数(日数)として渡す量。1個ぶん＝その品の耐久で、選ぶと自動で入ります。
+              </span>
               <div class="ops">
                 <div class="ops-head">ステータス等の効果</div>
                 <div v-for="(op, i) in serialOps" :key="i" class="op-row">
@@ -1564,9 +2050,15 @@ async function deleteEdit() {
                     <option value="add_disease">病気指数</option>
                   </select>
                   <select v-if="op.op === 'add_param'" v-model="op.param">
-                    <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">{{ PARAM_FULL[p] ?? p }}</option>
+                    <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">
+                      {{ PARAM_FULL[p] ?? p }}
+                    </option>
                   </select>
-                  <select v-else-if="op.op === 'add_disease'" v-model="op.disease" title="空=万能(どの病気にも効く)">
+                  <select
+                    v-else-if="op.op === 'add_disease'"
+                    v-model="op.disease"
+                    title="空=万能(どの病気にも効く)"
+                  >
                     <option value="">万能</option>
                     <option v-for="d in DISEASE_OPTIONS" :key="d" :value="d">{{ d }}のみ</option>
                   </select>
@@ -1577,10 +2069,17 @@ async function deleteEdit() {
               </div>
               <ToggleSwitch v-model="serialForm.enabled" label="有効" />
               <div class="actions">
-                <button class="btn primary" :disabled="busy" data-test="serial-save" @click="saveSerial">
+                <button
+                  class="btn primary"
+                  :disabled="busy"
+                  data-test="serial-save"
+                  @click="saveSerial"
+                >
                   {{ serialForm.id > 0 ? '更新' : '発行' }}
                 </button>
-                <button v-if="serialForm.id > 0" class="btn" @click="resetSerial">新規に戻す</button>
+                <button v-if="serialForm.id > 0" class="btn" @click="resetSerial">
+                  新規に戻す
+                </button>
               </div>
             </section>
 
@@ -1589,30 +2088,56 @@ async function deleteEdit() {
               <div class="table-scroll">
                 <table class="admin-table" data-test="serial-table">
                   <thead>
-                    <tr><th>コード</th><th>用途</th><th>景品</th><th>使用</th><th>有効</th><th></th></tr>
+                    <tr>
+                      <th>コード</th>
+                      <th>用途</th>
+                      <th>景品</th>
+                      <th>使用</th>
+                      <th>有効</th>
+                      <th></th>
+                    </tr>
                   </thead>
                   <tbody>
                     <tr v-for="c in serials" :key="c.id">
                       <td class="mono">{{ c.code }}</td>
                       <td>{{ c.label }}</td>
-                      <td>{{ c.reward_item_name ? `${c.reward_item_name}×${c.reward_item_uses}` : '-' }}</td>
-                      <td class="r">{{ c.used_count }}{{ c.max_uses > 0 ? ` / ${c.max_uses}` : '' }}</td>
-                      <td :class="{ off: !c.enabled }">{{ c.enabled ? '○' : '×' }}</td>
+                      <td>
+                        {{
+                          c.reward_item_name ? `${c.reward_item_name}×${c.reward_item_uses}` : '-'
+                        }}
+                      </td>
+                      <td class="r">
+                        {{ c.used_count }}{{ c.max_uses > 0 ? ` / ${c.max_uses}` : '' }}
+                      </td>
+                      <td :class="{ off: !c.enabled }">
+                        {{ c.enabled ? '○' : '×' }}
+                      </td>
                       <td>
                         <button class="btn mini" @click="editSerial(c)">編集</button>
                         <button class="btn mini" @click="showSerialUses(c.id)">使用者</button>
-                        <button class="btn mini danger" :disabled="busy" @click="deleteSerial(c.id)">削除</button>
+                        <button
+                          class="btn mini danger"
+                          :disabled="busy"
+                          @click="deleteSerial(c.id)"
+                        >
+                          削除
+                        </button>
                       </td>
                     </tr>
-                    <tr v-if="!serials.length"><td colspan="6" class="muted">まだコードがありません。</td></tr>
+                    <tr v-if="!serials.length">
+                      <td colspan="6" class="muted">まだコードがありません。</td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
               <div v-if="serialUsesFor" class="uses" data-test="serial-uses">
-                <div class="ops-head">コード #{{ serialUsesFor }} を使った人（{{ serialUses.length }}）</div>
+                <div class="ops-head">
+                  コード #{{ serialUsesFor }} を使った人（{{ serialUses.length }}）
+                </div>
                 <div v-if="!serialUses.length" class="muted">まだ誰も使っていません。</div>
                 <div v-for="u in serialUses" :key="u.player_id" class="use-row">
-                  {{ u.player_name }}（ID {{ u.player_id }}）— {{ new Date(u.used_at).toLocaleString('ja-JP') }}
+                  {{ u.player_name }}（ID {{ u.player_id }}）—
+                  {{ new Date(u.used_at).toLocaleString('ja-JP') }}
                 </div>
               </div>
             </section>
@@ -1622,7 +2147,8 @@ async function deleteEdit() {
         <!-- サーバー設定 -->
         <section class="fold">
           <button class="fold-head" @click="open.settings = !open.settings">
-            <span class="caret">{{ open.settings ? '▼' : '▶' }}</span> サーバー設定
+            <span class="caret">{{ open.settings ? '▼' : '▶' }}</span>
+            サーバー設定
           </button>
           <div v-if="open.settings" class="fold-body">
             <section class="panel">
@@ -1631,26 +2157,33 @@ async function deleteEdit() {
                 <div v-for="grp in SETTINGS_GROUPS" :key="grp.title" class="settings-group">
                   <div class="settings-group-head">{{ grp.title }}</div>
                   <div class="settings-grid">
-                    <label v-for="f in grp.fields" :key="f.key" class="setting" :class="{ 'chk-setting': f.type === 'checkbox' }">
+                    <label
+                      v-for="f in grp.fields"
+                      :key="f.key"
+                      class="setting"
+                      :class="{ 'chk-setting': f.type === 'checkbox' }"
+                    >
                       <span class="setting-label">{{ f.label }}</span>
                       <span v-if="f.type === 'checkbox'" class="chk-line">
-                        <ToggleSwitch v-model="(settings[f.key] as boolean)" :label="f.chk" />
+                        <ToggleSwitch v-model="settings[f.key] as boolean" :label="f.chk" />
                       </span>
                       <input
                         v-else-if="f.type === 'text'"
                         type="text"
                         :maxlength="f.maxlength"
                         spellcheck="false"
-                        v-model="(settings[f.key] as string)"
+                        v-model="settings[f.key] as string"
                       />
-                      <input v-else type="number" v-model.number="(settings[f.key] as number)" />
+                      <input v-else type="number" v-model.number="settings[f.key] as number" />
                       <span v-if="f.hint" class="setting-hint">{{ f.hint }}</span>
                     </label>
                   </div>
                 </div>
               </template>
               <div class="actions">
-                <button class="btn primary" :disabled="busy || !settings" @click="saveSettings">保存</button>
+                <button class="btn primary" :disabled="busy || !settings" @click="saveSettings">
+                  保存
+                </button>
                 <button class="btn" :disabled="busy" @click="refresh">再読込</button>
               </div>
             </section>
@@ -1666,25 +2199,47 @@ async function deleteEdit() {
             <section class="panel">
               <h3>
                 街の設定<span class="hint">
-                  ※上から順に街番号0,1,2…。名前と地価(万円)を編集。地価は建築費に使われる。「隠し」はワープで行けない隠し町。最大{{ 12 }}街。</span
+                  ※上から順に街番号0,1,2…。名前と地価(万円)を編集。地価は建築費に使われる。「隠し」はワープで行けない隠し町。最大{{
+                    12
+                  }}街。</span
                 >
               </h3>
               <table class="town-edit">
                 <thead>
-                  <tr><th>#</th><th>名前</th><th>地価(万)</th><th>隠し</th><th></th></tr>
+                  <tr>
+                    <th>#</th>
+                    <th>名前</th>
+                    <th>地価(万)</th>
+                    <th>隠し</th>
+                    <th></th>
+                  </tr>
                 </thead>
                 <tbody>
                   <tr v-for="(t, i) in townDraft" :key="i">
                     <td>{{ i }}</td>
                     <td><input v-model="t.name" /></td>
-                    <td><input type="number" v-model.number="t.land_price" min="0" /></td>
-                    <td class="chk-cell"><ToggleSwitch v-model="t.hidden" /></td>
-                    <td><button class="btn danger mini" :disabled="townDraft.length <= 1" @click="removeTown(i)">削除</button></td>
+                    <td>
+                      <input type="number" v-model.number="t.land_price" min="0" />
+                    </td>
+                    <td class="chk-cell">
+                      <ToggleSwitch v-model="t.hidden" />
+                    </td>
+                    <td>
+                      <button
+                        class="btn danger mini"
+                        :disabled="townDraft.length <= 1"
+                        @click="removeTown(i)"
+                      >
+                        削除
+                      </button>
+                    </td>
                   </tr>
                 </tbody>
               </table>
               <div class="actions">
-                <button class="btn" :disabled="townDraft.length >= 12" @click="addTown">＋街を追加</button>
+                <button class="btn" :disabled="townDraft.length >= 12" @click="addTown">
+                  ＋街を追加
+                </button>
                 <button class="btn primary" :disabled="busy" @click="saveTowns">保存</button>
                 <button class="btn" :disabled="busy" @click="refresh">再読込</button>
               </div>
@@ -1695,7 +2250,8 @@ async function deleteEdit() {
         <!-- タウンマップ -->
         <section class="fold">
           <button class="fold-head" @click="open.map = !open.map">
-            <span class="caret">{{ open.map ? '▼' : '▶' }}</span> タウンマップ（{{ townmap.length }}）
+            <span class="caret">{{ open.map ? '▼' : '▶' }}</span>
+            タウンマップ（{{ townmap.length }}）
           </button>
           <div v-if="open.map" class="fold-body">
             <!-- レイヤー切替: 機能付き施設層 / 背景アセット層 / 空き地(建設会社)層 -->
@@ -1722,21 +2278,32 @@ async function deleteEdit() {
                   v-for="(p, i) in allFacPresets"
                   :key="i"
                   class="fac-chip"
-                  :class="{ std: i < stdFacPresets.length, bulksel: bulkPlace && bulkPresetIdx === i }"
+                  :class="{
+                    std: i < stdFacPresets.length,
+                    bulksel: bulkPlace && bulkPresetIdx === i,
+                  }"
                   draggable="true"
                   :title="`${p.alt}（${p.key}${MOVE_KEYS.includes(p.key) ? '→' + (plotTowns.find((t) => t.no === p.dest)?.name ?? p.dest) : ''}）`"
                   @click="clickPresetChip(i)"
                   @dragstart="onPresetDragStart(i)"
                   @dragend="onDragEnd"
                 >
-                  <img :src="`/img/svg/${p.img}.svg`" width="20" height="20" alt="" draggable="false" />
+                  <img
+                    :src="`/img/svg/${p.img}.svg`"
+                    width="20"
+                    height="20"
+                    alt=""
+                    draggable="false"
+                  />
                   {{ p.alt }}
                   <button
                     v-if="i >= stdFacPresets.length"
                     class="chip-del"
                     title="プリセットを削除"
                     @click.stop="deletePreset(i - stdFacPresets.length)"
-                  >×</button>
+                  >
+                    ×
+                  </button>
                 </span>
                 <button class="btn mini" @click="presetFormOpen = !presetFormOpen">
                   {{ presetFormOpen ? 'キャンセル' : '＋プリセット追加' }}
@@ -1747,20 +2314,34 @@ async function deleteEdit() {
                 一括配置モード（プリセットをクリックで選択し、セルをクリックで連続配置）
               </label>
               <div v-if="presetFormOpen" class="preset-form">
-                <label>表示名<input v-model="presetDraft.alt" maxlength="40" placeholder="例: 中央デパート" /></label>
-                <label>遷移先
+                <label
+                  >表示名<input
+                    v-model="presetDraft.alt"
+                    maxlength="40"
+                    placeholder="例: 中央デパート"
+                /></label>
+                <label
+                  >遷移先
                   <select v-model="presetDraft.key">
-                    <option v-for="k in KEY_PRESETS" :key="k.key" :value="k.key">{{ k.label }}</option>
+                    <option v-for="k in KEY_PRESETS" :key="k.key" :value="k.key">
+                      {{ k.label }}
+                    </option>
                   </select>
                 </label>
-                <label v-if="MOVE_KEYS.includes(presetDraft.key)">行き先の街
+                <label v-if="MOVE_KEYS.includes(presetDraft.key)"
+                  >行き先の街
                   <select v-model.number="presetDraft.dest">
-                    <option v-for="t in plotTowns" :key="t.no" :value="t.no">{{ t.name }}</option>
+                    <option v-for="t in plotTowns" :key="t.no" :value="t.no">
+                      {{ t.name }}
+                    </option>
                   </select>
                 </label>
-                <label>画像
+                <label
+                  >画像
                   <select v-model="presetDraft.img">
-                    <option v-for="im in IMG_PRESETS" :key="im" :value="im">{{ im }}</option>
+                    <option v-for="im in IMG_PRESETS" :key="im" :value="im">
+                      {{ im }}
+                    </option>
                   </select>
                 </label>
                 <img :src="`/img/svg/${presetDraft.img}.svg`" width="24" height="24" alt="" />
@@ -1784,7 +2365,9 @@ async function deleteEdit() {
                 <div class="map-scroll">
                   <div class="map-grid">
                     <div class="corner"></div>
-                    <div v-for="c in mapCols" :key="'h' + c" class="colhead">{{ c }}</div>
+                    <div v-for="c in mapCols" :key="'h' + c" class="colhead">
+                      {{ c }}
+                    </div>
                     <template v-for="(r, ri) in mapRows" :key="r">
                       <div class="rowhead">{{ r }}</div>
                       <div
@@ -1836,7 +2419,12 @@ async function deleteEdit() {
                           @dragstart="onDragStart(mapFacilityAt(c, ri, facilityTown))"
                           @dragend="onDragEnd"
                         />
-                        <span v-if="houseCellAt(c, ri)" class="lock-badge" title="家が建っているため編集できません">🔒</span>
+                        <span
+                          v-if="houseCellAt(c, ri)"
+                          class="lock-badge"
+                          title="家が建っているため編集できません"
+                          >🔒</span
+                        >
                       </div>
                     </template>
                   </div>
@@ -1846,25 +2434,42 @@ async function deleteEdit() {
                   <div v-if="selectedFacility" class="sel-panel">
                     <div class="ops-head">選択中の施設</div>
                     <label>表示名<input v-model="selectedFacility.alt" /></label>
-                    <label>遷移先
+                    <label
+                      >遷移先
                       <select v-model="selectedFacility.key">
-                        <option v-for="k in KEY_PRESETS" :key="k.key" :value="k.key">{{ k.label }}</option>
+                        <option v-for="k in KEY_PRESETS" :key="k.key" :value="k.key">
+                          {{ k.label }}
+                        </option>
                       </select>
                     </label>
-                    <label v-if="MOVE_KEYS.includes(selectedFacility.key)">行き先の街
+                    <label v-if="MOVE_KEYS.includes(selectedFacility.key)"
+                      >行き先の街
                       <select v-model.number="selectedFacility.dest">
-                        <option v-for="t in plotTowns" :key="t.no" :value="t.no">{{ t.name }}</option>
+                        <option v-for="t in plotTowns" :key="t.no" :value="t.no">
+                          {{ t.name }}
+                        </option>
                       </select>
                     </label>
-                    <label>画像
+                    <label
+                      >画像
                       <select v-model="selectedFacility.img">
-                        <option v-for="im in IMG_PRESETS" :key="im" :value="im">{{ im }}</option>
+                        <option v-for="im in IMG_PRESETS" :key="im" :value="im">
+                          {{ im }}
+                        </option>
                       </select>
                     </label>
-                    <ToggleSwitch v-model="selectedFacility.ready" label="有効（オフで準備中=クリック不可）" />
+                    <ToggleSwitch
+                      v-model="selectedFacility.ready"
+                      label="有効（オフで準備中=クリック不可）"
+                    />
                     <div class="sel-prev">
                       位置: {{ mapRows[selectedFacility.row] }}{{ selectedFacility.col }}
-                      <img :src="`/img/svg/${selectedFacility.img}.svg`" width="28" height="28" alt="" />
+                      <img
+                        :src="`/img/svg/${selectedFacility.img}.svg`"
+                        width="28"
+                        height="28"
+                        alt=""
+                      />
                     </div>
                     <button class="btn danger mini" @click="deleteFacility">この施設を削除</button>
                   </div>
@@ -1885,7 +2490,9 @@ async function deleteEdit() {
             <section v-else-if="mapLayer === 'asset'" class="panel">
               <h3>
                 背景アセット配置<span class="hint">
-                  ※街を選び、パレットで素材を選んでマスをクリックで連続配置（常に一括配置）。1マスに最大{{ MAX_BG_LAYERS }}層まで重ね置き可（後から置いたものが上）。最上層と同じ素材を再クリック、または消しゴムで最上層を除去。施設は右下に薄く参照表示（編集不可）</span
+                  ※街を選び、パレットで素材を選んでマスをクリックで連続配置（常に一括配置）。1マスに最大{{
+                    MAX_BG_LAYERS
+                  }}層まで重ね置き可（後から置いたものが上）。最上層と同じ素材を再クリック、または消しゴムで最上層を除去。施設は右下に薄く参照表示（編集不可）</span
                 >
               </h3>
               <div class="plot-towns">
@@ -1932,13 +2539,20 @@ async function deleteEdit() {
                 </div>
                 <label class="bg-upload" title="背景アセットを画像から追加">
                   ＋画像を追加
-                  <input type="file" accept="image/png,image/gif,image/jpeg,image/webp" :disabled="busy" @change="onUploadAsset" />
+                  <input
+                    type="file"
+                    accept="image/png,image/gif,image/jpeg,image/webp"
+                    :disabled="busy"
+                    @change="onUploadAsset"
+                  />
                 </label>
               </div>
               <div class="map-scroll">
                 <div class="map-grid">
                   <div class="corner"></div>
-                  <div v-for="c in mapCols" :key="'ah' + c" class="colhead">{{ c }}</div>
+                  <div v-for="c in mapCols" :key="'ah' + c" class="colhead">
+                    {{ c }}
+                  </div>
                   <template v-for="(r, ri) in mapRows" :key="'ar' + r">
                     <div class="rowhead">{{ r }}</div>
                     <div
@@ -1961,10 +2575,16 @@ async function deleteEdit() {
                         :src="assetUrl(im)"
                         :alt="im"
                         :draggable="li === assetImgsAt(c, ri).length - 1"
-                        @dragstart="li === assetImgsAt(c, ri).length - 1 ? onBgTileDragStart(c, ri) : undefined"
+                        @dragstart="
+                          li === assetImgsAt(c, ri).length - 1
+                            ? onBgTileDragStart(c, ri)
+                            : undefined
+                        "
                         @dragend="onBgDragEnd"
                       />
-                      <span v-if="assetImgsAt(c, ri).length > 1" class="layer-badge">{{ assetImgsAt(c, ri).length }}</span>
+                      <span v-if="assetImgsAt(c, ri).length > 1" class="layer-badge">{{
+                        assetImgsAt(c, ri).length
+                      }}</span>
                       <img
                         v-if="mapFacilityAt(c, ri, assetTown) >= 0"
                         class="fac-ref"
@@ -1981,7 +2601,6 @@ async function deleteEdit() {
                 <button class="btn" :disabled="busy" @click="refresh">再読込</button>
               </div>
             </section>
-
           </div>
         </section>
       </div>
@@ -1991,11 +2610,7 @@ async function deleteEdit() {
     <div v-if="editing" class="modal-overlay" @click.self="closeEdit">
       <div class="modal">
         <h3>アイテム編集（ID {{ editing.id }}）</h3>
-        <label>品名<input v-model="editing.name" /></label>
-        <label>カテゴリ<input v-model="editing.category" /></label>
-        <label>値段<input type="number" v-model.number="editing.price" /></label>
-        <label>標準在庫数<input type="number" v-model.number="editing.stock_master" placeholder="空=無制限" /></label>
-        <ToggleSwitch v-model="editing.enabled" label="有効（オフで無効化）" />
+        <ItemFields :item="editing" edit />
         <div class="ops">
           <div class="ops-head">使用効果</div>
           <div v-for="(op, i) in editing.effect" :key="i" class="op-row">
@@ -2007,9 +2622,15 @@ async function deleteEdit() {
               <option value="add_disease">病気指数</option>
             </select>
             <select v-if="op.op === 'add_param'" v-model="op.param">
-              <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">{{ PARAM_FULL[p] ?? p }}</option>
+              <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">
+                {{ PARAM_FULL[p] ?? p }}
+              </option>
             </select>
-            <select v-else-if="op.op === 'add_disease'" v-model="op.disease" title="空=万能(どの病気にも効く)">
+            <select
+              v-else-if="op.op === 'add_disease'"
+              v-model="op.disease"
+              title="空=万能(どの病気にも効く)"
+            >
               <option value="">万能</option>
               <option v-for="d in DISEASE_OPTIONS" :key="d" :value="d">{{ d }}のみ</option>
             </select>
@@ -2040,13 +2661,17 @@ async function deleteEdit() {
           <label>ランク<input type="number" v-model.number="editingJob.rank" /></label>
           <label>身体消費<input type="number" v-model.number="editingJob.body_cost" /></label>
           <label>頭脳消費<input type="number" v-model.number="editingJob.nou_cost" /></label>
-          <label class="wide2">前提マスター職<input v-model="editingJob.require_master" placeholder="なし" /></label>
+          <label class="wide2"
+            >前提マスター職<input v-model="editingJob.require_master" placeholder="なし"
+          /></label>
         </div>
         <div class="ops">
           <div class="ops-head">就くための必要条件(以上)</div>
           <div v-for="(req, i) in editingJob.requirements" :key="i" class="op-row">
             <select v-model="req.param">
-              <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">{{ PARAM_FULL[p] ?? p }}</option>
+              <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">
+                {{ PARAM_FULL[p] ?? p }}
+              </option>
             </select>
             <span class="ge">≧</span>
             <input type="number" v-model.number="req.value" />
@@ -2065,9 +2690,15 @@ async function deleteEdit() {
               <option value="add_disease">病気指数</option>
             </select>
             <select v-if="op.op === 'add_param'" v-model="op.param">
-              <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">{{ PARAM_FULL[p] ?? p }}</option>
+              <option v-for="p in PARAM_OPTIONS" :key="p" :value="p">
+                {{ PARAM_FULL[p] ?? p }}
+              </option>
             </select>
-            <select v-else-if="op.op === 'add_disease'" v-model="op.disease" title="空=万能(どの病気にも効く)">
+            <select
+              v-else-if="op.op === 'add_disease'"
+              v-model="op.disease"
+              title="空=万能(どの病気にも効く)"
+            >
               <option value="">万能</option>
               <option v-for="d in DISEASE_OPTIONS" :key="d" :value="d">{{ d }}のみ</option>
             </select>
@@ -2096,9 +2727,12 @@ async function deleteEdit() {
         <ToggleSwitch v-model="editingPlayer.is_admin" label="管理者権限" />
         <div class="econ-grid">
           <label>所持金<input type="number" v-model.number="editingPlayer.money" /></label>
-          <label>職業
+          <label
+            >職業
             <select v-model="editingPlayer.job">
-              <option v-for="name in jobOptions" :key="name" :value="name">{{ name }}</option>
+              <option v-for="name in jobOptions" :key="name" :value="name">
+                {{ name }}
+              </option>
             </select>
           </label>
           <label>職Lv<input type="number" v-model.number="editingPlayer.job_level" /></label>
@@ -2106,7 +2740,9 @@ async function deleteEdit() {
           <label>身体P<input type="number" v-model.number="editingPlayer.energy" /></label>
           <label>頭脳P<input type="number" v-model.number="editingPlayer.nou_energy" /></label>
           <label>満腹度<input type="number" v-model.number="editingPlayer.satiety" /></label>
-          <label>病気指数<input type="number" v-model.number="editingPlayer.disease_index" /></label>
+          <label
+            >病気指数<input type="number" v-model.number="editingPlayer.disease_index"
+          /></label>
           <label>身長cm<input type="number" v-model.number="editingPlayer.height_cm" /></label>
           <label>体重g<input type="number" v-model.number="editingPlayer.weight_g" /></label>
         </div>
@@ -2770,6 +3406,11 @@ async function deleteEdit() {
   font-size: 11px;
   color: #889;
   font-weight: normal;
+}
+/* 「店に並べる」トグルの補足。トグルの直下に小さく置く。 */
+.modal .hint {
+  margin: -2px 0 6px;
+  line-height: 1.5;
 }
 .chk {
   font-size: 12px;

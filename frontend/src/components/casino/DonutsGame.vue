@@ -80,22 +80,27 @@ async function play(choice: 'hi' | 'low') {
     </p>
 
     <div class="cg-table">
-      <span class="prev">前のカード：<b>{{ prev }}</b></span>
-      <span class="count">累積：<b>{{ count }}</b> 枚</span>
-      <span class="stake">今回の掛け金：<b>{{ yen(stake) }}</b> 円</span>
+      <span class="prev"
+        >前のカード：<b>{{ prev }}</b></span
+      >
+      <span class="count"
+        >累積：<b>{{ count }}</b> 枚</span
+      >
+      <span class="stake"
+        >今回の掛け金：<b>{{ yen(stake) }}</b> 円</span
+      >
     </div>
 
-    <div
-      v-if="result"
-      class="cg-result"
-      :class="result.outcome"
-      data-test="result"
-    >
-      <span class="cards">{{ result.prev }} → <b>{{ result.card }}</b></span>
+    <div v-if="result" class="cg-result" :class="result.outcome" data-test="result">
+      <span class="cards"
+        >{{ result.prev }} → <b>{{ result.card }}</b></span
+      >
       <span class="band">{{ result.choice === 'hi' ? 'ハイ' : 'ロー' }}</span>
       <span class="outcome">
         <template v-if="result.outcome === 'win'">当たり！ +{{ yen(result.net) }}円</template>
-        <template v-else-if="result.outcome === 'safe'">セーフ(同じ数字)！ 損得なし・累積2倍で継続</template>
+        <template v-else-if="result.outcome === 'safe'"
+          >セーフ(同じ数字)！ 損得なし・累積2倍で継続</template
+        >
         <template v-else>はずれ {{ yen(result.net) }}円</template>
       </span>
     </div>
@@ -109,7 +114,9 @@ async function play(choice: 'hi' | 'low') {
       </label>
       <button class="btn" :disabled="busy" data-test="hi" @click="play('hi')">ハイ(大)</button>
       <button class="btn" :disabled="busy" data-test="low" @click="play('low')">ロー(小)</button>
-      <button class="btn ghost" :disabled="busy" data-test="reset" @click="newGame">新しく始める</button>
+      <button class="btn ghost" :disabled="busy" data-test="reset" @click="newGame">
+        新しく始める
+      </button>
     </div>
     <div v-if="message" class="message error">{{ message }}</div>
   </div>

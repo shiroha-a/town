@@ -151,9 +151,15 @@ onMounted(async () => {
           <div class="desc empty" v-else>自己紹介はありません。</div>
 
           <div class="counts">
-            <span><b>{{ prof.notes_count }}</b> 投稿</span>
-            <span><b>{{ prof.following_count }}</b> フォロー</span>
-            <span><b>{{ prof.followers_count }}</b> フォロワー</span>
+            <span
+              ><b>{{ prof.notes_count }}</b> 投稿</span
+            >
+            <span
+              ><b>{{ prof.following_count }}</b> フォロー</span
+            >
+            <span
+              ><b>{{ prof.followers_count }}</b> フォロワー</span
+            >
           </div>
 
           <div class="actions">
@@ -194,7 +200,9 @@ onMounted(async () => {
 
           <div class="fetched">
             {{ fmtTime(prof.fetched_at) }}時点の情報
-            <span class="stale" v-if="prof.stale">（インスタンスに接続できず、以前の内容を表示しています）</span>
+            <span class="stale" v-if="prof.stale"
+              >（インスタンスに接続できず、以前の内容を表示しています）</span
+            >
           </div>
         </template>
 

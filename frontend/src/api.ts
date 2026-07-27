@@ -15,6 +15,7 @@ export interface ItemStack {
   calorie_g: number; // 摂取カロリー(食べると体重+calorie_g g)
   special: string; // 特殊効果の説明(体重/身長/病気。無ければ空)
   enables_credit: boolean; // 所持しているとクレジット払いができる(カード類)
+  usable: boolean; // 「使う」ができるか(建築許可証・乗り物などは持つだけの品)
   // クールタイム中の再使用可能時刻(ISO8601)。使用可能ならnull。
   next_available_at: string | null;
 }
@@ -136,7 +137,10 @@ async function request<T>(
 ): Promise<T> {
   const res = await fetch(`/api/v1${path}`, {
     method,
-    headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...(headers ?? {}) },
+    headers: {
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+      ...(headers ?? {}),
+    },
     body: body ? JSON.stringify(body) : undefined,
     // ログインセッションはHttpOnly cookieで持つため、常に送る。
     credentials: 'same-origin',
@@ -460,7 +464,31 @@ export interface AdminItem {
   effect: EffectOp[];
   enabled: boolean;
   stock_master: number | null; // 標準在庫数(null=無制限)
+  /** どこで扱う品か。空と'hanbai'は持ち物になり、それ以外は施設のメニュー。 */
+  facility: string;
+  /** ギフト屋で包んだ状態の品。 */
+  is_gift: boolean;
+  /** 店頭に並べるか。false でもシリアルコードやイベントで配れて、持っていれば使える。 */
+  shop_listed: boolean;
+  /** 「使う」ができるか。持っていること自体が意味を持つ品は false。 */
+  usable: boolean;
+  /** 1個あたりの耐久(使用回数/日数)。 */
+  durability: number;
+  /** 耐久の単位。'use'=使うたびに1減る / 'day'=日数で減る。 */
+  durability_unit: string;
+  use_interval_min: number; // 使用間隔(分。0=制限なし)
+  fills_satiety: boolean; // 食べ物として満腹度を満たすか
+  calorie_g: number; // 摂取カロリー(食べると体重+この値g)
+  max_sets: number; // 1人が持てるセット数の上限
+  power_multiplier: number; // 温泉の回復速度倍率(0=温泉ではない)
+  body_cost: number; // 使用時に減る身体パワー
+  nou_cost: number; // 使用時に減る頭脳パワー
+  enables_credit: boolean; // 持っているとクレジット払いができる
+  build_span: number; // 建築許可証(0=通常 / 2=2マスの家)
 }
+
+/** アイテムの作成・更新で送る項目(content_itemsの編集できる列)。 */
+export type AdminItemInput = Omit<AdminItem, 'id'>;
 export interface AdminJob {
   id: number;
   name: string;
@@ -528,6 +556,15 @@ export interface AdminPlayerPayload {
   weight_g: number;
 }
 
+// 住民が自分で変えられる設定。
+export interface UserSettings {
+  display_name: string;
+  /** Misskeyの情報を街のプロフィールに載せるか(既定オフ)。 */
+  profile_public: boolean;
+  /** ログイン時に取り込んだMisskey側の名前(表示名を戻すときに使う)。 */
+  misskey_name: string;
+}
+
 export interface GameSettings {
   /** タイムゾーン。反映には再起動が要る。 */
   timezone: string;
@@ -554,6 +591,8 @@ export interface GameSettings {
   guest_enabled: boolean;
   /** ゲストのデータを消すまでの分数。 */
   guest_lifetime_min: number;
+  /** ログインが切れるまでの日数。遊ぶたびに延びる(最後に遊んでからの日数)。 */
+  session_ttl_days: number;
   move_walk_secs: number;
   move_bus_secs: number;
   towns: TownConfig[]; // 街の一覧(round-trip用。編集は専用エディタ)
@@ -657,7 +696,9 @@ export const WARP_FEE = 100000;
 // 背景アセット画像のURLを解決する。'u:'接頭辞はアップロード画像(DB配信)、
 // それ以外は組み込みのpublic/img/svg/*.svg(GIFからSVG化済み)。
 export function assetUrl(img: string): string {
-  return img.startsWith('u:') ? `/api/v1/assets/${encodeURIComponent(img.slice(2))}` : `/img/svg/${img}.svg`;
+  return img.startsWith('u:')
+    ? `/api/v1/assets/${encodeURIComponent(img.slice(2))}`
+    : `/img/svg/${img}.svg`;
 }
 
 export interface StockPrice {
@@ -837,6 +878,7 @@ export interface BuildingTown {
 export interface BuildingExterior {
   key: string;
   price: number;
+  span: number; // 横のマス数(1=通常 / 2=建築許可証が要る大邸宅)
 }
 export interface BuildingInterior {
   rank: number;
@@ -859,6 +901,7 @@ export interface HouseCell {
   col: number;
   exterior: string;
   setumei: string;
+  span_w: number; // 横のマス数(1 or 2)
   owner_name: string;
   own: boolean;
   tuika: number; // 0=家のみ/1=運営/2=株式会社/3=持ち物販売店
@@ -871,6 +914,7 @@ export interface MyHouse {
   col: number;
   exterior: string;
   setumei: string;
+  span_w: number; // 横のマス数(1 or 2)
   interior_rank: number;
   tuika: number; // 0=家のみ/1=運営/2=株式会社/3=持ち物販売店
   slots: number;
@@ -905,6 +949,9 @@ export interface BuildingState {
   shop_kinds: string[];
   house_count: number;
   mochiie_max: number;
+  permits: number; // 所持している建築許可証の枚数
+  permit_span: number; // 許可証で建てられる最大の横幅(0=許可証なし)
+  cost_factor: number; // 2マス以上の家にかかる建築費の倍率
   cols: number;
   rows: number;
 }
@@ -1172,14 +1219,21 @@ export const api = {
   listPlayers: () => request<PublicSummary[]>('GET', '/players'),
   site: () => request<{ title: string; tagline: string }>('GET', '/site'),
   emojiList: (host?: string) =>
-    request<{ host: string; emojis: PickerEmoji[]; verdicts: Record<string, string> }>(
-      'GET',
-      `/emojis${host ? `?host=${encodeURIComponent(host)}` : ''}`,
-    ),
+    request<{
+      host: string;
+      emojis: PickerEmoji[];
+      verdicts: Record<string, string>;
+    }>('GET', `/emojis${host ? `?host=${encodeURIComponent(host)}` : ''}`),
   resolveEmoji: (host: string, name: string) =>
     request<EmojiResolveResult>('POST', '/emojis/resolve', { host, name }),
-  usedEmojis: () =>
-    request<{ emojis: UsedEmoji[] }>('GET', '/emojis/used').then((r) => r.emojis),
+  usedEmojis: () => request<{ emojis: UsedEmoji[] }>('GET', '/emojis/used').then((r) => r.emojis),
+  userSettings: (id: number) => request<UserSettings>('GET', `/players/${id}/settings`),
+  updateUserSettings: (id: number, s: UserSettings) =>
+    request<UserSettings>('PUT', `/players/${id}/settings`, s),
+  refreshMisskeyProfile: (id: number) =>
+    request<MisskeyProfile>('POST', `/players/${id}/misskey/refresh`),
+  retire: (id: number, confirm: string) =>
+    request<{ retired: boolean }>('POST', `/players/${id}/retire`, { confirm }),
   misskeyProfile: (id: number) => request<MisskeyProfileResp>('GET', `/players/${id}/misskey`),
   misskeyFollow: (targetId: number) =>
     request<FollowResult>('POST', '/misskey/follow', { target_id: targetId }),
@@ -1188,7 +1242,8 @@ export const api = {
   playerProfile: (id: number) => request<PublicProfile>('GET', `/players/${id}/profile`),
   // 役場: 街のニュース(街全体)と住民ごとの出来事。
   townNews: (limit = 100) => request<NewsEntry[]>('GET', `/news?limit=${limit}`),
-  playerNews: (id: number, limit = 50) => request<NewsEntry[]>('GET', `/players/${id}/news?limit=${limit}`),
+  playerNews: (id: number, limit = 50) =>
+    request<NewsEntry[]>('GET', `/players/${id}/news?limit=${limit}`),
   fishing: (id: number) => request<FishingState>('GET', `/players/${id}/fishing`),
   fishingStart: (id: number, itemId: number) =>
     request<Player>('POST', `/players/${id}/fishing/start`, {
@@ -1201,14 +1256,16 @@ export const api = {
       idempotency_key: newIdempotencyKey(),
     }),
   // インスタンスを指定して認可URLをもらう(飛ばすのは呼び出し側)。
-  adminInstances: () =>
-    request<InstanceRules>('GET', '/admin/instances'),
+  adminInstances: () => request<InstanceRules>('GET', '/admin/instances'),
   adminPutInstance: (r: { host: string; kind: string; note: string }) =>
     request<{ ok: boolean }>('PUT', '/admin/instances', r),
   adminDeleteInstance: (host: string) =>
     request<{ deleted: boolean }>('DELETE', `/admin/instances/${encodeURIComponent(host)}`),
   authStart: (instance: string) =>
-    request<AuthStartResp>('POST', '/auth/start', { instance, origin: window.location.origin }),
+    request<AuthStartResp>('POST', '/auth/start', {
+      instance,
+      origin: window.location.origin,
+    }),
   // コールバックで受け取ったsessionを引き換えてログインする。
   authCallback: (session: string) => request<Player>('POST', '/auth/callback', { session }),
   authMe: () => request<Player>('GET', '/auth/me'),
@@ -1216,14 +1273,20 @@ export const api = {
   authLogout: () => request<{ ok: boolean }>('POST', '/auth/logout'),
   bingo: (id: number) => request<BingoState>('GET', `/players/${id}/bingo`),
   bingoTakeCard: (id: number) =>
-    request<Player>('POST', `/players/${id}/bingo/card`, { idempotency_key: newIdempotencyKey() }),
+    request<Player>('POST', `/players/${id}/bingo/card`, {
+      idempotency_key: newIdempotencyKey(),
+    }),
   bingoClaim: (id: number, cardId: number) =>
     request<BingoClaimResp>('POST', `/players/${id}/bingo/claim`, {
       card_id: cardId,
       idempotency_key: newIdempotencyKey(),
     }),
-  adminStartBingo: (cfg: { max_number: number; per_day: number; days: number; lines_to_win: number }) =>
-    request<{ started: boolean }>('POST', '/admin/bingo', cfg),
+  adminStartBingo: (cfg: {
+    max_number: number;
+    per_day: number;
+    days: number;
+    lines_to_win: number;
+  }) => request<{ started: boolean }>('POST', '/admin/bingo', cfg),
   redeemSerial: (id: number, code: string) =>
     request<SerialRedeemResp>('POST', `/players/${id}/serial/redeem`, {
       code,
@@ -1236,18 +1299,15 @@ export const api = {
       uses,
       idempotency_key: newIdempotencyKey(),
     }),
-  adminSerials: () =>
-    request<SerialCode[]>('GET', '/admin/serials'),
-  adminCreateSerial: (c: Partial<SerialCode>) =>
-    request<SerialCode>('POST', '/admin/serials', c),
-  adminUpdateSerial: (c: SerialCode) =>
-    request<SerialCode>('PUT', `/admin/serials/${c.id}`, c),
+  adminSerials: () => request<SerialCode[]>('GET', '/admin/serials'),
+  adminCreateSerial: (c: Partial<SerialCode>) => request<SerialCode>('POST', '/admin/serials', c),
+  adminUpdateSerial: (c: SerialCode) => request<SerialCode>('PUT', `/admin/serials/${c.id}`, c),
   adminDeleteSerial: (sid: number) =>
     request<{ deleted: boolean }>('DELETE', `/admin/serials/${sid}`),
-  adminSerialUses: (sid: number) =>
-    request<SerialUse[]>('GET', `/admin/serials/${sid}/uses`),
+  adminSerialUses: (sid: number) => request<SerialUse[]>('GET', `/admin/serials/${sid}/uses`),
   rankingKeys: () => request<RankingKey[]>('GET', '/ranking/keys'),
-  ranking: (key: string, self: number) => request<RankingResult>('GET', `/ranking?key=${key}&self=${self}`),
+  ranking: (key: string, self: number) =>
+    request<RankingResult>('GET', `/ranking?key=${key}&self=${self}`),
   publicHouses: () => request<HouseCell[]>('GET', '/houses'),
   townMap: () => request<TownFacility[]>('GET', '/townmap'),
   townAssets: () => request<TownAsset[]>('GET', '/townassets'),
@@ -1296,7 +1356,9 @@ export const api = {
   mailDelete: (id: number, msgId: number) =>
     request<{ ok: boolean }>('DELETE', `/players/${id}/mail/${msgId}`),
   mailSave: (id: number, msgId: number, saved: boolean) =>
-    request<{ ok: boolean }>('PUT', `/players/${id}/mail/${msgId}/save`, { saved }),
+    request<{ ok: boolean }>('PUT', `/players/${id}/mail/${msgId}/save`, {
+      saved,
+    }),
   greetings: (limit?: number) =>
     request<Greeting[]>('GET', `/greetings${limit ? `?limit=${limit}` : ''}`),
   postGreeting: (id: number, category: string, body: string, color: string, janken: string) =>
@@ -1310,9 +1372,15 @@ export const api = {
   getCharacter: (id: number) => request<Character | null>('GET', `/players/${id}/character`),
   cleague: () => request<CLeagueRank[]>('GET', '/cleague'),
   setCharacterName: (id: number, name: string) =>
-    request<Player>('POST', `/players/${id}/character`, { name, idempotency_key: newIdempotencyKey() }),
+    request<Player>('POST', `/players/${id}/character`, {
+      name,
+      idempotency_key: newIdempotencyKey(),
+    }),
   growCharacter: (id: number, inputs: Record<string, number>) =>
-    request<Player>('POST', `/players/${id}/character/grow`, { inputs, idempotency_key: newIdempotencyKey() }),
+    request<Player>('POST', `/players/${id}/character/grow`, {
+      inputs,
+      idempotency_key: newIdempotencyKey(),
+    }),
   battle: (id: number, opponentId: number) =>
     request<BattleResp>('POST', `/players/${id}/character/battle`, {
       opponent_id: opponentId,
@@ -1344,7 +1412,12 @@ export const api = {
       course_id: courseId,
       idempotency_key: newIdempotencyKey(),
     }),
-  facilityUse: (id: number, facility: string, menuId: number, payMethod: 'cash' | 'credit' = 'cash') =>
+  facilityUse: (
+    id: number,
+    facility: string,
+    menuId: number,
+    payMethod: 'cash' | 'credit' = 'cash',
+  ) =>
     request<Player>('POST', `/players/${id}/facilities/${facility}/use`, {
       menu_id: menuId,
       pay_method: payMethod,
@@ -1357,7 +1430,9 @@ export const api = {
       idempotency_key: newIdempotencyKey(),
     }),
   work: (id: number) =>
-    request<WorkResponse>('POST', `/players/${id}/work`, { idempotency_key: newIdempotencyKey() }),
+    request<WorkResponse>('POST', `/players/${id}/work`, {
+      idempotency_key: newIdempotencyKey(),
+    }),
   buy: (id: number, itemId: number, facility = '', payMethod: 'cash' | 'credit' = 'cash') =>
     request<Player>('POST', `/players/${id}/buy`, {
       item_id: itemId,
@@ -1418,7 +1493,8 @@ export const api = {
       params,
       idempotency_key: newIdempotencyKey(),
     }),
-  scratchState: (id: number, game: string) => request<ScratchState>('GET', `/players/${id}/scratch/${game}`),
+  scratchState: (id: number, game: string) =>
+    request<ScratchState>('GET', `/players/${id}/scratch/${game}`),
   scratchOpen: (id: number, game: string, card: number, cell: number) =>
     request<ScratchOpenResult>('POST', `/players/${id}/scratch/${game}/open`, {
       card,
@@ -1427,23 +1503,42 @@ export const api = {
     }),
   bjState: (id: number) => request<BJState>('GET', `/players/${id}/blackjack`),
   bjStart: (id: number, rate: number) =>
-    request<BJState>('POST', `/players/${id}/blackjack/start`, { rate, idempotency_key: newIdempotencyKey() }),
+    request<BJState>('POST', `/players/${id}/blackjack/start`, {
+      rate,
+      idempotency_key: newIdempotencyKey(),
+    }),
   bjHit: (id: number) =>
-    request<BJState>('POST', `/players/${id}/blackjack/hit`, { idempotency_key: newIdempotencyKey() }),
+    request<BJState>('POST', `/players/${id}/blackjack/hit`, {
+      idempotency_key: newIdempotencyKey(),
+    }),
   bjStand: (id: number) =>
-    request<BJState>('POST', `/players/${id}/blackjack/stand`, { idempotency_key: newIdempotencyKey() }),
+    request<BJState>('POST', `/players/${id}/blackjack/stand`, {
+      idempotency_key: newIdempotencyKey(),
+    }),
   pokerState: (id: number) => request<PokerState>('GET', `/players/${id}/poker`),
   pokerBuy: (id: number) =>
-    request<PokerState>('POST', `/players/${id}/poker/buy`, { idempotency_key: newIdempotencyKey() }),
+    request<PokerState>('POST', `/players/${id}/poker/buy`, {
+      idempotency_key: newIdempotencyKey(),
+    }),
   pokerDeal: (id: number) =>
-    request<PokerState>('POST', `/players/${id}/poker/deal`, { idempotency_key: newIdempotencyKey() }),
+    request<PokerState>('POST', `/players/${id}/poker/deal`, {
+      idempotency_key: newIdempotencyKey(),
+    }),
   pokerDraw: (id: number, hold: number[]) =>
-    request<PokerState>('POST', `/players/${id}/poker/draw`, { hold, idempotency_key: newIdempotencyKey() }),
+    request<PokerState>('POST', `/players/${id}/poker/draw`, {
+      hold,
+      idempotency_key: newIdempotencyKey(),
+    }),
   pokerCashout: (id: number) =>
-    request<PokerState>('POST', `/players/${id}/poker/cashout`, { idempotency_key: newIdempotencyKey() }),
+    request<PokerState>('POST', `/players/${id}/poker/cashout`, {
+      idempotency_key: newIdempotencyKey(),
+    }),
   loto6State: (id: number) => request<Loto6State>('GET', `/players/${id}/loto6`),
   loto6Buy: (id: number, numbers: number[]) =>
-    request<Loto6State>('POST', `/players/${id}/loto6/buy`, { numbers, idempotency_key: newIdempotencyKey() }),
+    request<Loto6State>('POST', `/players/${id}/loto6/buy`, {
+      numbers,
+      idempotency_key: newIdempotencyKey(),
+    }),
   hospitalTreat: (id: number) =>
     request<Player>('POST', `/players/${id}/hospital/treat`, {
       idempotency_key: newIdempotencyKey(),
@@ -1531,7 +1626,13 @@ export const api = {
     }),
   houseShop: (id: number, houseId: number) =>
     request<HouseShopView>('GET', `/players/${id}/building/shop?house_id=${houseId}`),
-  buyFromHouseShop: (id: number, houseId: number, itemId: number, qty: number, payMethod = 'cash') =>
+  buyFromHouseShop: (
+    id: number,
+    houseId: number,
+    itemId: number,
+    qty: number,
+    payMethod = 'cash',
+  ) =>
     request<BuyResp>('POST', `/players/${id}/building/shop/buy`, {
       house_id: houseId,
       item_id: itemId,
@@ -1590,7 +1691,14 @@ export const api = {
       house_id: houseId,
       idempotency_key: newIdempotencyKey(),
     }),
-  companyEducate: (id: number, houseId: number, staffId: number, param: string, amount: number, payMethod = 'cash') =>
+  companyEducate: (
+    id: number,
+    houseId: number,
+    staffId: number,
+    param: string,
+    amount: number,
+    payMethod = 'cash',
+  ) =>
     request<EducateResp>('POST', `/players/${id}/building/company/educate`, {
       house_id: houseId,
       staff_id: staffId,
@@ -1599,7 +1707,14 @@ export const api = {
       pay_method: payMethod,
       idempotency_key: newIdempotencyKey(),
     }),
-  companyBbsPost: (id: number, houseId: number, board: string, body: string, wantJoin = false, wantLeave = false) =>
+  companyBbsPost: (
+    id: number,
+    houseId: number,
+    board: string,
+    body: string,
+    wantJoin = false,
+    wantLeave = false,
+  ) =>
     request<Player>('POST', `/players/${id}/building/company/bbs`, {
       house_id: houseId,
       board,
@@ -1657,46 +1772,31 @@ export const api = {
     }),
 
   // 管理者API(ログインセッションのadminロールで認可)。
-  adminListItems: () =>
-    request<AdminItem[]>('GET', '/admin/items'),
-  adminCreateItem: (
-    item: { name: string; category: string; price: number; effect: EffectOp[]; stock_master: number | null },
-  ) => request<AdminItem>('POST', '/admin/items', item),
-  adminUpdateItem: (
-    id: number,
-    item: {
-      name: string;
-      category: string;
-      price: number;
-      effect: EffectOp[];
-      enabled: boolean;
-      stock_master: number | null;
-    },
-  ) => request<AdminItem>('PUT', `/admin/items/${id}`, item),
-  adminDeleteItem: (id: number) =>
-    request<{ deleted: boolean }>('DELETE', `/admin/items/${id}`),
-  adminListJobs: () =>
-    request<AdminJob[]>('GET', '/admin/jobs'),
-  adminCreateJob: (job: JobPayload) =>
-    request<AdminJob>('POST', '/admin/jobs', job),
+  adminListItems: () => request<AdminItem[]>('GET', '/admin/items'),
+  adminCreateItem: (item: AdminItemInput) => request<AdminItem>('POST', '/admin/items', item),
+  adminUpdateItem: (id: number, item: AdminItemInput) =>
+    request<AdminItem>('PUT', `/admin/items/${id}`, item),
+  adminDeleteItem: (id: number) => request<{ deleted: boolean }>('DELETE', `/admin/items/${id}`),
+  adminListJobs: () => request<AdminJob[]>('GET', '/admin/jobs'),
+  adminCreateJob: (job: JobPayload) => request<AdminJob>('POST', '/admin/jobs', job),
   adminUpdateJob: (id: number, job: JobPayload) =>
     request<AdminJob>('PUT', `/admin/jobs/${id}`, job),
-  adminDeleteJob: (id: number) =>
-    request<{ deleted: boolean }>('DELETE', `/admin/jobs/${id}`),
+  adminDeleteJob: (id: number) => request<{ deleted: boolean }>('DELETE', `/admin/jobs/${id}`),
   adminSimulate: (
     effect: EffectOp[],
-    state: { money: number; params: Record<string, { value: number; max: number }> },
+    state: {
+      money: number;
+      params: Record<string, { value: number; max: number }>;
+    },
   ) => request<SimResult>('POST', '/admin/simulate', { effect, state }),
-  adminListPlayers: () =>
-    request<AdminPlayerSummary[]>('GET', '/admin/players'),
+  adminListPlayers: () => request<AdminPlayerSummary[]>('GET', '/admin/players'),
   adminUpdatePlayer: (id: number, payload: AdminPlayerPayload) =>
     request<Player>('PUT', `/admin/players/${id}`, payload),
   adminDeletePlayer: (id: number) =>
     request<{ deleted: boolean }>('DELETE', `/admin/players/${id}`),
   adminDeleteGreeting: (id: number) =>
     request<{ deleted: boolean }>('DELETE', `/admin/greetings/${id}`),
-  adminGetSettings: () =>
-    request<GameSettings>('GET', '/admin/settings'),
+  adminGetSettings: () => request<GameSettings>('GET', '/admin/settings'),
   adminUpdateSettings: (settings: GameSettings) =>
     request<GameSettings>('PUT', '/admin/settings', settings),
   adminUpdateTownMap: (facilities: TownFacility[]) =>
@@ -1704,25 +1804,18 @@ export const api = {
   adminUpdateTownAssets: (assets: TownAsset[]) =>
     request<TownAsset[]>('PUT', '/admin/townassets', assets),
   // 施設プリセット(画像・表示名・遷移先の保存済みテンプレート)。
-  adminFacilityPresets: () =>
-    request<FacilityPreset[]>('GET', '/admin/townmap/presets'),
+  adminFacilityPresets: () => request<FacilityPreset[]>('GET', '/admin/townmap/presets'),
   adminUpdateFacilityPresets: (presets: FacilityPreset[]) =>
     request<FacilityPreset[]>('PUT', '/admin/townmap/presets', presets),
   // カスタムイベント(ランダムイベントの追加/編集/削除)。
-  adminListEvents: () =>
-    request<AdminEvent[]>('GET', '/admin/events'),
-  adminCreateEvent: (e: Omit<AdminEvent, 'id'>) =>
-    request<AdminEvent>('POST', '/admin/events', e),
-  adminUpdateEvent: (e: AdminEvent) =>
-    request<AdminEvent>('PUT', `/admin/events/${e.id}`, e),
-  adminDeleteEvent: (id: number) =>
-    request<{ deleted: boolean }>('DELETE', `/admin/events/${id}`),
+  adminListEvents: () => request<AdminEvent[]>('GET', '/admin/events'),
+  adminCreateEvent: (e: Omit<AdminEvent, 'id'>) => request<AdminEvent>('POST', '/admin/events', e),
+  adminUpdateEvent: (e: AdminEvent) => request<AdminEvent>('PUT', `/admin/events/${e.id}`, e),
+  adminDeleteEvent: (id: number) => request<{ deleted: boolean }>('DELETE', `/admin/events/${id}`),
   // 家が建っているマス(施設エディタでロックするため)。
-  adminHouseCells: () =>
-    request<PlotCell[]>('GET', '/admin/townmap/houses'),
+  adminHouseCells: () => request<PlotCell[]>('GET', '/admin/townmap/houses'),
   // アップロード済み画像名の一覧(背景アセットのパレット用)。
-  adminListAssets: () =>
-    request<string[]>('GET', '/admin/assets'),
+  adminListAssets: () => request<string[]>('GET', '/admin/assets'),
   // 背景アセット画像をアップロード(base64)。nameはURLスラッグ。
   adminUploadAsset: (name: string, mime: string, data: string) =>
     request<{ name: string }>('POST', '/admin/assets', { name, mime, data }),
@@ -1730,6 +1823,5 @@ export const api = {
   adminDeleteAsset: (name: string) =>
     request<{ ok: boolean }>('DELETE', `/admin/assets/${encodeURIComponent(name)}`),
   // 街の一覧(名前・地価)を更新。街番号は並び順で決まる。
-  adminUpdateTowns: (towns: TownConfig[]) =>
-    request<Town[]>('PUT', '/admin/towns', towns),
+  adminUpdateTowns: (towns: TownConfig[]) => request<Town[]>('PUT', '/admin/towns', towns),
 };

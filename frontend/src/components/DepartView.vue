@@ -79,7 +79,9 @@ async function buy(it: ShopItem) {
     <div class="depart-header">
       <div class="lead">
         デパートです。品揃えは毎日変わります。種類は豊富ですが値段は高めです。<br />
-        また一度に持てる所有物の限度は{{ player.item_kind_limit > 0 ? `${player.item_kind_limit}品目` : '無制限' }}です。<br />
+        また一度に持てる所有物の限度は{{
+          player.item_kind_limit > 0 ? `${player.item_kind_limit}品目` : '無制限'
+        }}です。<br />
         ●{{ player.display_name }}さんの所持金：<span class="money">{{ yen(player.money) }}円</span>
         <span class="pay">
           支払い
@@ -95,7 +97,7 @@ async function buy(it: ShopItem) {
     <div v-if="message" :class="['message', kind]" data-test="message">{{ message }}</div>
 
     <div class="panel-white">
-      <div class="table-scroll">
+      <div class="table-scroll sticky-table">
         <table class="depart-table">
           <thead>
             <tr>
@@ -113,37 +115,57 @@ async function buy(it: ShopItem) {
           <template v-for="[cat, list] in grouped" :key="cat">
             <tbody>
               <tr class="cat-row">
-                <td :colspan="PARAM_COLUMNS.length + 7">●{{ cat }}</td>
+                <td :colspan="PARAM_COLUMNS.length + 7">
+                  <span class="cat-name">●{{ cat }}</span>
+                </td>
               </tr>
               <template v-for="it in list" :key="it.id">
-              <tr :data-test="`shop-${it.id}`">
-                <!-- 効果行がある品は、品名/在庫/買うを2行にまたがせてどの品の効果か分かるようにする
+                <tr :data-test="`shop-${it.id}`">
+                  <!-- 効果行がある品は、品名/在庫/買うを2行にまたがせてどの品の効果か分かるようにする
                      (レガシー depart.cgi の rowspan=2 と同じ)。 -->
-                <td class="l" :rowspan="it.special ? 2 : 1">{{ it.name }}</td>
-                <td class="stock" :class="{ soldout: it.stock === 0 }" :rowspan="it.special ? 2 : 1">
-                  {{ it.stock < 0 ? '-' : it.stock === 0 ? '売切' : it.stock }}
-                </td>
-                <td class="buy" :rowspan="it.special ? 2 : 1">
-                  <button class="btn" :disabled="busy || it.stock === 0" @click="buy(it)">
-                    {{ it.stock === 0 ? '売切' : '買う' }}
-                  </button>
-                </td>
-                <td class="price">{{ yen(it.price) }}円</td>
-                <td class="dura">{{ it.durability }}{{ it.durability_unit === 'day' ? '日' : '回' }}</td>
-                <td v-for="c in PARAM_COLUMNS_MAIN" :key="c.key" class="p" :class="{ up: (it.params[c.key] ?? 0) > 0 }">
-                  {{ it.params[c.key] ?? 0 }}
-                </td>
-                <td class="cal">{{ it.calorie_g > 0 ? it.calorie_g : '-' }}</td>
-                <td v-for="c in PARAM_COLUMNS_POWER" :key="c.key" class="p" :class="{ up: (it.params[c.key] ?? 0) > 0 }">
-                  {{ it.params[c.key] ?? 0 }}
-                </td>
-                <td class="interval">{{ intervalLabel(it.interval_min) }}</td>
-              </tr>
-              <!-- 特殊効果(体重/身長/病気)は列に収まらないので1行下にcolspanで出す
+                  <td class="l" :rowspan="it.special ? 2 : 1">{{ it.name }}</td>
+                  <td
+                    class="stock"
+                    :class="{ soldout: it.stock === 0 }"
+                    :rowspan="it.special ? 2 : 1"
+                  >
+                    {{ it.stock < 0 ? '-' : it.stock === 0 ? '売切' : it.stock }}
+                  </td>
+                  <td class="buy" :rowspan="it.special ? 2 : 1">
+                    <button class="btn" :disabled="busy || it.stock === 0" @click="buy(it)">
+                      {{ it.stock === 0 ? '売切' : '買う' }}
+                    </button>
+                  </td>
+                  <td class="price">{{ yen(it.price) }}円</td>
+                  <td class="dura">
+                    {{ it.durability }}{{ it.durability_unit === 'day' ? '日' : '回' }}
+                  </td>
+                  <td
+                    v-for="c in PARAM_COLUMNS_MAIN"
+                    :key="c.key"
+                    class="p"
+                    :class="{ up: (it.params[c.key] ?? 0) > 0 }"
+                  >
+                    {{ it.params[c.key] ?? 0 }}
+                  </td>
+                  <td class="cal">{{ it.calorie_g > 0 ? it.calorie_g : '-' }}</td>
+                  <td
+                    v-for="c in PARAM_COLUMNS_POWER"
+                    :key="c.key"
+                    class="p"
+                    :class="{ up: (it.params[c.key] ?? 0) > 0 }"
+                  >
+                    {{ it.params[c.key] ?? 0 }}
+                  </td>
+                  <td class="interval">{{ intervalLabel(it.interval_min) }}</td>
+                </tr>
+                <!-- 特殊効果(体重/身長/病気)は列に収まらないので1行下にcolspanで出す
                    (レガシー depart.cgi の備考行と同じ方式)。 -->
-              <tr v-if="it.special" class="special-row" :data-test="`special-${it.id}`">
-                <td :colspan="PARAM_COLUMNS.length + 4">【 効果 】{{ it.special }}</td>
-              </tr>
+                <tr v-if="it.special" class="special-row" :data-test="`special-${it.id}`">
+                  <td :colspan="PARAM_COLUMNS.length + 4">
+                    <span class="cat-name">【 効果 】{{ it.special }}</span>
+                  </td>
+                </tr>
               </template>
             </tbody>
           </template>
@@ -205,6 +227,8 @@ async function buy(it: ShopItem) {
   padding: 8px;
 }
 .table-scroll {
+  --stick-line: #e0c080;
+  --stick-bg: #fffef0;
   overflow-x: auto;
 }
 .depart-table {

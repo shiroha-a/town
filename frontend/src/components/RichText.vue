@@ -21,19 +21,23 @@ onMounted(() => {
 });
 </script>
 
-<template><span class="rich"><template v-for="(t, i) in tokens" :key="i"><a
-        v-if="t.kind === 'link'"
-        :href="t.v"
-        target="_blank"
-        rel="noopener noreferrer"
-      >{{ t.v }}</a><img
+<template>
+  <span class="rich"
+    ><template v-for="(t, i) in tokens" :key="i"
+      ><a v-if="t.kind === 'link'" :href="t.v" target="_blank" rel="noopener noreferrer">{{
+        t.v
+      }}</a
+      ><img
         v-else-if="t.kind === 'emoji'"
         class="custom-emoji"
         :src="t.url"
         :alt="t.v"
         :title="t.license ? `${t.v}\nライセンス: ${t.license}` : t.v"
         loading="lazy"
-      /><template v-else>{{ t.v }}</template></template></span></template>
+      /><template v-else>{{ t.v }}</template></template
+    ></span
+  >
+</template>
 
 <style scoped>
 .rich {

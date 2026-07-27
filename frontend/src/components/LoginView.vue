@@ -203,85 +203,90 @@ async function login() {
         </div>
 
         <div class="ent-side">
-        <!-- 入口 -->
-        <div class="ent-gate">
-          <div class="box-head">街に入る</div>
-          <div class="box-body">
-            <p class="lead">
-              お使いのMisskeyインスタンスを入力してください。<br />
-              承認画面が開き、許可すると街に入れます。
-            </p>
-            <div class="row">
-              <span class="lbl">インスタンス</span>
-              <input
-                type="text"
-                v-model="instance"
-                placeholder="misskey.io"
-                data-test="instance"
-                autocapitalize="off"
-                autocorrect="off"
-                spellcheck="false"
-                @keydown.enter="login"
-              />
-              <button class="btn primary" :disabled="busy" data-test="login" @click="login">
-                {{ busy ? '接続中…' : 'ログイン' }}
-              </button>
-            </div>
+          <!-- 入口 -->
+          <div class="ent-gate">
+            <div class="box-head">街に入る</div>
+            <div class="box-body">
+              <p class="lead">
+                お使いのMisskeyインスタンスを入力してください。<br />
+                承認画面が開き、許可すると街に入れます。
+              </p>
+              <div class="row">
+                <span class="lbl">インスタンス</span>
+                <input
+                  type="text"
+                  v-model="instance"
+                  placeholder="misskey.io"
+                  data-test="instance"
+                  autocapitalize="off"
+                  autocorrect="off"
+                  spellcheck="false"
+                  @keydown.enter="login"
+                />
+                <button class="btn primary" :disabled="busy" data-test="login" @click="login">
+                  {{ busy ? '接続中…' : 'ログイン' }}
+                </button>
+              </div>
 
-            <p v-if="props.loggedOut" class="logged-out">
-              ログアウトしました。<br />
-              使わなくなったアクセストークンは
-              <a v-if="tokenSettingsURL" :href="tokenSettingsURL" target="_blank" rel="noopener noreferrer">
-                Misskeyの設定
-              </a>
-              <span v-else>Misskeyの設定</span>
-              から削除できます（設定 → アプリ）。
-            </p>
-            <div v-if="error" class="message error" data-test="login-error">{{ error }}</div>
+              <p v-if="props.loggedOut" class="logged-out">
+                ログアウトしました。<br />
+                使わなくなったアクセストークンは
+                <a
+                  v-if="tokenSettingsURL"
+                  :href="tokenSettingsURL"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Misskeyの設定
+                </a>
+                <span v-else>Misskeyの設定</span>
+                から削除できます（設定 → アプリ）。
+              </p>
+              <div v-if="error" class="message error" data-test="login-error">{{ error }}</div>
 
-            <p class="note">
-              ※初めての方はこの操作でそのまま登録されます。<br />
-              ※ゲーム内から他の住民をフォローするための許可だけをお願いしています。
-            </p>
+              <p class="note">
+                ※初めての方はこの操作でそのまま登録されます。<br />
+                ※ゲーム内から他の住民をフォローするための許可だけをお願いしています。
+              </p>
 
-            <div class="guest">
-              <button class="btn" :disabled="guestBusy" data-test="guest" @click="playAsGuest">
-                {{ guestBusy ? '準備中…' : 'アカウント無しでお試し' }}
-              </button>
-              <span class="guest-note">
-                1時間でデータが消えます。買い物や仕事は試せますが、家の建築・銀行・
-                あいさつ・メールは使えません(住民としても数えません)。
-              </span>
+              <div class="guest">
+                <button class="btn" :disabled="guestBusy" data-test="guest" @click="playAsGuest">
+                  {{ guestBusy ? '準備中…' : 'アカウント無しでお試し' }}
+                </button>
+                <span class="guest-note">
+                  1時間でデータが消えます。買い物や仕事は試せますが、家の建築・銀行・
+                  あいさつ・メールは使えません(住民としても数えません)。
+                </span>
+              </div>
             </div>
           </div>
-        </div>
 
-        <!-- 街の様子 -->
-        <div class="ent-now">
-          <div class="box-head">この街のいま</div>
-          <div class="box-body">
-            <div class="stat">
-              現在の住民 <b>{{ roster.length }}</b> 人
+          <!-- 街の様子 -->
+          <div class="ent-now">
+            <div class="box-head">この街のいま</div>
+            <div class="box-body">
+              <div class="stat">
+                現在の住民 <b>{{ roster.length }}</b> 人
+              </div>
+              <ul v-if="newcomers.length" class="residents">
+                <li v-for="m in newcomers" :key="m.id">
+                  <span class="rname">{{ m.display_name }}</span>
+                  <span class="rjob">（{{ m.job }}）</span>
+                </li>
+              </ul>
+              <div v-else class="empty">まだ住民がいません。最初の住民になりませんか。</div>
+
+              <div class="sub-head">最近の出来事</div>
+              <ul v-if="news.length" class="news">
+                <li v-for="n in news" :key="n.id">
+                  <span class="day">{{ fmtDay(n.at) }}</span>
+                  <span class="kind">{{ n.kind }}</span>
+                  {{ n.message }}
+                </li>
+              </ul>
+              <div v-else class="empty">まだ何も起きていません。</div>
             </div>
-            <ul v-if="newcomers.length" class="residents">
-              <li v-for="m in newcomers" :key="m.id">
-                <span class="rname">{{ m.display_name }}</span>
-                <span class="rjob">（{{ m.job }}）</span>
-              </li>
-            </ul>
-            <div v-else class="empty">まだ住民がいません。最初の住民になりませんか。</div>
-
-            <div class="sub-head">最近の出来事</div>
-            <ul v-if="news.length" class="news">
-              <li v-for="n in news" :key="n.id">
-                <span class="day">{{ fmtDay(n.at) }}</span>
-                <span class="kind">{{ n.kind }}</span>
-                {{ n.message }}
-              </li>
-            </ul>
-            <div v-else class="empty">まだ何も起きていません。</div>
           </div>
-        </div>
         </div>
       </div>
     </template>
@@ -308,7 +313,9 @@ async function login() {
   font-weight: bold;
   letter-spacing: 6px;
   color: #fff8e6;
-  text-shadow: 1px 1px 0 #6b5527, 2px 2px 3px rgba(0, 0, 0, 0.35);
+  text-shadow:
+    1px 1px 0 #6b5527,
+    2px 2px 3px rgba(0, 0, 0, 0.35);
 }
 .tagline {
   margin-top: 4px;

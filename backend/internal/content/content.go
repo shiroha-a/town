@@ -9,11 +9,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/shiroha-a/town/internal/building"
 	"github.com/shiroha-a/town/internal/effects"
 	"github.com/shiroha-a/town/internal/gametime"
 	"github.com/shiroha-a/town/internal/jobrule"
@@ -35,6 +37,110 @@ type Item struct {
 	Effect      json.RawMessage `json:"effect"`
 	Enabled     bool            `json:"enabled"`
 	StockMaster *int            `json:"stock_master"` // 標準在庫数(NULL=無制限)
+	// Facility は「どこで扱う品か」。空とhanbai(自販機)は買うと持ち物になるが、
+	// syokudou/gym/onsen/school/kyushitu はその場で消費するメニューで、
+	// 持ち物にはならない(シリアルの景品などに選ばせないための判別に使う)。
+	Facility string `json:"facility"`
+	// IsGift はギフト屋で包んだ状態の品。贈る前提の一時的な形なので、
+	// 景品として直接配るものではない。
+	IsGift bool `json:"is_gift"`
+	// ShopListed は店頭に並べるか。false でも存在はするので、シリアルコードや
+	// イベントで配れて、持っていれば使える(配布限定の品を表す)。
+	ShopListed bool `json:"shop_listed"`
+	// Usable は「使う」ができるか。建築許可証・乗り物・カード類のように持って
+	// いること自体が意味を持つ品は false(使っても耐久が減るだけになるため)。
+	Usable bool `json:"usable"`
+	// Durability は1個あたりの耐久(使用回数/日数)。シリアルコードの景品で
+	// 「1個ぶん」の既定値として使う。
+	Durability int `json:"durability"`
+	// DurabilityUnit は耐久の単位。'use'=使うたびに1減る / 'day'=日数で減る。
+	DurabilityUnit  string `json:"durability_unit"`
+	UseIntervalMin  int    `json:"use_interval_min"` // 使用間隔(分。0=制限なし)
+	FillsSatiety    bool   `json:"fills_satiety"`    // 食べ物として満腹度を満たすか
+	CalorieG        int    `json:"calorie_g"`        // 摂取カロリー(食べると体重+この値g)
+	MaxSets         int    `json:"max_sets"`         // 1人が持てるセット数の上限
+	PowerMultiplier int    `json:"power_multiplier"` // 温泉の回復速度倍率(0=温泉ではない)
+	BodyCost        int    `json:"body_cost"`        // 使用時に減る身体パワー
+	NouCost         int    `json:"nou_cost"`         // 使用時に減る頭脳パワー
+	EnablesCredit   bool   `json:"enables_credit"`   // 持っているとクレジット払いができる
+	BuildSpan       int    `json:"build_span"`       // 建築許可証(0=通常 / 2=2マスの家)
+}
+
+// ItemInput is the editable set of an item's fields (管理画面のフォーム1件ぶん)。
+// 引数で並べると20個を超えて順番を間違えやすいので構造体で渡す(JobInputと同じ形)。
+type ItemInput struct {
+	Name            string
+	Category        string
+	Facility        string
+	Price           int64
+	Effect          []byte
+	Enabled         bool
+	StockMaster     *int
+	ShopListed      bool
+	Usable          bool
+	IsGift          bool
+	Durability      int
+	DurabilityUnit  string
+	UseIntervalMin  int
+	FillsSatiety    bool
+	CalorieG        int
+	MaxSets         int
+	PowerMultiplier int
+	BodyCost        int
+	NouCost         int
+	EnablesCredit   bool
+	BuildSpan       int
+}
+
+// itemFacilities are the places an item can belong to. 空=デパートの棚、
+// hanbai=自販機で、この2つは買うと持ち物になる。残りはその場で消費するメニュー。
+var itemFacilities = []string{"", "hanbai", "syokudou", "gym", "onsen", "school", "kyushitu"}
+
+// validate checks and normalises the admin input.
+func (in *ItemInput) validate() error {
+	if in.Name == "" {
+		return &ValidationError{Message: "品名を入力してください。"}
+	}
+	if in.Price < 0 {
+		return &ValidationError{Message: "値段は0以上にしてください。"}
+	}
+	if !slices.Contains(itemFacilities, in.Facility) {
+		return &ValidationError{Message: "扱う場所の指定が正しくありません。"}
+	}
+	if in.DurabilityUnit == "" {
+		in.DurabilityUnit = "use"
+	}
+	if in.DurabilityUnit != "use" && in.DurabilityUnit != "day" {
+		return &ValidationError{Message: "耐久の単位は「回」か「日」にしてください。"}
+	}
+	if in.Durability < 1 {
+		in.Durability = 1
+	}
+	if in.MaxSets < 1 {
+		in.MaxSets = 1
+	}
+	for _, v := range []struct {
+		name  string
+		value int
+	}{
+		{"使用間隔", in.UseIntervalMin}, {"カロリー", in.CalorieG},
+		{"温泉の回復倍率", in.PowerMultiplier},
+		{"身体パワーの消費", in.BodyCost}, {"頭脳パワーの消費", in.NouCost},
+	} {
+		if v.value < 0 {
+			return &ValidationError{Message: v.name + "は0以上にしてください。"}
+		}
+	}
+	// 建築許可証は「何マスの家を建てられるか」。1マスの家に許可証は要らないので
+	// 1は意味を持たない。上限は実装している最大の幅。
+	if in.BuildSpan == 1 || in.BuildSpan < 0 || in.BuildSpan > building.MaxSpan {
+		return &ValidationError{Message: fmt.Sprintf("建築許可証の幅は0(通常のアイテム)か2〜%dにしてください。", building.MaxSpan)}
+	}
+	in.Effect = orEmptyArray(in.Effect)
+	if _, err := effects.ParseEffect(in.Effect); err != nil {
+		return &ValidationError{Message: "effect: " + err.Error()}
+	}
+	return nil
 }
 
 // Job is a content job definition (含む給与体系, design 17.5)。
@@ -140,49 +246,65 @@ func orEmptyArray(b []byte) []byte {
 	return b
 }
 
-// CreateItem validates the effect and inserts a new item.
-func (s *Service) CreateItem(ctx context.Context, name, category string, price int64, effect []byte, stockMaster *int) (Item, error) {
-	if name == "" {
-		return Item{}, &ValidationError{Message: "name is required"}
-	}
-	if price < 0 {
-		return Item{}, &ValidationError{Message: "price must be >= 0"}
-	}
-	effect = orEmptyArray(effect)
-	if _, err := effects.ParseEffect(effect); err != nil {
-		return Item{}, &ValidationError{Message: "effect: " + err.Error()}
-	}
+// itemColumns is the full projection used by every item query so the admin
+// screen always gets the same shape.
+const itemColumns = `id, name, COALESCE(category, ''), COALESCE(facility, ''), price, effect,
+	        enabled, stock_master, shop_listed, usable, is_gift,
+	        GREATEST(durability, 1), durability_unit, use_interval_min, fills_satiety,
+	        calorie_g, max_sets, power_multiplier, body_cost, nou_cost, enables_credit, build_span`
+
+// scanItem reads one row of itemColumns.
+func scanItem(row pgx.Row) (Item, error) {
 	var it Item
-	if err := s.pool.QueryRow(ctx,
-		`INSERT INTO content_items (name, category, price, effect, stock_master)
-		 VALUES ($1, $2, $3, $4::jsonb, $5)
-		 RETURNING id, name, COALESCE(category, ''), price, effect, enabled, stock_master`,
-		name, category, price, string(effect), stockMaster).
-		Scan(&it.ID, &it.Name, &it.Category, &it.Price, &it.Effect, &it.Enabled, &it.StockMaster); err != nil {
+	err := row.Scan(&it.ID, &it.Name, &it.Category, &it.Facility, &it.Price, &it.Effect,
+		&it.Enabled, &it.StockMaster, &it.ShopListed, &it.Usable, &it.IsGift,
+		&it.Durability, &it.DurabilityUnit, &it.UseIntervalMin, &it.FillsSatiety,
+		&it.CalorieG, &it.MaxSets, &it.PowerMultiplier, &it.BodyCost, &it.NouCost,
+		&it.EnablesCredit, &it.BuildSpan)
+	return it, err
+}
+
+// CreateItem validates the input and inserts a new item.
+func (s *Service) CreateItem(ctx context.Context, in ItemInput) (Item, error) {
+	if err := in.validate(); err != nil {
+		return Item{}, err
+	}
+	it, err := scanItem(s.pool.QueryRow(ctx,
+		`INSERT INTO content_items
+		   (name, category, facility, price, effect, stock_master, shop_listed, usable, is_gift,
+		    durability, durability_unit, use_interval_min, fills_satiety, calorie_g, max_sets,
+		    power_multiplier, body_cost, nou_cost, enables_credit, build_span)
+		 VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+		 RETURNING `+itemColumns,
+		in.Name, in.Category, in.Facility, in.Price, string(in.Effect), in.StockMaster,
+		in.ShopListed, in.Usable, in.IsGift, in.Durability, in.DurabilityUnit,
+		in.UseIntervalMin, in.FillsSatiety, in.CalorieG, in.MaxSets,
+		in.PowerMultiplier, in.BodyCost, in.NouCost, in.EnablesCredit, in.BuildSpan))
+	if err != nil {
 		return Item{}, fmt.Errorf("insert item: %w", err)
 	}
 	return it, nil
 }
 
 // UpdateItem validates and updates an existing item (including enabled/無効化).
-func (s *Service) UpdateItem(ctx context.Context, id int64, name, category string, price int64, effect []byte, enabled bool, stockMaster *int) (Item, error) {
-	if name == "" {
-		return Item{}, &ValidationError{Message: "name is required"}
+func (s *Service) UpdateItem(ctx context.Context, id int64, in ItemInput) (Item, error) {
+	if err := in.validate(); err != nil {
+		return Item{}, err
 	}
-	if price < 0 {
-		return Item{}, &ValidationError{Message: "price must be >= 0"}
-	}
-	effect = orEmptyArray(effect)
-	if _, err := effects.ParseEffect(effect); err != nil {
-		return Item{}, &ValidationError{Message: "effect: " + err.Error()}
-	}
-	var it Item
-	err := s.pool.QueryRow(ctx,
-		`UPDATE content_items SET name = $2, category = $3, price = $4, effect = $5::jsonb, enabled = $6, stock_master = $7
+	it, err := scanItem(s.pool.QueryRow(ctx,
+		`UPDATE content_items SET
+		   name = $2, category = $3, facility = $4, price = $5, effect = $6::jsonb,
+		   enabled = $7, stock_master = $8, shop_listed = $9, usable = $10, is_gift = $11,
+		   durability = $12, durability_unit = $13, use_interval_min = $14, fills_satiety = $15,
+		   calorie_g = $16, max_sets = $17, power_multiplier = $18, body_cost = $19,
+		   nou_cost = $20, enables_credit = $21, build_span = $22
 		 WHERE id = $1
-		 RETURNING id, name, COALESCE(category, ''), price, effect, enabled, stock_master`,
-		id, name, category, price, string(effect), enabled, stockMaster).
-		Scan(&it.ID, &it.Name, &it.Category, &it.Price, &it.Effect, &it.Enabled, &it.StockMaster)
+		 RETURNING `+itemColumns,
+		id, in.Name, in.Category, in.Facility, in.Price, string(in.Effect),
+		in.Enabled, in.StockMaster, in.ShopListed, in.Usable, in.IsGift,
+		in.Durability, in.DurabilityUnit, in.UseIntervalMin, in.FillsSatiety,
+		in.CalorieG, in.MaxSets, in.PowerMultiplier, in.BodyCost, in.NouCost,
+		in.EnablesCredit, in.BuildSpan))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Item{}, &ValidationError{Message: "そのアイテムはありません。"}
 	}
@@ -215,17 +337,15 @@ func (s *Service) DeleteItem(ctx context.Context, id int64) error {
 
 // ListItems returns all items ordered by id.
 func (s *Service) ListItems(ctx context.Context) ([]Item, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT id, name, COALESCE(category, ''), price, effect, enabled, stock_master
-		 FROM content_items ORDER BY id`)
+	rows, err := s.pool.Query(ctx, `SELECT `+itemColumns+` FROM content_items ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("list items: %w", err)
 	}
 	defer rows.Close()
 	items := []Item{}
 	for rows.Next() {
-		var it Item
-		if err := rows.Scan(&it.ID, &it.Name, &it.Category, &it.Price, &it.Effect, &it.Enabled, &it.StockMaster); err != nil {
+		it, err := scanItem(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan item: %w", err)
 		}
 		items = append(items, it)
@@ -304,7 +424,7 @@ func (s *Service) listItems(ctx context.Context, facility string) ([]ShopItem, e
 	          FROM content_items ci
 	          LEFT JOIN shop_daily_stock sds
 	                 ON sds.facility = ci.facility AND sds.item_id = ci.id AND sds.game_date = $2
-	          WHERE ci.enabled AND ci.facility = $1`
+	          WHERE ci.enabled AND ci.shop_listed AND ci.facility = $1`
 	args := []any{facility, gameDate, adjust}
 	// デパート/食堂は毎日一部だけを品揃えする(旧仕様)。
 	if n := s.dailyCountFor(facility); n > 0 {

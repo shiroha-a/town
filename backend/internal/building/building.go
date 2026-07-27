@@ -112,14 +112,18 @@ func townByNo(no int) (Town, bool) {
 }
 
 // Exterior is a house appearance: an image key and its price in 万円.
+// Span is how many cells wide the house is (1 = 通常, 2 = 建築許可証が要る大邸宅)。
 type Exterior struct {
 	Key   string `json:"key"`   // gif名(拡張子なし)。例: house4
 	Price int    `json:"price"` // 万円
+	Span  int    `json:"span"`  // 横のマス数(1 or 2)
 }
 
 // exteriors is the exterior price map (%ie_hash), restricted to the artwork
 // bundled in the rewrite (house1-19, kamakura, bil2-5). Ordered cheapest-first
 // so the build screen can present a natural progression.
+//
+// Spanを書いていない行は1マス。2マスの外装だけ Span: 2 を明示する。
 var exteriors = []Exterior{
 	{Key: "house1", Price: 150},
 	{Key: "house2", Price: 150},
@@ -151,13 +155,37 @@ var exteriors = []Exterior{
 	{Key: "youkan", Price: 10000},
 	{Key: "villa", Price: 15000},
 	{Key: "shiro", Price: 20000},
+	// 2マス(2x1)の大邸宅枠。建築許可証を消費し、建築費は MulticellCostFactor 倍。
+	// 価格は1マスの最高値(shiro 2億)より安いが、10倍が効くので総額は上回る。
+	{Key: "mansion", Price: 5000, Span: 2},
+	{Key: "ryokan", Price: 7000, Span: 2},
+	{Key: "palace", Price: 12000, Span: 2},
 }
 
-// Exteriors returns a copy of the exterior catalog.
+// MaxSpan is the widest house the game can build (2x1)。占有マスの検証と
+// 建築許可証(content_items.build_span)の上限に使う。
+const MaxSpan = 2
+
+// MulticellCostFactor multiplies the build cost of a multi-cell house.
+// マス数ぶんの加算はしない: 10倍が既に2マス分をはるかに超えているため。
+const MulticellCostFactor = 10
+
+// Exteriors returns a copy of the exterior catalog with Span normalised to >= 1.
 func Exteriors() []Exterior {
 	out := make([]Exterior, len(exteriors))
 	copy(out, exteriors)
+	for i := range out {
+		out[i].Span = normSpan(out[i].Span)
+	}
 	return out
+}
+
+// normSpan treats an unset Span as a normal one-cell house.
+func normSpan(span int) int {
+	if span < 1 {
+		return 1
+	}
+	return span
 }
 
 // ExteriorPrice returns the 万円 price for an exterior key.
@@ -165,6 +193,16 @@ func ExteriorPrice(key string) (int, bool) {
 	for _, e := range exteriors {
 		if e.Key == key {
 			return e.Price, true
+		}
+	}
+	return 0, false
+}
+
+// ExteriorSpan returns how many cells wide an exterior is (1 or 2).
+func ExteriorSpan(key string) (int, bool) {
+	for _, e := range exteriors {
+		if e.Key == key {
+			return normSpan(e.Span), true
 		}
 	}
 	return 0, false
@@ -270,6 +308,9 @@ const ShinsaParam = 10000
 //
 //	1軒目:      (地価 + 外装) × 内装倍率(D=1..A=4)
 //	2軒目以降:  地価 + 外装×2 + tuika費(家のみ0/運営100/株式会社1000/持ち物販売店500万)
+//
+// 2マスの外装はさらに MulticellCostFactor 倍(高額なmoney sinkとしてのソフトなゲート。
+// 許可証アイテムがハードなゲート)。
 func BuildCost(townNo int, exterior string, interiorRank, houseCount, tuika int) (int64, error) {
 	t, ok := townByNo(townNo)
 	if !ok {
@@ -279,6 +320,7 @@ func BuildCost(townNo int, exterior string, interiorRank, houseCount, tuika int)
 	if !ok {
 		return 0, fmt.Errorf("unknown exterior %q", exterior)
 	}
+	span, _ := ExteriorSpan(exterior)
 	var man int
 	if houseCount == 0 {
 		in, ok := interiorByRank(interiorRank)
@@ -293,12 +335,16 @@ func BuildCost(townNo int, exterior string, interiorRank, houseCount, tuika int)
 		}
 		man = t.LandPrice + ext*2 + tk.Fee
 	}
+	if span > 1 {
+		man *= MulticellCostFactor
+	}
 	return int64(man) * yenPerMan, nil
 }
 
 // RebuildCost returns the cost in 円 to rebuild an existing house with a new
 // exterior and interior rank (建て替え). The land price is excluded because it
 // was already paid when the plot was first built on; this is charged in cash.
+// 2マスの外装は建築と同じく MulticellCostFactor 倍。
 func RebuildCost(exterior string, interiorRank int) (int64, error) {
 	ext, ok := ExteriorPrice(exterior)
 	if !ok {
@@ -308,17 +354,22 @@ func RebuildCost(exterior string, interiorRank int) (int64, error) {
 	if !ok {
 		return 0, fmt.Errorf("unknown interior rank %d", interiorRank)
 	}
-	return int64(ext*in.Multiplier) * yenPerMan, nil
+	man := ext * in.Multiplier
+	if span, _ := ExteriorSpan(exterior); span > 1 {
+		man *= MulticellCostFactor
+	}
+	return int64(man) * yenPerMan, nil
 }
 
 // SellValue returns the refund in 円 when a house is demolished/sold: the town's
-// land price (地価×10000). Used from フェーズ2c.
-func SellValue(townNo int) (int64, error) {
+// land price (地価×10000) per occupied cell. Used from フェーズ2c.
+// 外装・内装費と建築許可証は戻らない(レガシーの「土地代のみ返金」に合わせる)。
+func SellValue(townNo, span int) (int64, error) {
 	t, ok := townByNo(townNo)
 	if !ok {
 		return 0, fmt.Errorf("unknown town %d", townNo)
 	}
-	return int64(t.LandPrice) * yenPerMan, nil
+	return int64(t.LandPrice) * int64(normSpan(span)) * yenPerMan, nil
 }
 
 // shopKinds are the sellable shop categories (店の種類, town_ini.cgi:112).

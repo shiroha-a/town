@@ -25,11 +25,25 @@ const games: { key: string; name: string; desc: string; props?: Record<string, u
   { key: 'slot', name: 'スロット', desc: '8ラインスロット、絵柄を揃えて最大×7777' },
   { key: 'kuji', name: 'くじ', desc: '2択ダブルアップ、連勝で配当が2倍ずつ増える' },
   { key: 'donuts', name: 'ドーナツ', desc: 'Hi&Lo、前のカードより大きいか小さいかを当てる' },
-  { key: 'omikuji', name: 'おみくじ', desc: 'お賽銭と占う項目を選び、運勢でステータス・金運が変わる' },
+  {
+    key: 'omikuji',
+    name: 'おみくじ',
+    desc: 'お賽銭と占う項目を選び、運勢でステータス・金運が変わる',
+  },
   { key: 'otakara', name: 'お宝', desc: '宝箱を選んで代金を払い、アイテムやステータスを得る' },
   { key: 'fukubiki', name: '福引き', desc: 'カードを選んで景品が当たる(無料)' },
-  { key: 'scratch', name: 'スクラッチ', desc: '1日5枚、3マス開けて当たりを狙う(無料)', props: { game: 'scratch' } },
-  { key: 'sukuratti', name: 'スクラッチ2', desc: '3x3の9マス版スクラッチ(無料)', props: { game: 'sukuratti' } },
+  {
+    key: 'scratch',
+    name: 'スクラッチ',
+    desc: '1日5枚、3マス開けて当たりを狙う(無料)',
+    props: { game: 'scratch' },
+  },
+  {
+    key: 'sukuratti',
+    name: 'スクラッチ2',
+    desc: '3x3の9マス版スクラッチ(無料)',
+    props: { game: 'sukuratti' },
+  },
   { key: 'blackjack', name: 'ブラックジャック', desc: '21に近づけてディーラーに勝つ(配当1:1)' },
   { key: 'poker', name: 'ポーカー', desc: '5カードドロー、役でポイントを増やして換金' },
   { key: 'loto6', name: 'ロト6', desc: '1〜36から6個選んで購入、毎日抽選で銀行に賞金' },
@@ -74,7 +88,12 @@ const currentProps = computed(() => games.find((g) => g.key === selected.value)?
     </template>
     <template v-else>
       <button class="btn menu-back" @click="selected = null">← ゲーム選択にもどる</button>
-      <component :is="current" :player="player" v-bind="currentProps" @update="emit('update', $event)" />
+      <component
+        :is="current"
+        :player="player"
+        v-bind="currentProps"
+        @update="emit('update', $event)"
+      />
     </template>
   </div>
 </template>

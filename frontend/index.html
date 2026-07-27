@@ -1,9 +1,22 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ja">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Ｔｏｗｎ</title>
+
+    <!-- ホーム画面・デスクトップへ入れるための情報。名前は管理画面から変わるので
+         マニフェストはサーバーが組み立てて返す。 -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- アドレスバーやタイトルバーの色(街マップの空の色)。 -->
+    <meta name="theme-color" content="#8fd4f0" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <!-- iOSはマニフェストのdisplayを見ないので、個別に指定する。 -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="TOWN" />
+    <meta name="mobile-web-app-capable" content="yes" />
   </head>
   <body>
     <div id="app"></div>

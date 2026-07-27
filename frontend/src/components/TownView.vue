@@ -3,11 +3,23 @@ import RichText from './RichText.vue';
 import { siteTitle } from '../site';
 import TownMapBoard from './TownMapBoard.vue';
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue';
-import { api, WARP_FEE, type Player, type Params, type TownFacility, type TownAsset, type Town, type HouseCell, type MoveResult, type WorkResponse } from '../api';
+import {
+  api,
+  WARP_FEE,
+  type Player,
+  type Params,
+  type TownFacility,
+  type TownAsset,
+  type Town,
+  type HouseCell,
+  type MoveResult,
+  type WorkResponse,
+} from '../api';
 import { satietyLabel } from '../params';
 import CommandIcon from './CommandIcon.vue';
 import PowerBar from './PowerBar.vue';
 import { projectedPower } from '../power';
+import { yen, totalAssets } from '../money';
 import GreetingModal from './GreetingModal.vue';
 // v-touch-label: title属性のラベルをモバイルの長押しで表示する
 import { vTouchLabel } from '../touchlabel';
@@ -19,10 +31,7 @@ const emit = defineEmits<{
   logout: [];
 }>();
 
-const yen = (n: number) => n.toLocaleString('ja-JP');
-
-const total = computed(() => props.player.money + props.player.savings);
-
+const total = computed(() => totalAssets(props.player));
 
 // 体重はg保持なので表示はkg小数第1位に整形する。
 const weightKg = computed(() => (props.player.status.weight_g / 1000).toFixed(1));
@@ -59,40 +68,36 @@ const houses = ref<HouseCell[]>([]);
 const assets = ref<TownAsset[]>([]);
 
 onMounted(async () => {
-  try {
-    facilities.value = await api.townMap();
-  } catch {
-    // マップ取得に失敗しても他機能は使えるよう空配置で継続する。
-    facilities.value = [];
-  }
-  try {
-    assets.value = await api.townAssets();
-  } catch {
-    assets.value = [];
-  }
-  try {
-    townList.value = await api.towns();
-  } catch {
-    // 街一覧が取れなくても他機能は使えるよう空で継続する。
-    townList.value = [];
-  }
-  try {
-    houses.value = await api.houses(props.player.id);
-  } catch {
-    houses.value = [];
-  }
-  try {
-    const s = await api.stocks();
-    stockPrices.value = s.prices;
-  } catch {
-    stockPrices.value = [];
-  }
+  // どれも互いに依存しないので並行して取る。1本ずつawaitすると往復がそのまま
+  // 積み上がり、トンネル越し(1本250ms前後)では待ち時間が6倍になる。
+  // 取れなかったものだけ空にして、他の機能はそのまま使えるようにする。
+  await Promise.all([
+    api.townMap().then(
+      (v) => (facilities.value = v),
+      () => (facilities.value = []),
+    ),
+    api.townAssets().then(
+      (v) => (assets.value = v),
+      () => (assets.value = []),
+    ),
+    api.towns().then(
+      (v) => (townList.value = v),
+      () => (townList.value = []),
+    ),
+    api.houses(props.player.id).then(
+      (v) => (houses.value = v),
+      () => (houses.value = []),
+    ),
+    api.stocks().then(
+      (s) => (stockPrices.value = s.prices),
+      () => (stockPrices.value = []),
+    ),
+    api.greetings(30).then(
+      (v) => (greetings.value = v),
+      () => (greetings.value = []),
+    ),
+  ]);
   refreshUnread();
-  try {
-    greetings.value = await api.greetings(30);
-  } catch {
-    greetings.value = [];
-  }
   // 街を開いた=来訪として足あとに記帳する(1日1回)。
   // ゲストは足あとに残さない(サーバー側でも拒否される)。
   if (!props.player.is_guest) api.attendanceCheckin(props.player.id).catch(() => {});
@@ -123,10 +128,12 @@ function rollEvent() {
 // 街トップのチャット窓に表示する最新のあいさつ。管理人・宣伝は別枠に
 // 区切って表示するため、広めに取得してフロント側で振り分ける。
 const greetings = ref<import('../api').Greeting[]>([]);
-const adminGreets = computed(() => greetings.value.filter((g) => g.category === '管理人').slice(0, 2));
+const adminGreets = computed(() =>
+  greetings.value.filter((g) => g.category === '管理人').slice(0, 2),
+);
 const adGreets = computed(() => greetings.value.filter((g) => g.category === '宣伝').slice(0, 5));
-const normalGreets = computed(
-  () => greetings.value.filter((g) => g.category !== '管理人' && g.category !== '宣伝').slice(0, 15),
+const normalGreets = computed(() =>
+  greetings.value.filter((g) => g.category !== '管理人' && g.category !== '宣伝').slice(0, 15),
 );
 
 // 新着メール通知。街トップ表示時とポーリングで未読数を取得する。
@@ -337,6 +344,7 @@ const commands = computed(() => {
   if (hasOwnHouse.value) {
     list.push({ key: 'myhouse', img: 'myhome', alt: '家の設定' });
   }
+  list.push({ key: 'usersettings', img: 'usersettings', alt: 'ユーザー設定' });
   list.push({ key: 'off', img: 'off', alt: 'ログアウト' });
   return list;
 });
@@ -364,7 +372,12 @@ async function doWork() {
     const before = props.player;
     const after = await api.work(props.player.id);
     emit('reload');
-    showToast({ variant: 'work', title: '仕事に出かけました', lines: buildWorkLines(before, after), icon: 'go_work' });
+    showToast({
+      variant: 'work',
+      title: '仕事に出かけました',
+      lines: buildWorkLines(before, after),
+      icon: 'go_work',
+    });
   } catch (e) {
     showToast({
       variant: 'error',
@@ -409,7 +422,8 @@ function clickCommand(key: string) {
     emit('reload');
     rollEvent(); // 更新ボタンでもイベントを抽選する
   } else if (key === 'off') emit('logout');
-  else if (key === 'aisatu') aisatuOpen.value = true; // ページ遷移せずモーダルで投稿
+  else if (key === 'aisatu')
+    aisatuOpen.value = true; // ページ遷移せずモーダルで投稿
   else emit('navigate', key);
 }
 
@@ -627,7 +641,16 @@ const paramBar = (v: number) => Math.max(3, Math.round((v / paramMax.value) * 10
   </div>
 
   <div class="participant">
-    現在の総参加者({{ participants.length }}人)：★<template v-for="p in participants" :key="p.id"><img src="/img/svg/tree2.svg" width="12" height="12" style="vertical-align: middle" alt="" /><span class="name" :class="{ me: p.id === player.id }">{{ p.display_name }}</span>★</template>
+    現在の総参加者({{ participants.length }}人)：★<template v-for="p in participants" :key="p.id"
+      ><img
+        src="/img/svg/tree2.svg"
+        width="12"
+        height="12"
+        style="vertical-align: middle"
+        alt=""
+      /><span class="name" :class="{ me: p.id === player.id }">{{ p.display_name }}</span
+      >★</template
+    >
   </div>
 
   <button v-if="unreadMail > 0" class="mail-notice" @click="nav('mail')">
@@ -669,7 +692,8 @@ const paramBar = (v: number) => Math.max(3, Math.round((v / paramMax.value) * 10
           <div v-for="g in adminGreets" :key="g.id" class="chat-line">
             <span class="cbadge admin">管理人</span>
             <span class="ct">{{ fmtChatTime(g.posted_at) }}</span>
-            <span class="cn">{{ g.user_name }}</span>：<span :style="{ color: g.color }"><RichText :text="g.body" /></span>
+            <span class="cn">{{ g.user_name }}</span
+            >：<span :style="{ color: g.color }"><RichText :text="g.body" /></span>
           </div>
         </div>
         <!-- 宣伝(有料枠、最新2件) -->
@@ -677,13 +701,15 @@ const paramBar = (v: number) => Math.max(3, Math.round((v / paramMax.value) * 10
           <div v-for="g in adGreets" :key="g.id" class="chat-line">
             <span class="cbadge ad">宣伝</span>
             <span class="ct">{{ fmtChatTime(g.posted_at) }}</span>
-            <span class="cn">{{ g.user_name }}</span>：<span :style="{ color: g.color }"><RichText :text="g.body" /></span>
+            <span class="cn">{{ g.user_name }}</span
+            >：<span :style="{ color: g.color }"><RichText :text="g.body" /></span>
           </div>
         </div>
         <!-- 通常のあいさつ(最新6件) -->
         <div v-for="g in normalGreets" :key="g.id" class="chat-line">
           <span class="ct">{{ fmtChatTime(g.posted_at) }}</span>
-          <span class="cn">{{ g.user_name }}</span>：<span :style="{ color: g.color }"><RichText :text="g.body" /></span>
+          <span class="cn">{{ g.user_name }}</span
+          >：<span :style="{ color: g.color }"><RichText :text="g.body" /></span>
         </div>
       </div>
     </div>
@@ -695,11 +721,19 @@ const paramBar = (v: number) => Math.max(3, Math.round((v / paramMax.value) * 10
           <!-- 街情報ヘッダ。デスクトップでのみ右カラム上部に表示する(town-info-side)。 -->
           <div class="whitebox town-info town-info-side">
             <div class="midasi">「{{ siteTitle }}」内<br />{{ currentTownName }}</div>
-            <div class="num">地　価：{{ currentTownLandPrice }}万<br />経済力：--円<br />繁栄度：--</div>
+            <div class="num">
+              地　価：{{ currentTownLandPrice }}万<br />経済力：--円<br />繁栄度：--
+            </div>
           </div>
 
           <div class="command-icons">
-            <button v-if="isAdmin" v-touch-label class="admin-link" title="管理者画面" @click="nav('admin')">
+            <button
+              v-if="isAdmin"
+              v-touch-label
+              class="admin-link"
+              title="管理者画面"
+              @click="nav('admin')"
+            >
               <svg class="gear" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
                 <path
                   fill="currentColor"
@@ -711,29 +745,43 @@ const paramBar = (v: number) => Math.max(3, Math.round((v / paramMax.value) * 10
               v-for="cmd in commands"
               :key="cmd.key"
               v-touch-label
-              :title="cmd.key === 'work' && workCooldown ? `まだ働けません（${workCooldown}）` : cmd.alt"
+              :title="
+                cmd.key === 'work' && workCooldown ? `まだ働けません（${workCooldown}）` : cmd.alt
+              "
               :disabled="cmd.key === 'work' && !!workCooldown"
               :class="{ 'on-cooldown': cmd.key === 'work' && !!workCooldown }"
               @click="clickCommand(cmd.key)"
             >
               <CommandIcon :name="cmd.img" />
-              <span v-if="cmd.key === 'work' && workCooldown" class="cmd-cooldown">{{ workCooldown }}</span>
-              <span v-if="cmd.key === 'mail' && unreadMail > 0" class="cmd-badge">{{ unreadMail }}</span>
+              <span v-if="cmd.key === 'work' && workCooldown" class="cmd-cooldown">{{
+                workCooldown
+              }}</span>
+              <span v-if="cmd.key === 'mail' && unreadMail > 0" class="cmd-badge">{{
+                unreadMail
+              }}</span>
             </button>
           </div>
 
           <div class="orangebox status">
             <div class="honbun2">
-              <span class="honbun2">名　前</span>：<span class="name">{{ player.display_name }}</span>
+              <span class="honbun2">名　前</span>：<span class="name">{{
+                player.display_name
+              }}</span>
               <span class="muted">({{ player.remote_user_id }}@{{ player.instance_host }})</span>
               <span v-if="player.roles.includes('admin')" class="tyuu"> [管理者]</span>
             </div>
             <div class="honbun2">
-              <span class="honbun2">持ち金</span>：<span class="money">{{ yen(player.money) }}円</span>
-              <span class="small">（総資産：{{ yen(total) }}円）（貯金：{{ yen(player.savings) }}円）</span>
+              <span class="honbun2">持ち金</span>：<span class="money"
+                >{{ yen(player.money) }}円</span
+              >
+              <span class="small"
+                >（総資産：{{ yen(total) }}円）（貯金：{{ yen(player.savings) }}円）</span
+              >
             </div>
             <div class="honbun2">
-              <span class="honbun2">職　業</span>：{{ player.status.job }}（レベル {{ player.status.job_level }} / 経験値 {{ player.status.job_exp }} / 勤務 {{ player.status.job_kaisuu }}回）
+              <span class="honbun2">職　業</span>：{{ player.status.job }}（レベル
+              {{ player.status.job_level }} / 経験値 {{ player.status.job_exp }} / 勤務
+              {{ player.status.job_kaisuu }}回）
             </div>
             <div v-if="player.status.mastered_jobs.length > 0" class="honbun2">
               <span class="honbun2">マスター職</span>：{{ player.status.mastered_jobs.join('、') }}
@@ -751,25 +799,41 @@ const paramBar = (v: number) => Math.max(3, Math.round((v / paramMax.value) * 10
               :full-remain="nouFullRemain"
             />
             <div class="honbun2">
-              <span class="honbun2">コンディション</span>：<span :class="{ sick: player.status.disease_name }">{{ player.status.condition }}</span>
-            </div>
-            <div class="honbun2"><span class="honbun2">空腹度</span>：{{ satietyLabel(player.status.satiety) }}</div>
-            <div class="honbun2">
-              <span class="honbun2">身　長</span>：{{ player.status.height_cm }}cm　<span class="honbun2">体　重</span>：{{ weightKg }}kg
-            </div>
-            <div class="honbun2">
-              <span class="honbun2">体　型</span>：{{ player.status.body_type }}（BMI {{ player.status.bmi }}）
+              <span class="honbun2">コンディション</span>：<span
+                :class="{ sick: player.status.disease_name }"
+                >{{ player.status.condition }}</span
+              >
             </div>
             <div class="honbun2">
-              <span class="honbun2">所有物</span>：購入商品 {{ player.items.length }} / {{ player.item_kind_limit || '∞' }}<br />
-              <span class="honbun5" v-for="it in player.items" :key="it.item_id">○{{ it.name }}({{ it.quantity }}個) </span>
+              <span class="honbun2">空腹度</span>：{{ satietyLabel(player.status.satiety) }}
+            </div>
+            <div class="honbun2">
+              <span class="honbun2">身　長</span>：{{ player.status.height_cm }}cm　<span
+                class="honbun2"
+                >体　重</span
+              >：{{ weightKg }}kg
+            </div>
+            <div class="honbun2">
+              <span class="honbun2">体　型</span>：{{ player.status.body_type }}（BMI
+              {{ player.status.bmi }}）
+            </div>
+            <div class="honbun2">
+              <span class="honbun2">所有物</span>：購入商品 {{ player.items.length }} /
+              {{ player.item_kind_limit || '∞' }}<br />
+              <span class="honbun5" v-for="it in player.items" :key="it.item_id"
+                >○{{ it.name }}({{ it.quantity }}個)
+              </span>
             </div>
             <div class="honbun2 warp-box">
               <span class="honbun2">ワープ</span>：
               <select v-model.number="warpDest" class="warp-select">
                 <option v-for="t in warpDests" :key="t.no" :value="t.no">{{ t.name }}</option>
               </select>
-              <button class="warp-btn" :disabled="warpBusy || warpDests.length === 0" @click="doWarp">
+              <button
+                class="warp-btn"
+                :disabled="warpBusy || warpDests.length === 0"
+                @click="doWarp"
+              >
                 ワープ（{{ yen(warpFee) }}円）
               </button>
             </div>
@@ -786,7 +850,10 @@ const paramBar = (v: number) => Math.max(3, Math.round((v / paramMax.value) * 10
                   <td>{{ p.label }}：</td>
                   <td class="v">
                     <span class="pbar">
-                      <span class="pbar-fill" :style="{ width: paramBar(player.params[p.key]) + '%' }"></span>
+                      <span
+                        class="pbar-fill"
+                        :style="{ width: paramBar(player.params[p.key]) + '%' }"
+                      ></span>
                       <span class="pbar-val">{{ player.params[p.key] }}</span>
                     </span>
                   </td>

@@ -68,12 +68,7 @@ function reset() {
       3枚のカードから1枚を選ぶ無料の福引き。選んだカードの当たり・並・はずれに応じた景品(アイテム)がもらえる。
     </p>
 
-    <div
-      v-if="result"
-      class="cg-result"
-      :class="cardRank(result.card)"
-      data-test="result"
-    >
+    <div v-if="result" class="cg-result" :class="cardRank(result.card)" data-test="result">
       <span class="band">{{ rankLabel(result.rank) }}</span>
       <span class="outcome">景品：{{ result.prize }} を手に入れた！</span>
     </div>

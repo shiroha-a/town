@@ -90,34 +90,55 @@ func (s *Service) DoBuildHouse(ctx context.Context, playerID int64, town, row, c
 				}
 			}
 		}
+		// 外装で家の横幅(マス数)が決まる。2マスの大邸宅は建築許可証を消費する。
+		span, ok := building.ExteriorSpan(exterior)
+		if !ok {
+			return &ConditionError{Message: "外装の指定が正しくありません。"}
+		}
+		if col+span-1 > townmap.Cols {
+			return &ConditionError{Message: "そこには入りきりません。右側にもう1マス必要です。"}
+		}
 		// 建築可能マス = key='akichi' の空き地施設があるマスのみ(空き地は施設に統合済み)。
 		// 通常施設のあるマスには akichi が無い(1セル1施設)ので、自動的に建築不可になる。
-		var isPlot bool
-		if err := tx.QueryRow(ctx,
-			`SELECT EXISTS(
-			   SELECT 1 FROM town_map, jsonb_array_elements(facilities) f
-			   WHERE id = 1 AND f->>'key' = 'akichi'
-			     AND COALESCE((f->>'town')::int, 0) = $1
-			     AND (f->>'row')::int = $2 AND (f->>'col')::int = $3)`,
-			town, row, col).Scan(&isPlot); err != nil {
-			return fmt.Errorf("check plot: %w", err)
-		}
-		if !isPlot {
-			return &ConditionError{Message: "そこは空地に指定されていません。空地に設定された場所にのみ家を建てられます。"}
+		// 2マスの家は覆うマスすべてが空地でなければならない。
+		for i := 0; i < span; i++ {
+			c := col + i
+			var isPlot bool
+			if err := tx.QueryRow(ctx,
+				`SELECT EXISTS(
+				   SELECT 1 FROM town_map, jsonb_array_elements(facilities) f
+				   WHERE id = 1 AND f->>'key' = 'akichi'
+				     AND COALESCE((f->>'town')::int, 0) = $1
+				     AND (f->>'row')::int = $2 AND (f->>'col')::int = $3)`,
+				town, row, c).Scan(&isPlot); err != nil {
+				return fmt.Errorf("check plot: %w", err)
+			}
+			if !isPlot {
+				if span > 1 {
+					return &ConditionError{Message: "2マスの家は、横に並んだ空地2マスにしか建てられません。"}
+				}
+				return &ConditionError{Message: "そこは空地に指定されていません。空地に設定された場所にのみ家を建てられます。"}
+			}
+			// 空地判定(そのマスに既存の家が無いこと)。占有マスのPKも二重の保険になる。
+			var occupied bool
+			if err := tx.QueryRow(ctx,
+				`SELECT EXISTS(SELECT 1 FROM player_house_cells WHERE town = $1 AND grid_row = $2 AND grid_col = $3)`,
+				town, row, c).Scan(&occupied); err != nil {
+				return fmt.Errorf("check plot: %w", err)
+			}
+			if occupied {
+				return &ConditionError{Message: "その場所にはすでに家が建っています。"}
+			}
 		}
 		cost, err := building.BuildCost(town, exterior, interiorRank, count, tuika)
 		if err != nil {
 			return &ConditionError{Message: "外装または内装の指定が正しくありません。"}
 		}
-		// 空地判定(同一マスに既存の家が無いこと)。UNIQUE制約も二重の保険になる。
-		var occupied bool
-		if err := tx.QueryRow(ctx,
-			`SELECT EXISTS(SELECT 1 FROM player_houses WHERE town = $1 AND grid_row = $2 AND grid_col = $3)`,
-			town, row, col).Scan(&occupied); err != nil {
-			return fmt.Errorf("check plot: %w", err)
-		}
-		if occupied {
-			return &ConditionError{Message: "その場所にはすでに家が建っています。"}
+		// 建築許可証は建てられることが確定してから消費する(売却しても戻らない)。
+		if span > 1 {
+			if err := takeBuildPermit(ctx, tx, playerID, span); err != nil {
+				return err
+			}
 		}
 		// 建築費は普通口座(savings)から引き落とす。
 		var savings int64
@@ -140,14 +161,65 @@ func (s *Service) DoBuildHouse(ctx context.Context, playerID int64, town, row, c
 		if count > 0 {
 			ir = 0
 		}
-		if _, err := tx.Exec(ctx,
-			`INSERT INTO player_houses (owner_id, town, grid_row, grid_col, exterior, interior_rank, tuika)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-			playerID, town, row, col, exterior, ir, tuika); err != nil {
+		var houseID int64
+		if err := tx.QueryRow(ctx,
+			`INSERT INTO player_houses (owner_id, town, grid_row, grid_col, exterior, interior_rank, tuika, span_w)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+			playerID, town, row, col, exterior, ir, tuika, span).Scan(&houseID); err != nil {
 			return fmt.Errorf("insert house: %w", err)
 		}
-		return recordHouseNews(ctx, tx, playerID, town, "に家を建築しました。")
+		// 占有マスを実体で持つ。PK (town,row,col) が同時建築での重なりを防ぐ。
+		for i := 0; i < span; i++ {
+			if _, err := tx.Exec(ctx,
+				`INSERT INTO player_house_cells (house_id, town, grid_row, grid_col) VALUES ($1, $2, $3, $4)`,
+				houseID, town, row, col+i); err != nil {
+				return fmt.Errorf("insert house cell: %w", err)
+			}
+		}
+		what := "に家を建築しました。"
+		if span > 1 {
+			what = "に大邸宅を建築しました。"
+		}
+		return recordHouseNews(ctx, tx, playerID, town, what)
 	})
+}
+
+// takeBuildPermit consumes one 建築許可証 (content_items.build_span >= span) from
+// the player's inventory. 許可証は建築時に消費し、売却しても戻らない。
+func takeBuildPermit(ctx context.Context, tx pgx.Tx, playerID int64, span int) error {
+	var (
+		itemID                     int64
+		qty, remaining, durability int
+	)
+	// 条件を満たす許可証が複数あれば、余りの少ないもの(build_spanが小さいもの)から使う。
+	err := tx.QueryRow(ctx,
+		`SELECT pi.item_id, pi.quantity, pi.remaining_uses, GREATEST(ci.durability, 1)
+		 FROM player_items pi JOIN content_items ci ON ci.id = pi.item_id
+		 WHERE pi.player_id = $1 AND pi.quantity > 0 AND pi.remaining_uses > 0
+		   AND ci.build_span >= $2
+		 ORDER BY ci.build_span, ci.id LIMIT 1`, playerID, span).
+		Scan(&itemID, &qty, &remaining, &durability)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return &ConditionError{Message: "建築許可証がありません。2マスの家を建てるには建築許可証が必要です。"}
+	}
+	if err != nil {
+		return fmt.Errorf("find build permit: %w", err)
+	}
+	// 1枚(=1セット分の耐久)を消費する。持ち物の減らし方は闇市への出品と同じ。
+	uses := min(remaining, durability)
+	if qty == 1 || remaining-uses <= 0 {
+		if _, err := tx.Exec(ctx,
+			`DELETE FROM player_items WHERE player_id = $1 AND item_id = $2`, playerID, itemID); err != nil {
+			return fmt.Errorf("consume build permit: %w", err)
+		}
+		return nil
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE player_items SET quantity = quantity - 1, remaining_uses = remaining_uses - $3, updated_at = now()
+		 WHERE player_id = $1 AND item_id = $2`, playerID, itemID, uses); err != nil {
+		return fmt.Errorf("consume build permit: %w", err)
+	}
+	return nil
 }
 
 // checkShinsa reports whether the player passes 能力審査: total assets
@@ -155,8 +227,7 @@ func (s *Service) DoBuildHouse(ctx context.Context, playerID int64, town, row, c
 func (s *Service) checkShinsa(ctx context.Context, tx pgx.Tx, playerID int64) (bool, error) {
 	var assets int64
 	if err := tx.QueryRow(ctx,
-		`SELECT COALESCE(SUM(delta), 0) FROM ledger_entry WHERE account IN ($1, $2, $3)`,
-		ledger.PlayerAccount(playerID), ledger.SavingsAccount(playerID), ledger.SuperSavingsAccount(playerID)).Scan(&assets); err != nil {
+		`SELECT `+ledger.TotalAssetsSQL, playerID).Scan(&assets); err != nil {
 		return false, fmt.Errorf("sum assets: %w", err)
 	}
 	if assets < building.ShinsaAsset {
@@ -181,16 +252,17 @@ func (s *Service) DoSellHouse(ctx context.Context, playerID, houseID int64, idem
 		return nil, err
 	}
 	return s.runAction(ctx, playerID, "sell_house", idempotencyKey, func(ctx context.Context, tx pgx.Tx, _ effects.State) error {
-		var town int
+		var town, span int
 		err := tx.QueryRow(ctx,
-			`SELECT town FROM player_houses WHERE id = $1 AND owner_id = $2`, houseID, playerID).Scan(&town)
+			`SELECT town, span_w FROM player_houses WHERE id = $1 AND owner_id = $2`, houseID, playerID).Scan(&town, &span)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return &ConditionError{Message: "その家は所有していません。"}
 		}
 		if err != nil {
 			return fmt.Errorf("load house: %w", err)
 		}
-		refund, err := building.SellValue(town)
+		// 返金は地価×マス数。外装・内装費と建築許可証は戻らない。
+		refund, err := building.SellValue(town, span)
 		if err != nil {
 			return &ConditionError{Message: "家の街情報が不正です。"}
 		}
@@ -229,14 +301,26 @@ func (s *Service) DoSellHouse(ctx context.Context, playerID, houseID int64, idem
 // re-charged because it was already paid at build time.
 func (s *Service) DoRebuildHouse(ctx context.Context, playerID, houseID int64, exterior string, interiorRank int, idempotencyKey string) (*player.Player, error) {
 	return s.runAction(ctx, playerID, "rebuild_house", idempotencyKey, func(ctx context.Context, tx pgx.Tx, state effects.State) error {
-		var town int
+		var town, span int
 		err := tx.QueryRow(ctx,
-			`SELECT town FROM player_houses WHERE id = $1 AND owner_id = $2`, houseID, playerID).Scan(&town)
+			`SELECT town, span_w FROM player_houses WHERE id = $1 AND owner_id = $2`, houseID, playerID).Scan(&town, &span)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return &ConditionError{Message: "その家は所有していません。"}
 		}
 		if err != nil {
 			return fmt.Errorf("load house: %w", err)
+		}
+		// 建て替えでは大きさを変えられない。占有マスの取り直しになるうえ、
+		// 1マスの家を建ててから許可証なしで大邸宅へ化けさせる抜け道にもなる。
+		newSpan, ok := building.ExteriorSpan(exterior)
+		if !ok {
+			return &ConditionError{Message: "外装の指定が正しくありません。"}
+		}
+		if newSpan != span {
+			if span > 1 {
+				return &ConditionError{Message: "2マスの家は2マスの外装にしか建て替えられません。"}
+			}
+			return &ConditionError{Message: "1マスの家は2マスの外装に建て替えられません。空地2マスに建て直してください。"}
 		}
 		cost, err := building.RebuildCost(exterior, interiorRank)
 		if err != nil {
@@ -420,7 +504,7 @@ func (s *Service) DoShiire(ctx context.Context, playerID, houseID, itemID int64,
 			facility string
 		)
 		err = tx.QueryRow(ctx,
-			`SELECT category, price, facility FROM content_items WHERE id = $1 AND enabled`, itemID).
+			`SELECT category, price, facility FROM content_items WHERE id = $1 AND enabled AND shop_listed`, itemID).
 			Scan(&category, &price, &facility)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return &ConditionError{Message: "その商品は仕入れられません。"}

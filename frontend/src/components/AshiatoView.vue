@@ -35,35 +35,50 @@ onMounted(async () => {
     <div v-if="message" class="message error">{{ message }}</div>
 
     <div v-if="board" class="ashi-body">
-      <div class="panel-white table-scroll">
-        <table class="ashi-table">
-          <thead>
-            <tr>
-              <th class="name-col">住人</th>
-              <th v-for="(d, i) in board.dates" :key="i">{{ d }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="m in board.members" :key="m.id" :class="{ me: m.id === player.id }">
-              <td class="name-col">{{ m.name }}</td>
-              <td v-for="(c, i) in m.cells" :key="i" :class="['cell', c]">{{ cellMark(c) }}</td>
-            </tr>
-          </tbody>
-        </table>
+      <div class="panel-white">
+        <div class="table-scroll sticky-table">
+          <table class="ashi-table">
+            <thead>
+              <tr>
+                <th class="name-col">住人</th>
+                <th v-for="(d, i) in board.dates" :key="i">{{ d }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="m in board.members" :key="m.id" :class="{ me: m.id === player.id }">
+                <td class="name-col">{{ m.name }}</td>
+                <td v-for="(c, i) in m.cells" :key="i" :class="['cell', c]">{{ cellMark(c) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div class="panel-white rank">
         <h3>皆勤賞ランキング</h3>
         <table class="rank-table">
-          <thead><tr><th>#</th><th class="l">住人</th><th>出席率</th><th>出席/日数</th></tr></thead>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th class="l">住人</th>
+              <th>出席率</th>
+              <th>出席/日数</th>
+            </tr>
+          </thead>
           <tbody>
-            <tr v-for="(r, i) in board.ranking" :key="i" :class="{ me: r.name === player.display_name }">
+            <tr
+              v-for="(r, i) in board.ranking"
+              :key="i"
+              :class="{ me: r.name === player.display_name }"
+            >
               <td>{{ i + 1 }}</td>
               <td class="l">{{ r.name }}</td>
               <td class="rate">{{ r.rate }}%</td>
               <td>{{ r.present }}/{{ r.days }}</td>
             </tr>
-            <tr v-if="!board.ranking.length"><td colspan="4" class="muted">まだランキング対象者がいません。</td></tr>
+            <tr v-if="!board.ranking.length">
+              <td colspan="4" class="muted">まだランキング対象者がいません。</td>
+            </tr>
           </tbody>
         </table>
       </div>
@@ -120,6 +135,8 @@ onMounted(async () => {
   color: #336633;
 }
 .table-scroll {
+  --stick-line: #cfe0c0;
+  --stick-bg: #fff;
   overflow-x: auto;
 }
 .ashi-table {

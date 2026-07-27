@@ -6,6 +6,7 @@ package integration
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -120,11 +121,14 @@ func setup(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 		t.Fatalf("connect: %v", err)
 	}
 	// 各テスト前にワールド状態をまっさらにする(content_jobsのシードは残す)。
+	// serial_codesはテストが発行する一時的なものなので消す(残すとコードの
+	// UNIQUE制約で2回目の実行が落ちる)。
 	// shop_daily_stockはgame_date別に在庫を持つため、テスト間で在庫が持ち越されて
 	// 枯渇しないようリセット対象に含める。
 	if _, err := pool.Exec(ctx,
 		`TRUNCATE players, player_roles, player_status, status_history,
-		 ledger_entry, ledger_tx, action_log, worker_jobs, shop_daily_stock RESTART IDENTITY CASCADE`); err != nil {
+		 ledger_entry, ledger_tx, action_log, worker_jobs, shop_daily_stock,
+		 serial_codes RESTART IDENTITY CASCADE`); err != nil {
 		pool.Close()
 		t.Fatalf("truncate: %v", err)
 	}
@@ -142,7 +146,7 @@ func setup(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 	svc := player.New(pool, led, rng.New(1), st)
 	actions := action.New(pool, led, svc, rng.New(2), time.UTC, 5, st)
 	contentSvc := content.New(pool, time.UTC, 5, st)
-	tmap, err := townmap.NewStore(ctx, pool, townmap.Default())
+	tmap, err := townmap.NewStore(ctx, pool, townmap.Default(), townmap.DefaultAssets())
 	if err != nil {
 		pool.Close()
 		t.Fatalf("townmap: %v", err)
@@ -153,7 +157,7 @@ func setup(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 		pool.Close()
 		t.Fatalf("townmap set: %v", err)
 	}
-	sessions := session.New(pool, false)
+	sessions := session.New(pool, false, st)
 	// 認可ガード(自分のIDしか操作できない)を通すため、テストのHTTP呼び出しに
 	// ログインcookieを自動で付ける。テストは逐次実行なのでプロセス共有で足りる。
 	testPlayerSvc, testSessionStore, testTokens = svc, sessions, &sync.Map{}
@@ -184,9 +188,12 @@ func setup(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 // overrides whatever a prior test seeded).
 func newTestSettings(t *testing.T, ctx context.Context, pool *pgxpool.Pool, g settings.Game) *settings.Store {
 	t.Helper()
-	// テストは検証したい項目だけを書くので、必須の表示名は既定で補う。
+	// テストは検証したい項目だけを書くので、必須の項目は既定で補う。
 	if g.SiteTitle == "" {
 		g.SiteTitle = settings.Defaults().SiteTitle
+	}
+	if g.SessionTTLDays == 0 {
+		g.SessionTTLDays = settings.Defaults().SessionTTLDays
 	}
 	st, err := settings.NewStore(ctx, pool, g)
 	if err != nil {
@@ -4743,4 +4750,722 @@ func TestUseItemRequiresEnoughPower(t *testing.T) {
 	if after.Status.Energy != 0 {
 		t.Errorf("消費後の身体パワー = %d, want 0", after.Status.Energy)
 	}
+}
+
+// 退会は自分のデータを消すが、台帳の「世界のお金の合計」は動かさない
+// (行だけ消すと合計が合わなくなるため、残高は街へ返してから消す)。
+func TestRetire(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+
+	alice := register(t, srv.URL, "misskey.example", "alice")
+	bob := register(t, srv.URL, "misskey.example", "bob")
+
+	// aliceに貯金と持ち物を作っておく。
+	bankAction(t, srv.URL, "/bank/deposit", alice.ID, 100000, "dep-1")
+	var itemID int64
+	if err := pool.QueryRow(ctx, `SELECT id FROM content_items WHERE name = '栄養ドリンク'`).Scan(&itemID); err != nil {
+		t.Fatal(err)
+	}
+	itemAction(t, srv.URL, "/buy", alice.ID, itemID, "buy-1")
+
+	sum := func() int64 {
+		var v int64
+		if err := pool.QueryRow(ctx, `SELECT COALESCE(SUM(delta), 0) FROM ledger_entry`).Scan(&v); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	before := sum()
+
+	// 名前が違うと拒否される(誤操作防止)。
+	body, _ := json.Marshal(map[string]string{"confirm": "ちがう名前"})
+	bad, err := http.Post(srv.URL+"/api/v1/players/"+strconv.FormatInt(alice.ID, 10)+"/retire",
+		"application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad.Body.Close()
+	if bad.StatusCode != http.StatusBadRequest {
+		t.Fatalf("確認名が違うのに退会できた: status=%d", bad.StatusCode)
+	}
+
+	body, _ = json.Marshal(map[string]string{"confirm": "alice"})
+	resp, err := http.Post(srv.URL+"/api/v1/players/"+strconv.FormatInt(alice.ID, 10)+"/retire",
+		"application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("retire status = %d", resp.StatusCode)
+	}
+
+	// 住民と持ち物が消えている。
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM players WHERE id = $1`, alice.ID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("退会後も住民が残っている")
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM player_items WHERE player_id = $1`, alice.ID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("退会後も持ち物が残っている: %d", n)
+	}
+	// 台帳の合計(=世界のお金)は変わらない。
+	if after := sum(); after != before {
+		t.Errorf("台帳の合計が動いた: %d -> %d", before, after)
+	}
+	// 他の住民には影響しない。
+	if _, status := doWork(t, srv.URL, bob.ID, "bob-after-retire"); status == http.StatusNotFound {
+		t.Errorf("他の住民が消えている")
+	}
+}
+
+// TestBuildMulticellHouse covers 2マス(2x1)の家: 建築許可証の消費、占有マスの
+// 確保、建築費の倍率、覆われたマスへの二重建築の拒否、建て替えでのサイズ固定、
+// 売却でのマス数ぶんの返金。
+func TestBuildMulticellHouse(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	register(t, srv.URL, "misskey.example", "admin0") // 1人目=admin(売却の返金が無いので避ける)
+	p := register(t, srv.URL, "misskey.example", "mansionowner")
+	// 謎の街(4)は地価250万。mansion(5000万)+内装D+10倍 = 5億2500万円。
+	creditSavings(t, pool, p.ID, 600_000_000)
+	seedPlots(t, pool, [][3]int{{4, 0, 1}, {4, 0, 2}, {4, 0, 3}, {4, 0, 4}, {4, 0, 5}})
+
+	// 建築許可証を持っていないと2マスの外装では建てられない。
+	if _, c := buildHouse(t, srv.URL, p.ID, 4, 0, 1, "mansion", 3, "m-nopermit"); c != http.StatusUnprocessableEntity {
+		t.Errorf("許可証なしで建った: status=%d, want 422", c)
+	}
+
+	giveItem(t, pool, p.ID, "建築許可証", 1)
+
+	// 右隣が空地でない場所(A5の右=A6は空地ではない)には建てられない。
+	if _, c := buildHouse(t, srv.URL, p.ID, 4, 0, 5, "mansion", 3, "m-nospace"); c != http.StatusUnprocessableEntity {
+		t.Errorf("空地1マスに2マスの家が建った: status=%d, want 422", c)
+	}
+	// 失敗しても許可証は消えない。
+	var permits int
+	if err := pool.QueryRow(ctx,
+		`SELECT COALESCE(SUM(pi.quantity), 0)::int FROM player_items pi
+		 JOIN content_items ci ON ci.id = pi.item_id
+		 WHERE pi.player_id = $1 AND ci.build_span > 1`, p.ID).Scan(&permits); err != nil {
+		t.Fatalf("count permits: %v", err)
+	}
+	if permits != 1 {
+		t.Errorf("失敗した建築で許可証が減った: %d, want 1", permits)
+	}
+
+	// A1に建てる。費用=(250+5000)×1×10×10000=525,000,000。
+	got, code := buildHouse(t, srv.URL, p.ID, 4, 0, 1, "mansion", 3, "m-ok")
+	if code != http.StatusOK {
+		t.Fatalf("build mansion: status=%d", code)
+	}
+	if got.Savings != 75_000_000 {
+		t.Errorf("savings after mansion = %d, want 75000000", got.Savings)
+	}
+	var houseID int64
+	var span int
+	if err := pool.QueryRow(ctx,
+		`SELECT id, span_w FROM player_houses WHERE owner_id = $1`, p.ID).Scan(&houseID, &span); err != nil {
+		t.Fatalf("load house: %v", err)
+	}
+	if span != 2 {
+		t.Errorf("span_w = %d, want 2", span)
+	}
+	// 占有マスはA1とA2の2マス。
+	var cells int
+	if err := pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM player_house_cells WHERE house_id = $1`, houseID).Scan(&cells); err != nil {
+		t.Fatalf("count cells: %v", err)
+	}
+	if cells != 2 {
+		t.Errorf("占有マス = %d, want 2", cells)
+	}
+	// 許可証は建築で消費される。
+	if err := pool.QueryRow(ctx,
+		`SELECT COALESCE(SUM(pi.quantity), 0)::int FROM player_items pi
+		 JOIN content_items ci ON ci.id = pi.item_id
+		 WHERE pi.player_id = $1 AND ci.build_span > 1`, p.ID).Scan(&permits); err != nil {
+		t.Fatalf("count permits: %v", err)
+	}
+	if permits != 0 {
+		t.Errorf("許可証が消費されていない: %d, want 0", permits)
+	}
+
+	// 覆われた側のマス(A2)には1マスの家も建てられない。
+	if _, c := buildHouse(t, srv.URL, p.ID, 4, 0, 2, "house1", 0, "m-covered"); c != http.StatusUnprocessableEntity {
+		t.Errorf("覆われたマスに建った: status=%d, want 422", c)
+	}
+	// 許可証を使い切ったので2軒目の大邸宅も建てられない。
+	if _, c := buildHouse(t, srv.URL, p.ID, 4, 0, 3, "mansion", 0, "m-nopermit2"); c != http.StatusUnprocessableEntity {
+		t.Errorf("許可証なしで2軒目が建った: status=%d, want 422", c)
+	}
+
+	// 建て替えで大きさは変えられない(1マスの外装へは不可)。
+	creditCash(t, pool, p.ID, 800_000_000)
+	if _, c := rebuildHouse(t, srv.URL, p.ID, houseID, "house1", 3, "m-shrink"); c != http.StatusUnprocessableEntity {
+		t.Errorf("2マスの家が1マスへ建て替わった: status=%d, want 422", c)
+	}
+	// 同じ2マスの外装へは建て替えられる。費用=7000×1×10×10000=700,000,000。
+	after, c := rebuildHouse(t, srv.URL, p.ID, houseID, "ryokan", 3, "m-rebuild")
+	if c != http.StatusOK {
+		t.Fatalf("rebuild ryokan: status=%d", c)
+	}
+	// 初期所持金50万円が残っているので 8億+50万-7億。
+	if after.Money != 100_500_000 {
+		t.Errorf("cash after rebuild = %d, want 100500000", after.Money)
+	}
+
+	// 売却は地価×マス数(250万×2=500万)が現金で戻り、占有マスも解放される。
+	sold, c := sellHouse(t, srv.URL, p.ID, houseID, "m-sell")
+	if c != http.StatusOK {
+		t.Fatalf("sell: status=%d", c)
+	}
+	if sold.Money != 105_500_000 {
+		t.Errorf("cash after sell = %d, want 105500000", sold.Money)
+	}
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM player_house_cells`).Scan(&cells); err != nil {
+		t.Fatalf("count cells: %v", err)
+	}
+	if cells != 0 {
+		t.Errorf("売却後の占有マス = %d, want 0", cells)
+	}
+
+	// 台帳ゼロ和は保たれる。
+	led := ledger.New(pool)
+	if sum, _ := led.AuditZeroSum(ctx); sum != 0 {
+		t.Errorf("ledger zero-sum broken: %d", sum)
+	}
+}
+
+// TestShopListedFlag covers 店に並べる(shop_listed)の切り替え: オフにすると店頭の
+// 品揃えから消えて買えなくなるが、シリアルコードで配れて持っていれば使える。
+// 建築許可証のような配布限定の品のための設定。
+func TestShopListedFlag(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	alice := register(t, srv.URL, "misskey.example", "alice")
+
+	var drinkID int64
+	if err := pool.QueryRow(ctx,
+		`SELECT id FROM content_items WHERE name = '栄養ドリンク'`).Scan(&drinkID); err != nil {
+		t.Fatalf("seed lookup: %v", err)
+	}
+	// 既定(shop_listed=true)では買える。
+	if _, c := itemAction(t, srv.URL, "/buy", alice.ID, drinkID, "sl-buy1"); c != http.StatusOK {
+		t.Fatalf("既定で買えない: status=%d", c)
+	}
+
+	// content_items はテスト間で truncate されないので、書き換えたら必ず戻す。
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(),
+			`UPDATE content_items SET shop_listed = TRUE WHERE id = $1`, drinkID); err != nil {
+			t.Errorf("restore shop_listed: %v", err)
+		}
+	})
+	if _, err := pool.Exec(ctx,
+		`UPDATE content_items SET shop_listed = FALSE WHERE id = $1`, drinkID); err != nil {
+		t.Fatalf("unlist: %v", err)
+	}
+
+	// 店頭の品揃えから消える。
+	resp, err := http.Get(srv.URL + "/api/v1/items")
+	if err != nil {
+		t.Fatalf("shop items: %v", err)
+	}
+	var shop []struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&shop); err != nil {
+		t.Fatalf("decode shop: %v", err)
+	}
+	resp.Body.Close()
+	for _, it := range shop {
+		if it.ID == drinkID {
+			t.Errorf("店頭に並べない品が品揃えに出ている (id=%d)", drinkID)
+		}
+	}
+	// 直接叩いても買えない(一覧から隠すだけでは不十分)。
+	if _, c := itemAction(t, srv.URL, "/buy", alice.ID, drinkID, "sl-buy2"); c == http.StatusOK {
+		t.Errorf("店頭に並べない品が買えてしまう")
+	}
+
+	// 配布(シリアルコード相当)で持てば、これまでどおり使える。
+	giveItem(t, pool, alice.ID, "栄養ドリンク", 1)
+	if _, c := itemAction(t, srv.URL, "/use", alice.ID, drinkID, "sl-use"); c != http.StatusOK {
+		t.Errorf("配布された品が使えない: status=%d", c)
+	}
+
+	// 建築許可証は既定で店頭に出さない(配布限定)。
+	var listed bool
+	if err := pool.QueryRow(ctx,
+		`SELECT shop_listed FROM content_items WHERE name = '建築許可証'`).Scan(&listed); err != nil {
+		t.Fatalf("permit lookup: %v", err)
+	}
+	if listed {
+		t.Errorf("建築許可証が店頭に並んでいる")
+	}
+}
+
+// TestItemUsableFlag covers 使える(usable)の切り替え: 持っていること自体が意味を
+// 持つ品(建築許可証・乗り物・カード類)は「使う」で消えない。
+func TestItemUsableFlag(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	alice := register(t, srv.URL, "misskey.example", "alice")
+
+	// 効果が空の品は既定で使用不可(migrationで一括設定)。乗り物で確かめる。
+	var bikeID int64
+	if err := pool.QueryRow(ctx,
+		`SELECT id FROM content_items WHERE name = '自転車'`).Scan(&bikeID); err != nil {
+		t.Fatalf("seed lookup: %v", err)
+	}
+	var usable bool
+	if err := pool.QueryRow(ctx,
+		`SELECT usable FROM content_items WHERE id = $1`, bikeID).Scan(&usable); err != nil {
+		t.Fatalf("read usable: %v", err)
+	}
+	if usable {
+		t.Errorf("効果の無い品が使用可のままになっている(自転車)")
+	}
+
+	giveItem(t, pool, alice.ID, "自転車", 1)
+	// 乗り物の耐久は交通事故で減るもので、使用では減らない。
+	var before int
+	if err := pool.QueryRow(ctx,
+		`SELECT remaining_uses FROM player_items WHERE player_id = $1 AND item_id = $2`,
+		alice.ID, bikeID).Scan(&before); err != nil {
+		t.Fatalf("read remaining: %v", err)
+	}
+	if _, c := itemAction(t, srv.URL, "/use", alice.ID, bikeID, "u-bike"); c == http.StatusOK {
+		t.Errorf("持つだけの品が使えてしまう")
+	}
+	var after int
+	if err := pool.QueryRow(ctx,
+		`SELECT remaining_uses FROM player_items WHERE player_id = $1 AND item_id = $2`,
+		alice.ID, bikeID).Scan(&after); err != nil {
+		t.Fatalf("read remaining: %v", err)
+	}
+	if after != before {
+		t.Errorf("使用に失敗したのに耐久が減った: %d -> %d", before, after)
+	}
+
+	// 建築許可証も同じく使えない(誤操作で失わない)。
+	var permitID int64
+	if err := pool.QueryRow(ctx,
+		`SELECT id FROM content_items WHERE name = '建築許可証'`).Scan(&permitID); err != nil {
+		t.Fatalf("permit lookup: %v", err)
+	}
+	giveItem(t, pool, alice.ID, "建築許可証", 1)
+	if _, c := itemAction(t, srv.URL, "/use", alice.ID, permitID, "u-permit"); c == http.StatusOK {
+		t.Errorf("建築許可証が使えてしまう")
+	}
+
+	// 効果のある品はこれまでどおり使える。
+	var drinkID int64
+	if err := pool.QueryRow(ctx,
+		`SELECT id FROM content_items WHERE name = '栄養ドリンク'`).Scan(&drinkID); err != nil {
+		t.Fatalf("drink lookup: %v", err)
+	}
+	giveItem(t, pool, alice.ID, "栄養ドリンク", 1)
+	if _, c := itemAction(t, srv.URL, "/use", alice.ID, drinkID, "u-drink"); c != http.StatusOK {
+		t.Errorf("効果のある品が使えない: status=%d", c)
+	}
+}
+
+// TestSerialRewardItem covers シリアルコードの景品配布: 耐久を書かずに景品
+// アイテムだけ選んでも1個ぶんが配られる(0のままだと引き換えは成功するのに
+// 何も渡らず、配布されていないように見えた)。
+func TestSerialRewardItem(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	admin := register(t, srv.URL, "misskey.example", "admin0") // 1人目=admin
+	alice := register(t, srv.URL, "misskey.example", "alice")
+
+	var permitID int64
+	var durability int
+	if err := pool.QueryRow(ctx,
+		`SELECT id, GREATEST(durability, 1) FROM content_items WHERE name = '建築許可証'`).
+		Scan(&permitID, &durability); err != nil {
+		t.Fatalf("permit lookup: %v", err)
+	}
+
+	// 管理画面の既定値どおり、耐久を0のまま発行する。
+	code, body := adminPost(t, srv.URL, "/api/v1/admin/serials", admin.ID, map[string]any{
+		"code": "PERMIT2X1", "message": "どうぞ", "effect": "[]",
+		"reward_item_id": permitID, "reward_item_uses": 0,
+		"max_uses": 0, "enabled": true,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("create serial: status=%d body=%s", code, body)
+	}
+	// 保存時に1個ぶん(その品の耐久)で補われる。
+	var savedUses int
+	if err := pool.QueryRow(ctx,
+		`SELECT reward_item_uses FROM serial_codes WHERE code = 'PERMIT2X1'`).Scan(&savedUses); err != nil {
+		t.Fatalf("read saved uses: %v", err)
+	}
+	if savedUses != durability {
+		t.Errorf("景品の耐久が補われていない: %d, want %d", savedUses, durability)
+	}
+
+	// 引き換えると実際に持ち物へ入る。
+	resp, err := http.Post(srv.URL+"/api/v1/players/"+strconv.FormatInt(alice.ID, 10)+"/serial/redeem",
+		"application/json", bytes.NewReader([]byte(`{"code":"PERMIT2X1","idempotency_key":"sr1"}`)))
+	if err != nil {
+		t.Fatalf("redeem: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("redeem status = %d", resp.StatusCode)
+	}
+	var got struct {
+		Result struct {
+			ItemName string `json:"item_name"`
+			ItemUses int    `json:"item_uses"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Result.ItemName != "建築許可証" || got.Result.ItemUses != durability {
+		t.Errorf("引き換え結果 = %q×%d, want 建築許可証×%d",
+			got.Result.ItemName, got.Result.ItemUses, durability)
+	}
+	var qty int
+	if err := pool.QueryRow(ctx,
+		`SELECT quantity FROM player_items WHERE player_id = $1 AND item_id = $2`,
+		alice.ID, permitID).Scan(&qty); err != nil {
+		t.Fatalf("read inventory: %v", err)
+	}
+	if qty != 1 {
+		t.Errorf("配られた個数 = %d, want 1", qty)
+	}
+}
+
+// TestAdminItemFields covers 管理画面から編集できるアイテムの項目。以前は
+// name/category/price/effect/enabled/stock_master しか送れず、新規作成した品は
+// 必ず「使用間隔なし・耐久1回・カロリーなし・デパート売り」になっていた。
+func TestAdminItemFields(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	admin := register(t, srv.URL, "misskey.example", "admin0") // 1人目=admin
+
+	// 食堂のメニューを、耐久・使用間隔・カロリー付きで作れる。
+	code, body := adminPost(t, srv.URL, "/api/v1/admin/items", admin.ID, map[string]any{
+		"name": "特製ラーメン", "category": "食料品", "facility": "syokudou",
+		"price": 800, "effect": []any{},
+		"durability": 3, "durability_unit": "day", "use_interval_min": 45,
+		"fills_satiety": true, "calorie_g": 700, "max_sets": 2,
+		"body_cost": 5, "nou_cost": 1,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("create item: status=%d body=%s", code, body)
+	}
+	var created struct {
+		ID             int64  `json:"id"`
+		Facility       string `json:"facility"`
+		Durability     int    `json:"durability"`
+		DurabilityUnit string `json:"durability_unit"`
+		UseIntervalMin int    `json:"use_interval_min"`
+		FillsSatiety   bool   `json:"fills_satiety"`
+		CalorieG       int    `json:"calorie_g"`
+		MaxSets        int    `json:"max_sets"`
+		BodyCost       int    `json:"body_cost"`
+		NouCost        int    `json:"nou_cost"`
+		Enabled        bool   `json:"enabled"`
+	}
+	if err := json.Unmarshal([]byte(body), &created); err != nil {
+		t.Fatalf("decode created: %v", err)
+	}
+	if created.Facility != "syokudou" || created.Durability != 3 || created.DurabilityUnit != "day" ||
+		created.UseIntervalMin != 45 || !created.FillsSatiety || created.CalorieG != 700 ||
+		created.MaxSets != 2 || created.BodyCost != 5 || created.NouCost != 1 {
+		t.Errorf("作成した品の設定が反映されていない: %+v", created)
+	}
+	if !created.Enabled {
+		t.Error("作成直後は有効であってほしい")
+	}
+
+	// 建築許可証も管理画面から作れる(これまではSQLが要った)。
+	code, body = adminPost(t, srv.URL, "/api/v1/admin/items", admin.ID, map[string]any{
+		"name": "大邸宅の建築許可証", "category": "デパート", "price": 50000000,
+		"effect": []any{}, "build_span": 2, "shop_listed": false, "usable": false,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("create permit: status=%d body=%s", code, body)
+	}
+	var permit struct {
+		ID         int64 `json:"id"`
+		BuildSpan  int   `json:"build_span"`
+		ShopListed bool  `json:"shop_listed"`
+		Usable     bool  `json:"usable"`
+	}
+	if err := json.Unmarshal([]byte(body), &permit); err != nil {
+		t.Fatalf("decode permit: %v", err)
+	}
+	if permit.BuildSpan != 2 || permit.ShopListed || permit.Usable {
+		t.Errorf("許可証の設定が反映されていない: %+v", permit)
+	}
+
+	// 更新でも全項目が通る。
+	code, body = adminPut(t, srv.URL, "/api/v1/admin/items/"+strconv.FormatInt(created.ID, 10), admin.ID,
+		map[string]any{
+			"name": "特製ラーメン", "category": "食料品", "facility": "syokudou",
+			"price": 900, "effect": []any{}, "enabled": false,
+			"durability": 1, "durability_unit": "use", "use_interval_min": 10,
+			"calorie_g": 650, "max_sets": 5, "power_multiplier": 0,
+		})
+	if code != http.StatusOK {
+		t.Fatalf("update item: status=%d body=%s", code, body)
+	}
+	var updated struct {
+		Price          int64 `json:"price"`
+		UseIntervalMin int   `json:"use_interval_min"`
+		CalorieG       int   `json:"calorie_g"`
+		Enabled        bool  `json:"enabled"`
+	}
+	if err := json.Unmarshal([]byte(body), &updated); err != nil {
+		t.Fatalf("decode updated: %v", err)
+	}
+	if updated.Price != 900 || updated.UseIntervalMin != 10 || updated.CalorieG != 650 || updated.Enabled {
+		t.Errorf("更新が反映されていない: %+v", updated)
+	}
+
+	// 検証: 知らない扱い場所と、意味のない許可証の幅は弾く。
+	if c, _ := adminPost(t, srv.URL, "/api/v1/admin/items", admin.ID, map[string]any{
+		"name": "変な品", "facility": "nowhere", "effect": []any{},
+	}); c != http.StatusBadRequest {
+		t.Errorf("知らない扱い場所: status=%d, want 400", c)
+	}
+	if c, _ := adminPost(t, srv.URL, "/api/v1/admin/items", admin.ID, map[string]any{
+		"name": "変な許可証", "effect": []any{}, "build_span": 1,
+	}); c != http.StatusBadRequest {
+		t.Errorf("幅1の許可証: status=%d, want 400", c)
+	}
+
+	// 作った食堂メニューが、実際に食堂の品揃えへ出る。
+	var facility string
+	if err := pool.QueryRow(ctx,
+		`SELECT facility FROM content_items WHERE id = $1`, created.ID).Scan(&facility); err != nil {
+		t.Fatalf("read facility: %v", err)
+	}
+	if facility != "syokudou" {
+		t.Errorf("facility = %q, want syokudou", facility)
+	}
+}
+
+// TestSessionExpiry covers ログインの有効期限: 期限切れは弾かれ、遊べば延びる。
+// 延びたときはcookieも貼り直す(DBの行だけ延ばしてもブラウザは発行時の期限で
+// 捨てるため、遊び続けても再ログインが要るままになっていた)。
+func TestSessionExpiry(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	p := register(t, srv.URL, "misskey.example", "sessuser")
+
+	// 期限切れのセッションでは通らない。
+	expired := issueSessionWithExpiry(t, pool, p.ID, -time.Hour)
+	if code, _ := getWithSession(t, srv.URL+"/api/v1/auth/me", expired); code != http.StatusUnauthorized {
+		t.Errorf("期限切れのセッションが通った: status=%d, want 401", code)
+	}
+
+	// 生きているセッションは通り、last_seen_atが古ければ期限が延びてcookieも返る。
+	live := issueSessionWithExpiry(t, pool, p.ID, 24*time.Hour)
+	if _, err := pool.Exec(ctx,
+		`UPDATE sessions SET last_seen_at = now() - interval '10 minutes'
+		 WHERE token_hash = $1`, tokenHash(live)); err != nil {
+		t.Fatalf("age session: %v", err)
+	}
+	var before time.Time
+	if err := pool.QueryRow(ctx,
+		`SELECT expires_at FROM sessions WHERE token_hash = $1`, tokenHash(live)).Scan(&before); err != nil {
+		t.Fatalf("read expiry: %v", err)
+	}
+	code, setCookie := getWithSession(t, srv.URL+"/api/v1/auth/me", live)
+	if code != http.StatusOK {
+		t.Fatalf("生きているセッションが通らない: status=%d", code)
+	}
+	var after time.Time
+	if err := pool.QueryRow(ctx,
+		`SELECT expires_at FROM sessions WHERE token_hash = $1`, tokenHash(live)).Scan(&after); err != nil {
+		t.Fatalf("read expiry: %v", err)
+	}
+	if !after.After(before) {
+		t.Errorf("有効期限が延びていない: %v -> %v", before, after)
+	}
+	// 期限が延びたらcookieも貼り直す。
+	if !strings.Contains(setCookie, "town_session=") {
+		t.Errorf("期限を延ばしたのにcookieを返していない: %q", setCookie)
+	}
+
+	// 直後の2回目は延長が間引かれるので、Set-Cookieも出ない(毎回ヘッダを
+	// 積まないための間引き。ここが壊れると全レスポンスにcookieが乗る)。
+	code, setCookie = getWithSession(t, srv.URL+"/api/v1/auth/me", live)
+	if code != http.StatusOK {
+		t.Fatalf("2回目が通らない: status=%d", code)
+	}
+	if strings.Contains(setCookie, "town_session=") {
+		t.Errorf("延長していないのにcookieを返している: %q", setCookie)
+	}
+}
+
+// issueSessionWithExpiry inserts a session row with an explicit expiry and
+// returns the raw token. トークンのハッシュ化はsessionパッケージと同じSHA-256。
+// (pgcryptoを入れていないのでDB側のdigest()は使えない)
+func issueSessionWithExpiry(t *testing.T, pool *pgxpool.Pool, playerID int64, d time.Duration) string {
+	t.Helper()
+	token := fmt.Sprintf("tok-%d-%d", playerID, d)
+	if _, err := pool.Exec(context.Background(),
+		`INSERT INTO sessions (token_hash, player_id, expires_at)
+		 VALUES ($1, $2, now() + $3::interval)`,
+		tokenHash(token), playerID, d.String()); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+	return token
+}
+
+// tokenHash mirrors session.hash (未公開なのでテスト側で同じ計算をする)。
+func tokenHash(token string) []byte {
+	sum := sha256.Sum256([]byte(token))
+	return sum[:]
+}
+
+// getWithSession issues a GET with the session cookie and returns the status
+// and the Set-Cookie header.
+func getWithSession(t *testing.T, url, token string) (int, string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.AddCookie(&http.Cookie{Name: "town_session", Value: token})
+	resp, err := (&http.Client{}).Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode, resp.Header.Get("Set-Cookie")
+}
+
+// TestTotalAssets covers 総資産の定義: 現金+普通口座+スーパー定期-ローン残高。
+// 街トップの表示だけスーパー定期とローンを見落としていて、銀行・役場のランキングと
+// 食い違っていた。能力審査もローンを引いていなかった。
+func TestTotalAssets(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	register(t, srv.URL, "misskey.example", "admin0") // 1人目=admin
+	p := register(t, srv.URL, "misskey.example", "rich")
+
+	// 現金50万(初期) + 普通1000万 + スーパー定期300万。
+	creditSavings(t, pool, p.ID, 10_000_000)
+	creditSuperSavings(t, pool, p.ID, 3_000_000)
+
+	base := int64(500_000 + 10_000_000 + 3_000_000)
+	if got := rankingAssets(t, srv.URL, p.ID); got != base {
+		t.Errorf("総資産 = %d, want %d(スーパー定期が抜けている可能性)", got, base)
+	}
+
+	// ローンを組むと残高(日額×残回数)が引かれる。
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO player_loans (player_id, nitigaku, kaisuu) VALUES ($1, 20000, 100)
+		 ON CONFLICT (player_id) DO UPDATE SET nitigaku = 20000, kaisuu = 100`, p.ID); err != nil {
+		t.Fatalf("insert loan: %v", err)
+	}
+	if got, want := rankingAssets(t, srv.URL, p.ID), base-20000*100; got != want {
+		t.Errorf("ローンを引いた総資産 = %d, want %d", got, want)
+	}
+
+	// 能力審査も同じ式で見る。現金+普通+定期では1億を超えるが、ローンを引くと
+	// 届かないケースで不合格になること。
+	creditSavings(t, pool, p.ID, 90_000_000)
+	if _, err := pool.Exec(ctx,
+		`UPDATE player_loans SET nitigaku = 100000, kaisuu = 200 WHERE player_id = $1`, p.ID); err != nil {
+		t.Fatalf("update loan: %v", err)
+	}
+	// お金だけを見たいので、パラメータは審査に通る値へ上げておく。
+	if _, err := pool.Exec(ctx,
+		`UPDATE player_status SET kokugo=20000, suugaku=20000, rika=20000, syakai=20000,
+		 eigo=20000, ongaku=20000, bijutsu=20000, looks=20000, tairyoku=20000, kenkou=20000,
+		 speed=20000, power=20000, wanryoku=20000, kyakuryoku=20000, love=20000, omoshirosa=20000
+		 WHERE player_id = $1`, p.ID); err != nil {
+		t.Fatalf("raise params: %v", err)
+	}
+	// 現金50万+普通1億+定期300万=1億350万、ローン2000万 → 8350万で不合格。
+	if shinsaOK(t, srv.URL, p.ID) {
+		t.Error("ローンを引くと1億に届かないのに能力審査に通っている")
+	}
+	// ローンを返し切れば合格する。
+	if _, err := pool.Exec(ctx, `DELETE FROM player_loans WHERE player_id = $1`, p.ID); err != nil {
+		t.Fatalf("clear loan: %v", err)
+	}
+	if !shinsaOK(t, srv.URL, p.ID) {
+		t.Error("ローンが無ければ能力審査に通るはず")
+	}
+}
+
+// creditSuperSavings tops up a player's super time deposit via the ledger.
+func creditSuperSavings(t *testing.T, pool *pgxpool.Pool, playerID, amount int64) {
+	t.Helper()
+	ctx := context.Background()
+	led := ledger.New(pool)
+	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		return led.PostTx(ctx, tx, "test_credit", "", []ledger.Entry{
+			{Account: ledger.SuperSavingsAccount(playerID), Delta: amount},
+			{Account: ledger.SystemAccount("test_faucet"), Delta: -amount},
+		})
+	})
+	if err != nil {
+		t.Fatalf("credit super savings: %v", err)
+	}
+}
+
+// rankingAssets reads one player's 総資産 from the 役場 ranking.
+func rankingAssets(t *testing.T, base string, playerID int64) int64 {
+	t.Helper()
+	resp, err := http.Get(base + "/api/v1/ranking?key=assets")
+	if err != nil {
+		t.Fatalf("ranking: %v", err)
+	}
+	defer resp.Body.Close()
+	var res struct {
+		Entries []struct {
+			ID    int64 `json:"id"`
+			Value int64 `json:"value"`
+		} `json:"entries"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		t.Fatalf("decode ranking: %v", err)
+	}
+	for _, e := range res.Entries {
+		if e.ID == playerID {
+			return e.Value
+		}
+	}
+	t.Fatalf("ランキングに出ていない (player %d)", playerID)
+	return 0
+}
+
+// shinsaOK reads the 能力審査 verdict from the build screen state.
+func shinsaOK(t *testing.T, base string, playerID int64) bool {
+	t.Helper()
+	resp, err := http.Get(base + "/api/v1/players/" + strconv.FormatInt(playerID, 10) + "/building")
+	if err != nil {
+		t.Fatalf("building: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("building: status=%d", resp.StatusCode)
+	}
+	var st struct {
+		ShinsaOK bool `json:"shinsa_ok"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
+		t.Fatalf("decode building: %v", err)
+	}
+	return st.ShinsaOK
 }

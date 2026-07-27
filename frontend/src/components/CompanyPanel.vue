@@ -77,7 +77,12 @@ async function addStaff() {
     await reload();
     showToast({ variant: 'item', title: '社員を増やしました', lines: [], icon: 'item' });
   } catch (e) {
-    showToast({ variant: 'error', title: 'できませんでした', lines: [e instanceof Error ? e.message : String(e)], icon: 'item' });
+    showToast({
+      variant: 'error',
+      title: 'できませんでした',
+      lines: [e instanceof Error ? e.message : String(e)],
+      icon: 'item',
+    });
   } finally {
     busy.value = false;
   }
@@ -101,11 +106,18 @@ async function educate(staffId: number, paramKey: string) {
     showToast({
       variant: 'item',
       title: '社員教育しました',
-      lines: [`${r.param_name}が${r.gained}あがりました。運営費として${yen(r.fee)}円かかりました。`],
+      lines: [
+        `${r.param_name}が${r.gained}あがりました。運営費として${yen(r.fee)}円かかりました。`,
+      ],
       icon: 'item',
     });
   } catch (e) {
-    showToast({ variant: 'error', title: '教育できませんでした', lines: [e instanceof Error ? e.message : String(e)], icon: 'item' });
+    showToast({
+      variant: 'error',
+      title: '教育できませんでした',
+      lines: [e instanceof Error ? e.message : String(e)],
+      icon: 'item',
+    });
   } finally {
     busy.value = false;
   }
@@ -126,7 +138,9 @@ const fmtDate = (iso: string) => {
   return `${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 };
 function statusLabel(s: string): string {
-  return { in: '入会申請中', out: '退会申請中', m_ryoukai: '受領済み', taikai: '退会指定' }[s] ?? '';
+  return (
+    { in: '入会申請中', out: '退会申請中', m_ryoukai: '受領済み', taikai: '退会指定' }[s] ?? ''
+  );
 }
 
 async function run(title: string, fn: () => Promise<import('../api').Player>) {
@@ -137,32 +151,53 @@ async function run(title: string, fn: () => Promise<import('../api').Player>) {
     await reload();
     showToast({ variant: 'item', title, lines: [], icon: 'item' });
   } catch (e) {
-    showToast({ variant: 'error', title: 'できませんでした', lines: [e instanceof Error ? e.message : String(e)], icon: 'item' });
+    showToast({
+      variant: 'error',
+      title: 'できませんでした',
+      lines: [e instanceof Error ? e.message : String(e)],
+      icon: 'item',
+    });
   } finally {
     busy.value = false;
   }
 }
 const postOpen = () =>
   run('投稿しました', async () => {
-    const p = await api.companyBbsPost(props.player.id, props.houseId, 'open', openBody.value, openJoin.value);
+    const p = await api.companyBbsPost(
+      props.player.id,
+      props.houseId,
+      'open',
+      openBody.value,
+      openJoin.value,
+    );
     openBody.value = '';
     openJoin.value = false;
     return p;
   });
 const postMember = () =>
   run('投稿しました', async () => {
-    const p = await api.companyBbsPost(props.player.id, props.houseId, 'member', memberBody.value, false, memberLeave.value);
+    const p = await api.companyBbsPost(
+      props.player.id,
+      props.houseId,
+      'member',
+      memberBody.value,
+      false,
+      memberLeave.value,
+    );
     memberBody.value = '';
     memberLeave.value = false;
     return p;
   });
-const approve = (postId: number) => run('許可しました', () => api.companyApprove(props.player.id, props.houseId, postId));
+const approve = (postId: number) =>
+  run('許可しました', () => api.companyApprove(props.player.id, props.houseId, postId));
 const kick = (officerId: number, name: string) => {
   if (!window.confirm(`${name}さんを退会させますか？`)) return;
   return run('退会させました', () => api.companyKick(props.player.id, props.houseId, officerId));
 };
 const delPost = () =>
-  run('記事を削除しました。', () => api.companyBbsDelete(props.player.id, props.houseId, delBoard.value, Number(delNo.value) || 0));
+  run('記事を削除しました。', () =>
+    api.companyBbsDelete(props.player.id, props.houseId, delBoard.value, Number(delNo.value) || 0),
+  );
 
 // 製造フォーム。
 const szName = ref('');
@@ -195,11 +230,18 @@ const doSeizou = async () => {
     showToast({
       variant: 'item',
       title: '生産しました',
-      lines: [`${r.name}（在庫${r.zaiko}・耐久${r.taikyuu}回・${yen(r.price)}円）をお店に並べました`],
+      lines: [
+        `${r.name}（在庫${r.zaiko}・耐久${r.taikyuu}回・${yen(r.price)}円）をお店に並べました`,
+      ],
       icon: 'item',
     });
   } catch (e) {
-    showToast({ variant: 'error', title: '生産できませんでした', lines: [e instanceof Error ? e.message : String(e)], icon: 'item' });
+    showToast({
+      variant: 'error',
+      title: '生産できませんでした',
+      lines: [e instanceof Error ? e.message : String(e)],
+      icon: 'item',
+    });
   } finally {
     busy.value = false;
   }
@@ -225,90 +267,129 @@ const doSeizou = async () => {
 
     <!-- 株式会社: セクション切替+役員一覧(オーナーは退会指定可) -->
     <div v-if="view.kind === 2" class="kaisha-bar">
-      <button class="btn" :class="{ active: section === 'edu' }" @click="section = 'edu'">社員教育</button>
-      <button class="btn" :class="{ active: section === 'bbs' }" @click="section = 'bbs'">会社掲示板</button>
-      <button v-if="view.own" class="btn" :class="{ active: section === 'seizou' }" @click="section = 'seizou'">製造</button>
+      <button class="btn" :class="{ active: section === 'edu' }" @click="section = 'edu'">
+        社員教育
+      </button>
+      <button class="btn" :class="{ active: section === 'bbs' }" @click="section = 'bbs'">
+        会社掲示板
+      </button>
+      <button
+        v-if="view.own"
+        class="btn"
+        :class="{ active: section === 'seizou' }"
+        @click="section = 'seizou'"
+      >
+        製造
+      </button>
       <span class="officers-line">
         役員:
         <template v-if="view.officers.length === 0">なし</template>
         <span v-for="o in view.officers" :key="o.player_id" class="officer">
-          {{ o.name }}<button v-if="view.own" class="kick" :disabled="busy" @click="kick(o.player_id, o.name)">×</button>
+          {{ o.name
+          }}<button
+            v-if="view.own"
+            class="kick"
+            :disabled="busy"
+            @click="kick(o.player_id, o.name)"
+          >
+            ×
+          </button>
         </span>
       </span>
     </div>
 
     <template v-if="view.kind === 1 || section === 'edu'">
-    <!-- 教育設定バー: 上げる量と支払い方法をここで選び、社員のパラメータをクリックして上げる。 -->
-    <div v-if="canEdu" class="edu-bar">
-      <span class="edu-bar-label">上げる量</span>
-      <select v-model.number="eduAmount">
-        <option v-for="a in AMOUNTS" :key="a" :value="a">{{ a }}</option>
-      </select>
-      <span class="divide">÷{{ view.edu_efficiency }}</span>
-      <span class="edu-preview">→ 社員に <b>+{{ eduGain }}</b>・費用 <b>{{ yen(eduFee) }}円</b></span>
-      <span class="edu-bar-label">支払い</span>
-      <select v-model="eduPay">
-        <option value="cash">現金</option>
-        <option value="credit" :disabled="!hasCreditCard">クレジット</option>
-      </select>
-      <span class="edu-hint">社員の上げたいパラメータをクリックすると教育します</span>
-    </div>
+      <!-- 教育設定バー: 上げる量と支払い方法をここで選び、社員のパラメータをクリックして上げる。 -->
+      <div v-if="canEdu" class="edu-bar">
+        <span class="edu-bar-label">上げる量</span>
+        <select v-model.number="eduAmount">
+          <option v-for="a in AMOUNTS" :key="a" :value="a">{{ a }}</option>
+        </select>
+        <span class="divide">÷{{ view.edu_efficiency }}</span>
+        <span class="edu-preview"
+          >→ 社員に <b>+{{ eduGain }}</b
+          >・費用 <b>{{ yen(eduFee) }}円</b></span
+        >
+        <span class="edu-bar-label">支払い</span>
+        <select v-model="eduPay">
+          <option value="cash">現金</option>
+          <option value="credit" :disabled="!hasCreditCard">クレジット</option>
+        </select>
+        <span class="edu-hint">社員の上げたいパラメータをクリックすると教育します</span>
+      </div>
 
-    <!-- 自分のパラメータ(教育できる人にだけ表示) -->
-    <template v-if="canEdu">
-      <div class="param-caption">●自分のパラメータ（教育すると選んだ量だけ減ります）</div>
-      <div class="param-grid">
-        <div v-for="p in PARAMS" :key="p.key" class="param-cell">
-          <span class="pname">{{ p.label }}</span>
-          <span class="pval" :class="{ zero: !(myParams[p.key] ?? 0), lack: (myParams[p.key] ?? 0) < eduAmount }">{{ yen(myParams[p.key] ?? 0) }}</span>
+      <!-- 自分のパラメータ(教育できる人にだけ表示) -->
+      <template v-if="canEdu">
+        <div class="param-caption">●自分のパラメータ（教育すると選んだ量だけ減ります）</div>
+        <div class="param-grid">
+          <div v-for="p in PARAMS" :key="p.key" class="param-cell">
+            <span class="pname">{{ p.label }}</span>
+            <span
+              class="pval"
+              :class="{ zero: !(myParams[p.key] ?? 0), lack: (myParams[p.key] ?? 0) < eduAmount }"
+              >{{ yen(myParams[p.key] ?? 0) }}</span
+            >
+          </div>
+        </div>
+      </template>
+
+      <!-- 社員一覧 -->
+      <div v-for="st in view.staff" :key="st.id" class="staff">
+        <div v-if="canEdu" class="edu-log">
+          最後の教育：{{ st.edu_log || '（まだ教育していません）' }}
+          <span v-if="!canEduNow(st.can_edu_at)" class="wait"
+            >（次の教育まで待ち時間があります）</span
+          >
+        </div>
+        <div class="staff-sum">
+          <span class="sum-label">総合能力値：</span>{{ yen(st.sougou) }}
+          <span class="staff-job">{{ st.job }}</span>
+          <span class="staff-income">仕送り {{ yen(st.income) }}円/日</span>
+          <button
+            v-if="canEdu && view.kind === 2"
+            class="btn mini-btn"
+            :disabled="busy || !canEduNow(st.can_edu_at)"
+            @click="educate(st.id, 'syoku')"
+          >
+            食材購入
+          </button>
+        </div>
+        <div class="param-grid staff-grid">
+          <template v-for="p in PARAMS" :key="p.key">
+            <button
+              v-if="canEdu"
+              class="param-cell cell-btn"
+              :disabled="busy || !canEduNow(st.can_edu_at) || (myParams[p.key] ?? 0) < eduAmount"
+              :title="`${p.label}を+${eduGain}（自分の${p.label}-${eduAmount}・費用${yen(eduFee)}円）`"
+              @click="educate(st.id, p.key)"
+            >
+              <span class="pname">{{ p.label }}</span>
+              <span class="pval" :class="{ zero: !(st.params[p.key] ?? 0) }">{{
+                yen(st.params[p.key] ?? 0)
+              }}</span>
+            </button>
+            <div v-else class="param-cell">
+              <span class="pname">{{ p.label }}</span>
+              <span class="pval" :class="{ zero: !(st.params[p.key] ?? 0) }">{{
+                yen(st.params[p.key] ?? 0)
+              }}</span>
+            </div>
+          </template>
         </div>
       </div>
-    </template>
+      <div v-if="view.staff.length === 0" class="empty">まだ社員がいません。</div>
 
-    <!-- 社員一覧 -->
-    <div v-for="st in view.staff" :key="st.id" class="staff">
-      <div v-if="canEdu" class="edu-log">
-        最後の教育：{{ st.edu_log || '（まだ教育していません）' }}
-        <span v-if="!canEduNow(st.can_edu_at)" class="wait">（次の教育まで待ち時間があります）</span>
-      </div>
-      <div class="staff-sum">
-        <span class="sum-label">総合能力値：</span>{{ yen(st.sougou) }}
-        <span class="staff-job">{{ st.job }}</span>
-        <span class="staff-income">仕送り {{ yen(st.income) }}円/日</span>
+      <div class="bottom-bar">
         <button
-          v-if="canEdu && view.kind === 2"
-          class="btn mini-btn"
-          :disabled="busy || !canEduNow(st.can_edu_at)"
-          @click="educate(st.id, 'syoku')"
-        >食材購入</button>
+          v-if="view.own && view.staff.length < view.staff_max"
+          class="btn"
+          :disabled="busy"
+          @click="addStaff"
+        >
+          社員を増やす
+        </button>
+        <span class="total">総合 {{ yen(view.total_income) }}円</span>
       </div>
-      <div class="param-grid staff-grid">
-        <template v-for="p in PARAMS" :key="p.key">
-          <button
-            v-if="canEdu"
-            class="param-cell cell-btn"
-            :disabled="busy || !canEduNow(st.can_edu_at) || (myParams[p.key] ?? 0) < eduAmount"
-            :title="`${p.label}を+${eduGain}（自分の${p.label}-${eduAmount}・費用${yen(eduFee)}円）`"
-            @click="educate(st.id, p.key)"
-          >
-            <span class="pname">{{ p.label }}</span>
-            <span class="pval" :class="{ zero: !(st.params[p.key] ?? 0) }">{{ yen(st.params[p.key] ?? 0) }}</span>
-          </button>
-          <div v-else class="param-cell">
-            <span class="pname">{{ p.label }}</span>
-            <span class="pval" :class="{ zero: !(st.params[p.key] ?? 0) }">{{ yen(st.params[p.key] ?? 0) }}</span>
-          </div>
-        </template>
-      </div>
-    </div>
-    <div v-if="view.staff.length === 0" class="empty">まだ社員がいません。</div>
-
-    <div class="bottom-bar">
-      <button v-if="view.own && view.staff.length < view.staff_max" class="btn" :disabled="busy" @click="addStaff">
-        社員を増やす
-      </button>
-      <span class="total">総合 {{ yen(view.total_income) }}円</span>
-    </div>
     </template>
 
     <!-- 会社掲示板(株式会社: 来訪者板+メンバー板) -->
@@ -333,7 +414,9 @@ const doSeizou = async () => {
               class="btn mini-btn"
               :disabled="busy"
               @click="approve(p.id)"
-            >入会</button>
+            >
+              入会
+            </button>
           </div>
           <div class="bbs-body"><RichText :text="p.body" /></div>
         </div>
@@ -358,7 +441,9 @@ const doSeizou = async () => {
               class="btn mini-btn"
               :disabled="busy"
               @click="approve(p.id)"
-            >退会</button>
+            >
+              退会
+            </button>
           </div>
           <div class="bbs-body"><RichText :text="p.body" /></div>
         </div>
@@ -378,10 +463,25 @@ const doSeizou = async () => {
       <div v-if="!view.materials.has_shop" class="seizou-warn">
         商品を並べるお店がありません。先に家の店を開いてください。
       </div>
-      <div v-else-if="view.materials.made_today" class="seizou-warn">本日の生産は完了しました。</div>
+      <div v-else-if="view.materials.made_today" class="seizou-warn">
+        本日の生産は完了しました。
+      </div>
       <table class="sz-table">
-        <tr><td>種類</td><td>{{ view.materials.shop_syubetu || '（店なし）' }}</td></tr>
-        <tr><td>品名</td><td><input v-model="szName" maxlength="50" class="sz-name" placeholder="(空欄=自分の名前の商品)" /></td></tr>
+        <tr>
+          <td>種類</td>
+          <td>{{ view.materials.shop_syubetu || '（店なし）' }}</td>
+        </tr>
+        <tr>
+          <td>品名</td>
+          <td>
+            <input
+              v-model="szName"
+              maxlength="50"
+              class="sz-name"
+              placeholder="(空欄=自分の名前の商品)"
+            />
+          </td>
+        </tr>
         <tr v-for="p in PARAMS" :key="p.key">
           <td>{{ p.label }}値</td>
           <td>
@@ -389,13 +489,42 @@ const doSeizou = async () => {
             <span class="sz-max">原料 {{ view.materials.maxima[p.key] ?? 0 }}</span>
           </td>
         </tr>
-        <tr><td>カロリー</td><td><input v-model="szCal" class="sz-num" /><span class="sz-max">食料 {{ view.materials.syoku }}</span></td></tr>
-        <tr><td>間隔(分)</td><td><input v-model="szKankaku" class="sz-num" /></td></tr>
-        <tr><td>在庫</td><td><input v-model="szZaiko" class="sz-num" /><span class="sz-max">在庫×耐久 ≦ 社員{{ view.materials.staff_count }}人×min(原料/設定値)</span></td></tr>
-        <tr><td>耐久</td><td><input v-model="szTaikyuu" class="sz-num" /></td></tr>
-        <tr><td>値段</td><td><input v-model="szPrice" class="sz-num wide" placeholder="0=既定" /></td></tr>
+        <tr>
+          <td>カロリー</td>
+          <td>
+            <input v-model="szCal" class="sz-num" /><span class="sz-max"
+              >食料 {{ view.materials.syoku }}</span
+            >
+          </td>
+        </tr>
+        <tr>
+          <td>間隔(分)</td>
+          <td><input v-model="szKankaku" class="sz-num" /></td>
+        </tr>
+        <tr>
+          <td>在庫</td>
+          <td>
+            <input v-model="szZaiko" class="sz-num" /><span class="sz-max"
+              >在庫×耐久 ≦ 社員{{ view.materials.staff_count }}人×min(原料/設定値)</span
+            >
+          </td>
+        </tr>
+        <tr>
+          <td>耐久</td>
+          <td><input v-model="szTaikyuu" class="sz-num" /></td>
+        </tr>
+        <tr>
+          <td>値段</td>
+          <td><input v-model="szPrice" class="sz-num wide" placeholder="0=既定" /></td>
+        </tr>
       </table>
-      <button class="btn" :disabled="busy || !view.materials.has_shop || view.materials.made_today" @click="doSeizou">変更／作成</button>
+      <button
+        class="btn"
+        :disabled="busy || !view.materials.has_shop || view.materials.made_today"
+        @click="doSeizou"
+      >
+        変更／作成
+      </button>
     </div>
   </div>
   <EmojiPicker v-if="emojiFor" @pick="insertEmoji" @close="emojiFor = null" />

@@ -9,11 +9,26 @@ const emit = defineEmits<{ update: [player: Player]; back: [] }>();
 
 const yen = (n: number) => n.toLocaleString('ja-JP');
 const ABILITIES = [
-  'kokugo', 'suugaku', 'rika', 'syakai', 'eigo', 'ongaku', 'bijutsu',
-  'looks', 'tairyoku', 'kenkou', 'speed', 'power', 'wanryoku', 'kyakuryoku', 'love', 'omoshirosa',
+  'kokugo',
+  'suugaku',
+  'rika',
+  'syakai',
+  'eigo',
+  'ongaku',
+  'bijutsu',
+  'looks',
+  'tairyoku',
+  'kenkou',
+  'speed',
+  'power',
+  'wanryoku',
+  'kyakuryoku',
+  'love',
+  'omoshirosa',
 ];
 const label = (k: string) => PARAM_LABEL[k] ?? k;
-const playerParam = (k: string) => (props.player.params as unknown as Record<string, number>)[k] ?? 0;
+const playerParam = (k: string) =>
+  (props.player.params as unknown as Record<string, number>)[k] ?? 0;
 
 const character = ref<Character | null>(null);
 const ranking = ref<CLeagueRank[]>([]);
@@ -133,17 +148,21 @@ async function doBattle() {
           <div class="panel-white char-card">
             <h3>{{ character.name }}</h3>
             <div class="derived">
-              頭の良さ <b>{{ character.zunou }}</b> ／ 身体能力 <b>{{ character.sintai }}</b>
-              ／ 戦績 {{ character.wins }}勝 {{ character.losses }}敗 {{ character.draws }}分
+              頭の良さ <b>{{ character.zunou }}</b> ／ 身体能力 <b>{{ character.sintai }}</b> ／
+              戦績 {{ character.wins }}勝 {{ character.losses }}敗 {{ character.draws }}分
             </div>
           </div>
 
           <div class="panel-white">
-            <h3>育成（本人の能力とお金を注入）<span class="hint"> 費用: {{ yen(growCost) }}円</span></h3>
+            <h3>
+              育成（本人の能力とお金を注入）<span class="hint"> 費用: {{ yen(growCost) }}円</span>
+            </h3>
             <div class="grow-grid">
               <label v-for="k in ABILITIES" :key="k" class="grow-cell">
                 <span class="gl">{{ label(k) }}</span>
-                <span class="cur">キャラ{{ character.abilities[k] ?? 0 }} / 本人{{ playerParam(k) }}</span>
+                <span class="cur"
+                  >キャラ{{ character.abilities[k] ?? 0 }} / 本人{{ playerParam(k) }}</span
+                >
                 <input type="number" min="0" v-model.number="grow[k]" />
               </label>
             </div>
@@ -161,13 +180,17 @@ async function doBattle() {
                   {{ o.char_name }}（{{ o.owner_name }}）
                 </option>
               </select>
-              <button class="btn primary" :disabled="busy || opponentId === ''" @click="doBattle">対戦する</button>
+              <button class="btn primary" :disabled="busy || opponentId === ''" @click="doBattle">
+                対戦する
+              </button>
             </div>
             <div v-if="battle" class="battle-log">
               <div v-for="(rd, i) in battle.rounds" :key="i" class="round" :class="rd.winner">
                 第{{ i + 1 }}戦 [{{ label(rd.ability) }}] {{ rd.comment }}
                 <span class="score">{{ rd.a_score }} vs {{ rd.b_score }}</span>
-                <span class="rw">{{ rd.winner === 'a' ? '○勝' : rd.winner === 'b' ? '×負' : '△分' }}</span>
+                <span class="rw">{{
+                  rd.winner === 'a' ? '○勝' : rd.winner === 'b' ? '×負' : '△分'
+                }}</span>
               </div>
             </div>
           </div>
@@ -176,14 +199,24 @@ async function doBattle() {
         <div class="rank-col panel-white">
           <h3>Cリーグ順位</h3>
           <table class="rank-table">
-            <thead><tr><th>#</th><th class="l">キャラ</th><th>戦績</th></tr></thead>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th class="l">キャラ</th>
+                <th>戦績</th>
+              </tr>
+            </thead>
             <tbody>
               <tr v-for="(r, i) in ranking" :key="i" :class="{ me: r.owner_id === player.id }">
                 <td>{{ i + 1 }}</td>
-                <td class="l">{{ r.char_name }}<span class="ro">({{ r.owner_name }})</span></td>
+                <td class="l">
+                  {{ r.char_name }}<span class="ro">({{ r.owner_name }})</span>
+                </td>
                 <td>{{ r.wins }}-{{ r.losses }}-{{ r.draws }}</td>
               </tr>
-              <tr v-if="!ranking.length"><td colspan="3" class="muted">まだキャラがいません。</td></tr>
+              <tr v-if="!ranking.length">
+                <td colspan="3" class="muted">まだキャラがいません。</td>
+              </tr>
             </tbody>
           </table>
         </div>

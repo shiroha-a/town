@@ -156,7 +156,10 @@ async function play() {
       </thead>
       <tbody>
         <tr v-for="(name, i) in symNames" :key="i">
-          <td><span class="chip" :class="`sym${i}`">{{ symTokens[i] }}</span>{{ name }}</td>
+          <td>
+            <span class="chip" :class="`sym${i}`">{{ symTokens[i] }}</span
+            >{{ name }}
+          </td>
           <td>×{{ symMults[i] }}</td>
         </tr>
       </tbody>

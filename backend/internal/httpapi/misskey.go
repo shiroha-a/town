@@ -31,6 +31,20 @@ func (s *Server) misskeyProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "その住民は見つかりません。")
 		return
 	}
+	// 本人が「掲載する」にしていなければ他の住民には見せない(既定オフ)。
+	viewer := PlayerIDFrom(r.Context())
+	if viewer != id {
+		pub, err := s.players.ProfilePublic(r.Context(), id)
+		if err != nil {
+			writeInternal(w, r, err)
+			return
+		}
+		if !pub {
+			writeError(w, http.StatusForbidden,
+				"この住民はMisskeyの情報を公開していません。")
+			return
+		}
+	}
 	prof, err := s.profiles.Get(r.Context(), id)
 	if errors.Is(err, profile.ErrNoProfile) {
 		writeError(w, http.StatusNotFound, "Misskeyのプロフィールを取得できませんでした。")

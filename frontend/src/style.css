@@ -15,10 +15,24 @@ body {
   --plaid: rgba(59, 197, 115, 0.25);
   background-image:
     repeating-linear-gradient(90deg, transparent 0 50px, var(--plaid) 50px 100px),
-    repeating-linear-gradient(90deg, transparent 0 56px, var(--plaid) 56px 61px, transparent 61px 89px, var(--plaid) 89px 94px, transparent 94px 100px),
+    repeating-linear-gradient(
+      90deg,
+      transparent 0 56px,
+      var(--plaid) 56px 61px,
+      transparent 61px 89px,
+      var(--plaid) 89px 94px,
+      transparent 94px 100px
+    ),
     repeating-linear-gradient(0deg, transparent 0 50px, var(--plaid) 50px 100px),
-    repeating-linear-gradient(0deg, transparent 0 56px, var(--plaid) 56px 61px, transparent 61px 89px, var(--plaid) 89px 94px, transparent 94px 100px);
-  font-family: "MS PGothic", Osaka, "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+    repeating-linear-gradient(
+      0deg,
+      transparent 0 56px,
+      var(--plaid) 56px 61px,
+      transparent 61px 89px,
+      var(--plaid) 89px 94px,
+      transparent 94px 100px
+    );
+  font-family: 'MS PGothic', Osaka, 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif;
   font-size: 13px;
   color: #000;
 }
@@ -255,6 +269,76 @@ body {
 .facility:hover {
   outline: 2px solid #ff6600;
   outline-offset: -2px;
+}
+/* 2マス(2x1)の家。幅はマス数ぶんの百分率をインラインで与え、原点マスから右隣へ
+   はみ出して描く。覆われた側のマスには何も置かない(背景アセットだけが残る)ので、
+   その上に家が重なる。z-indexは右隣の.cell-bg(絶対配置)より前に出すため。 */
+.house-wide {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  z-index: 2;
+}
+.house-wide img {
+  max-width: 64px;
+}
+
+/* 一覧表(デパート・職安・持ち物など)の見出し・品名・カテゴリを、スクロールしても
+   見失わないようにする。パラメータ列が16個あって表が画面より広くなるため、狭い画面では
+   横に振ると「どの品の行か」、縦に送ると「どの列か」が分からなくなっていた。
+
+   使う側は .table-scroll に .sticky-table を足し、色だけを変数で渡す。
+   固定した要素は下の内容が透けるので、背景と端の線を必ず指定する。 */
+.sticky-table {
+  /* 見出し行の高さ。カテゴリ行をこの下に置くので決め打ちにする(実測に頼ると
+     端末のフォント差でカテゴリ行が見出しの裏に潜る)。 */
+  --stick-head-h: 22px;
+  --stick-line: #ccc; /* 固定した端に引く線 */
+  --stick-bg: #fff; /* 固定した列・行の背景 */
+  max-height: 62vh;
+  overflow-y: auto;
+  /* 端まで来ても背後のページが釣られて動かないようにする。 */
+  overscroll-behavior: contain;
+}
+/* 見出し行(縦スクロール時)。border-collapse の表は固定中に枠線が消えるので影で描く。 */
+.sticky-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  height: var(--stick-head-h);
+  box-sizing: border-box;
+  box-shadow: 0 1px 0 var(--stick-line);
+}
+/* 品名列(横スクロール時)。見出しとの交差は見出し側を前に出す。 */
+.sticky-table th.l {
+  left: 0;
+  z-index: 4;
+  box-shadow:
+    1px 0 0 var(--stick-line),
+    0 1px 0 var(--stick-line);
+}
+.sticky-table td.l {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--stick-bg);
+  box-shadow: 1px 0 0 var(--stick-line);
+}
+/* カテゴリ行。行は見出しの下に、名前はセルの中で左端に留める。
+   セル自体は colspan で表の全幅ぶんあり動く余地が無いので、中身の span を固定する。 */
+.sticky-table tr.cat-row td {
+  position: sticky;
+  top: var(--stick-head-h);
+  z-index: 2;
+  box-shadow: 0 1px 0 var(--stick-line);
+}
+/* カテゴリ名と、行の下に出る特殊効果の説明。どちらも colspan のセルに入っていて
+   横に振ると文字だけが流れていくため、中身を左端に留める。 */
+.sticky-table .cat-name {
+  display: inline-block;
+  position: sticky;
+  left: 6px;
 }
 
 .ticker {

@@ -55,8 +55,12 @@ async function play(choice: 'even' | 'odd') {
           <option v-for="b in bets" :key="b" :value="b">{{ yen(b) }}円</option>
         </select>
       </label>
-      <button class="btn" :disabled="busy" data-test="even" @click="play('even')">偶数に賭ける</button>
-      <button class="btn" :disabled="busy" data-test="odd" @click="play('odd')">奇数に賭ける</button>
+      <button class="btn" :disabled="busy" data-test="even" @click="play('even')">
+        偶数に賭ける
+      </button>
+      <button class="btn" :disabled="busy" data-test="odd" @click="play('odd')">
+        奇数に賭ける
+      </button>
     </div>
     <div v-if="message" class="message error">{{ message }}</div>
   </div>

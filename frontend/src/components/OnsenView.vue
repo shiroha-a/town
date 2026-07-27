@@ -115,7 +115,10 @@ function startPolling() {
       // 待たずに2秒ごとパワーが増えていく。
       const p = await api.onsenTick(props.player.id);
       emit('update', p);
-      if (p.status.energy >= p.status.energy_max && p.status.nou_energy >= p.status.nou_energy_max) {
+      if (
+        p.status.energy >= p.status.energy_max &&
+        p.status.nou_energy >= p.status.nou_energy_max
+      ) {
         stopPolling(); // 満タンになったら回復は止まる
       }
     } catch {
@@ -191,7 +194,9 @@ async function backToTown() {
       <div class="bathe-result">
         <p class="lead">
           {{ lastBath?.name }}（回復倍率×{{ lastBath?.power_multiplier }}）に入っています。<br />
-          <span v-if="!isFull">通常の{{ lastBath?.power_multiplier }}倍の速さでパワーが回復中です。</span>
+          <span v-if="!isFull"
+            >通常の{{ lastBath?.power_multiplier }}倍の速さでパワーが回復中です。</span
+          >
           <span v-else>パワーは満タンになりました。</span>
         </p>
         <PowerBar
@@ -206,7 +211,9 @@ async function backToTown() {
           :max="player.status.nou_energy_max"
           :full-remain="nouFullRemain"
         />
-        <p class="gain-note">この入浴で 身体+{{ gainedEnergy }} ／ 頭脳+{{ gainedNou }} 回復しました。</p>
+        <p class="gain-note">
+          この入浴で 身体+{{ gainedEnergy }} ／ 頭脳+{{ gainedNou }} 回復しました。
+        </p>
       </div>
       <div class="bathe-actions">
         <button class="btn" :disabled="busy" @click="backToSelect">別の風呂に入る</button>
@@ -219,8 +226,8 @@ async function backToTown() {
       <h2 class="onsen-title">風呂の選択</h2>
       <div class="onsen-sub">
         ●{{ player.display_name }}さんの所持金：<span class="money">{{ yen(player.money) }}円</span>
-        ／ 身体パワー {{ player.status.energy }}/{{ player.status.energy_max }}
-        ・頭脳パワー {{ player.status.nou_energy }}/{{ player.status.nou_energy_max }}
+        ／ 身体パワー {{ player.status.energy }}/{{ player.status.energy_max }} ・頭脳パワー
+        {{ player.status.nou_energy }}/{{ player.status.nou_energy_max }}
       </div>
 
       <div v-if="message" :class="['message', kind]" data-test="message">{{ message }}</div>

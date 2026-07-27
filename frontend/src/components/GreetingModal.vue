@@ -17,7 +17,15 @@ const emit = defineEmits<{
 
 const isAdmin = computed(() => props.player.roles.includes('admin'));
 
-const CATEGORIES = ['あいさつ', '雑談', '今日の出来事', '今の気分', 'なんとなく', 'お話ししよう', '宣伝'];
+const CATEGORIES = [
+  'あいさつ',
+  '雑談',
+  '今日の出来事',
+  '今の気分',
+  'なんとなく',
+  'お話ししよう',
+  '宣伝',
+];
 const COLORS = [
   { label: '黒', value: '#333333' },
   { label: '緑', value: '#009933' },
@@ -66,7 +74,13 @@ async function post() {
   busy.value = true;
   message.value = '';
   try {
-    const res = await api.postGreeting(props.player.id, category.value, body.value, color.value, janken.value);
+    const res = await api.postGreeting(
+      props.player.id,
+      category.value,
+      body.value,
+      color.value,
+      janken.value,
+    );
     emit('update', res.player);
     const r = res.result;
     const lines: string[] = [];

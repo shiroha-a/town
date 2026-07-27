@@ -27,14 +27,17 @@ onMounted(async () => {
 
 // 前提マスター職を満たしているか(なければ常にtrue)。
 function masterOk(job: JobOption): boolean {
-  return job.require_master === '' || props.player.status.mastered_jobs.includes(job.require_master);
+  return (
+    job.require_master === '' || props.player.status.mastered_jobs.includes(job.require_master)
+  );
 }
 
 // 前提職をまだマスターしておらず就けない職業は、一覧から除外する。
 const visibleJobs = computed(() => jobs.value.filter(masterOk));
 
 // プレイヤーの現在値を取得(学力・能力はplayer.paramsに入っている)。
-const playerParam = (key: string): number => (props.player.params as unknown as Record<string, number>)[key] ?? 0;
+const playerParam = (key: string): number =>
+  (props.player.params as unknown as Record<string, number>)[key] ?? 0;
 // 必要値があり、現在値がそれに満たない(=不足)か。
 function lacking(job: JobOption, key: string): boolean {
   const need = job.requirements[key] ?? 0;
@@ -78,8 +81,10 @@ async function take(job: JobOption) {
     <div v-if="message" :class="['message', kind]" data-test="message">{{ message }}</div>
 
     <div class="panel-white">
-      <div class="cap">必要パラメータ(不足は赤・達成は緑で表示)／ 身P・頭P消費(1回働くと消費するパワー)</div>
-      <div class="table-scroll">
+      <div class="cap">
+        必要パラメータ(不足は赤・達成は緑で表示)／ 身P・頭P消費(1回働くと消費するパワー)
+      </div>
+      <div class="table-scroll sticky-table">
         <table class="job-table">
           <thead>
             <tr>
@@ -111,7 +116,9 @@ async function take(job: JobOption) {
               <td class="cost">{{ job.nou_energy_cost }}</td>
               <td class="right money">
                 {{ yen(job.pay) }}円
-                <span v-if="job.pay_interval > 1" class="interval">{{ job.pay_interval }}回ごと支給</span>
+                <span v-if="job.pay_interval > 1" class="interval"
+                  >{{ job.pay_interval }}回ごと支給</span
+                >
               </td>
               <td class="right">
                 <button
@@ -138,7 +145,12 @@ async function take(job: JobOption) {
 .job-page {
   background-color: #669966;
   /* 旧shop_bak.gifのCSS再現: 6px周期の1pxライン */
-  background-image: repeating-linear-gradient(180deg, transparent 0 2px, #cccccc 2px 3px, transparent 3px 6px);
+  background-image: repeating-linear-gradient(
+    180deg,
+    transparent 0 2px,
+    #cccccc 2px 3px,
+    transparent 3px 6px
+  );
   padding: 6px;
   min-height: 80vh;
 }
@@ -178,6 +190,8 @@ async function take(job: JobOption) {
   margin-bottom: 4px;
 }
 .table-scroll {
+  --stick-line: #b0d0b0;
+  --stick-bg: #fff;
   overflow-x: auto;
 }
 .job-table {
