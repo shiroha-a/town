@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>つながっていません</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #e8dcc0;
+        color: #333;
+        font-family: 'MS PGothic', Osaka, 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif;
+      }
+      .box {
+        background: #fff;
+        border: 1px solid #999;
+        padding: 20px 24px;
+        max-width: 320px;
+        text-align: center;
+        line-height: 1.8;
+      }
+      h1 {
+        font-size: 16px;
+        color: #663300;
+        margin: 0 0 8px;
+      }
+      p {
+        font-size: 13px;
+        margin: 0 0 14px;
+      }
+      button {
+        font: inherit;
+        font-size: 13px;
+        padding: 4px 16px;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="box">
+      <h1>つながっていません</h1>
+      <!-- この街はサーバーで動いているので、通信できないと何も進められない。
+           オフラインで遊べるふりはせず、その旨だけを出す。 -->
+      <p>電波の届く場所でもう一度お試しください。</p>
+      <button onclick="location.reload()">再読み込み</button>
+    </div>
+  </body>
+</html>

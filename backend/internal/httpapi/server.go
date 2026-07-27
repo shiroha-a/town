@@ -269,7 +269,13 @@ func NewServer(players *player.Service, actions *action.Service, contentSvc *con
 		return api
 	}
 	// 画面もこのプロセスから配る(オリジンを1つにする)。
-	return spaHandler(auth.WebDir, api)
+	// PWAのマニフェストはゲーム名が管理画面から変わるので動的に返す。spaHandlerは
+	// /api/以外を静的ファイル扱いにしてしまうため、その手前で受ける。
+	// 認証は要らない(マニフェストはcookie無しで取得される)。
+	web := http.NewServeMux()
+	web.HandleFunc("GET /manifest.webmanifest", s.manifest)
+	web.Handle("/", spaHandler(auth.WebDir, api))
+	return web
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

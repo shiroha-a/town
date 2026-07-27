@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- アプリアイコン。ホーム画面の小さい表示でも読めるよう、空・草地・道・家という
+       街マップの要素を最小限まで削って大きく描く。配色は街マップと同じ。 -->
+  <rect width="512" height="512" fill="#8fbf6a"/>
+  <rect width="512" height="216" fill="#8fd4f0"/>
+
+  <!-- 雲 -->
+  <g fill="#fff" opacity="0.85">
+    <ellipse cx="96" cy="76" rx="46" ry="22"/>
+    <ellipse cx="132" cy="66" rx="32" ry="26"/>
+    <ellipse cx="410" cy="120" rx="36" ry="17"/>
+  </g>
+
+  <!-- 道(手前で横に走る) -->
+  <rect y="392" width="512" height="76" fill="#bdb6a6"/>
+  <g fill="#fff">
+    <rect x="34" y="425" width="60" height="10" rx="5"/>
+    <rect x="150" y="425" width="60" height="10" rx="5"/>
+    <rect x="266" y="425" width="60" height="10" rx="5"/>
+    <rect x="382" y="425" width="60" height="10" rx="5"/>
+  </g>
+
+  <!-- 家(左) -->
+  <g>
+    <ellipse cx="150" cy="378" rx="80" ry="12" fill="#000" opacity="0.12"/>
+    <path d="M62 254 L150 186 L238 254 Z" fill="#c2483a"/>
+    <rect x="82" y="254" width="136" height="124" fill="#f6f0e2"/>
+    <g fill="#bfe0ee" stroke="#7fa8bc" stroke-width="4">
+      <rect x="104" y="278" width="42" height="38"/>
+      <rect x="156" y="278" width="42" height="38"/>
+    </g>
+    <rect x="128" y="330" width="46" height="48" fill="#8a6a3c"/>
+  </g>
+
+  <!-- ビル(右) -->
+  <g>
+    <ellipse cx="358" cy="378" rx="66" ry="11" fill="#000" opacity="0.12"/>
+    <rect x="298" y="212" width="120" height="166" fill="#e7e2d4"/>
+    <rect x="298" y="212" width="120" height="16" fill="#6d7f92"/>
+    <g fill="#bfe0ee" stroke="#7fa8bc" stroke-width="3">
+      <rect x="316" y="246" width="30" height="30"/>
+      <rect x="370" y="246" width="30" height="30"/>
+      <rect x="316" y="292" width="30" height="30"/>
+      <rect x="370" y="292" width="30" height="30"/>
+    </g>
+    <rect x="340" y="336" width="36" height="42" fill="#6d7f92"/>
+  </g>
+
+  <!-- 木 -->
+  <g>
+    <rect x="252" y="330" width="14" height="48" fill="#7a5a34"/>
+    <circle cx="259" cy="312" r="38" fill="#4f9a45"/>
+    <circle cx="236" cy="330" r="26" fill="#5cae50"/>
+    <circle cx="282" cy="330" r="26" fill="#5cae50"/>
+  </g>
+</svg>
