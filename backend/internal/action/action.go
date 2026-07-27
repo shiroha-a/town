@@ -328,7 +328,8 @@ func (s *Service) DoWork(ctx context.Context, playerID int64, idempotencyKey str
 		// パラメータ値には依存しない。基準以下にはならない)。
 		energySpend := jobrule.PowerSpend(econ.bodyCost, econ.rank)
 		nouSpend := jobrule.PowerSpend(econ.nouCost, econ.rank)
-		// 6. 今回の給料(レベル×昇給係数で増額)+ 消費した合計パワーに見合う労働ボーナス。
+		// 6. 今回の給料(基本給 × レベル × raise_rate% を上乗せ)+ 消費した合計パワーに
+		// 見合う労働ボーナス。
 		workBonus := int64(energySpend+nouSpend) * jobrule.PayPerPower
 		thisSalary := econ.salary + econ.salary*int64(newLevel)*int64(econ.raiseRate)/100 + workBonus
 		// 7. 勤務回数を進め、支払間隔ごとにまとめて支給。
@@ -341,10 +342,12 @@ func (s *Service) DoWork(ctx context.Context, playerID int64, idempotencyKey str
 		if kaisuu%payInterval == 0 {
 			pay = thisSalary * int64(payInterval)
 		}
-		// 8. レベルアップ時ボーナス(今回給料 × bonus_rate%)。
+		// 8. レベルアップ時ボーナス(今回給料 × bonus_rate 倍)。
+		// bonus_rate は率ではなく倍率。レガシーも $job_kyuuyo * $job_bonus で、
+		// 一覧には「×15」と出していた(basic0.cgi の job_change_go)。
 		var bonus int64
 		if leveledUp {
-			bonus = thisSalary * int64(econ.bonusRate) / 100
+			bonus = thisSalary * int64(econ.bonusRate)
 		}
 		// 給料・ボーナスは台帳経由(system:payroll_source が原資、zero-sum維持)。
 		if total := pay + bonus; total > 0 {

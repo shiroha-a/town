@@ -1592,8 +1592,8 @@ async function deleteEdit() {
               <div class="econ-grid">
                 <label>給料<input type="number" v-model.number="job.salary" /></label>
                 <label>支払間隔<input type="number" v-model.number="job.pay_interval" /></label>
-                <label>ボーナス%<input type="number" v-model.number="job.bonus_rate" /></label>
-                <label>昇給%<input type="number" v-model.number="job.raise_rate" /></label>
+                <label>ボーナス倍<input type="number" v-model.number="job.bonus_rate" /></label>
+                <label>昇給%/Lv<input type="number" v-model.number="job.raise_rate" /></label>
                 <label>ランク<input type="number" v-model.number="job.rank" /></label>
                 <label>身体消費<input type="number" v-model.number="job.body_cost" /></label>
                 <label>頭脳消費<input type="number" v-model.number="job.nou_cost" /></label>
@@ -2656,8 +2656,8 @@ async function deleteEdit() {
         <div class="econ-grid">
           <label>給料<input type="number" v-model.number="editingJob.salary" /></label>
           <label>支払間隔<input type="number" v-model.number="editingJob.pay_interval" /></label>
-          <label>ボーナス%<input type="number" v-model.number="editingJob.bonus_rate" /></label>
-          <label>昇給%<input type="number" v-model.number="editingJob.raise_rate" /></label>
+          <label>ボーナス倍<input type="number" v-model.number="editingJob.bonus_rate" /></label>
+          <label>昇給%/Lv<input type="number" v-model.number="editingJob.raise_rate" /></label>
           <label>ランク<input type="number" v-model.number="editingJob.rank" /></label>
           <label>身体消費<input type="number" v-model.number="editingJob.body_cost" /></label>
           <label>頭脳消費<input type="number" v-model.number="editingJob.nou_cost" /></label>
