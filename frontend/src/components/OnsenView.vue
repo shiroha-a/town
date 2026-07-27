@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { api, type Player, type ShopItem } from '../api';
 import PowerBar from './PowerBar.vue';
 import { projectedPower } from '../power';
+import { requestWakeLock, releaseWakeLock } from '../wakelock';
 
 const props = defineProps<{ player: Player }>();
 const emit = defineEmits<{ update: [player: Player]; back: [] }>();
@@ -51,6 +52,7 @@ onMounted(async () => {
 onUnmounted(() => {
   if (timer !== undefined) window.clearInterval(timer);
   stopPolling();
+  releaseWakeLock();
   // 入浴中に画面を離れたら通常速度へ戻す(念のため)。
   if (phase.value === 'bathing') {
     api.onsenLeave(props.player.id).catch(() => {});
@@ -148,6 +150,8 @@ async function bathe(bath: ShopItem) {
     emit('update', updated);
     lastBath.value = bath;
     phase.value = 'bathing';
+    // 入浴中は操作せず眺めるだけなので、端末の自動ロックで暗くならないようにする。
+    requestWakeLock();
     startPolling();
   } catch (e) {
     message.value = e instanceof Error ? e.message : String(e);
@@ -160,6 +164,7 @@ async function bathe(bath: ShopItem) {
 // 入浴を終える(回復倍率を通常に戻す)。
 async function leaveOnsen() {
   stopPolling();
+  releaseWakeLock();
   try {
     emit('update', await api.onsenLeave(props.player.id));
   } catch {

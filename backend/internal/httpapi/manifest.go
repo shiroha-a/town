@@ -46,6 +46,18 @@ func (s *Server) manifest(w http.ResponseWriter, r *http.Request) {
 			// maskable はOSが好きな形に切り抜く用(Androidの丸/角丸アイコン)。
 			{"src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
 		},
+		// アイコンを長押し/右クリックしたときに出る行き先。よく開くものだけを
+		// 4つに絞る(OSによっては先頭3〜4件しか出ない)。
+		"shortcuts": []map[string]any{
+			{"name": "持ち物", "url": "/item",
+				"icons": []map[string]any{{"src": "/icons/icon-192.png", "sizes": "192x192"}}},
+			{"name": "銀行", "url": "/bank",
+				"icons": []map[string]any{{"src": "/icons/icon-192.png", "sizes": "192x192"}}},
+			{"name": "役場(住民名鑑)", "url": "/yakuba",
+				"icons": []map[string]any{{"src": "/icons/icon-192.png", "sizes": "192x192"}}},
+			{"name": "メール", "url": "/mail",
+				"icons": []map[string]any{{"src": "/icons/icon-192.png", "sizes": "192x192"}}},
+		},
 		// スクリーンショットがあると、特にデスクトップのインストール画面が
 		// 名前だけの素っ気ないものから、絵の付いたものに変わる。
 		"screenshots": []map[string]any{

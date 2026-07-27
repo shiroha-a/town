@@ -10,7 +10,7 @@
 // 事前キャッシュ(precache)はしない。ビルド成果物の名前がハッシュ付きで変わるため、
 // 一覧を作るとビルド側との二重管理になる。代わりに実際に使われたものを都度貯める。
 
-const VERSION = 'v2';
+const VERSION = 'v3';
 const ASSETS = `town-assets-${VERSION}`; // ハッシュ付きJS/CSS・画像
 const PAGES = `town-pages-${VERSION}`; // オフラインページ
 const OFFLINE = '/offline.html';
@@ -39,7 +39,10 @@ function isStatic(url) {
     url.pathname.startsWith('/assets/') || // ハッシュ付きJS/CSS(中身は不変)
     url.pathname.startsWith('/img/') ||
     url.pathname.startsWith('/icons/') ||
-    url.pathname === '/icon.svg'
+    url.pathname === '/icon.svg' ||
+    // 管理者がアップロードした街の背景画像。/api/ の下にあるが中身は画像で、
+    // 名前が変われば別物になるため貯めてよい。
+    url.pathname.startsWith('/api/v1/assets/')
   );
 }
 
@@ -51,7 +54,8 @@ self.addEventListener('fetch', (e) => {
   if (url.origin !== self.location.origin) return; // Misskeyのアイコン等は素通し
 
   // APIは絶対にキャッシュしない。ログイン状態や所持金が古いまま出ると実害が出る。
-  if (url.pathname.startsWith('/api/')) return;
+  // ただし /api/v1/assets/ はアップロード画像なので、下の静的扱いに回す。
+  if (url.pathname.startsWith('/api/') && !url.pathname.startsWith('/api/v1/assets/')) return;
 
   // 画面遷移(HTML)は必ずネットワークから取る。デプロイがすぐ反映されるうえ、
   // HTMLは小さく no-cache で配られているので手元に持つ意味が薄い。
