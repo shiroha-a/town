@@ -5351,3 +5351,121 @@ func getWithSession(t *testing.T, url, token string) (int, string) {
 	defer resp.Body.Close()
 	return resp.StatusCode, resp.Header.Get("Set-Cookie")
 }
+
+// TestTotalAssets covers 総資産の定義: 現金+普通口座+スーパー定期-ローン残高。
+// 街トップの表示だけスーパー定期とローンを見落としていて、銀行・役場のランキングと
+// 食い違っていた。能力審査もローンを引いていなかった。
+func TestTotalAssets(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	register(t, srv.URL, "misskey.example", "admin0") // 1人目=admin
+	p := register(t, srv.URL, "misskey.example", "rich")
+
+	// 現金50万(初期) + 普通1000万 + スーパー定期300万。
+	creditSavings(t, pool, p.ID, 10_000_000)
+	creditSuperSavings(t, pool, p.ID, 3_000_000)
+
+	base := int64(500_000 + 10_000_000 + 3_000_000)
+	if got := rankingAssets(t, srv.URL, p.ID); got != base {
+		t.Errorf("総資産 = %d, want %d(スーパー定期が抜けている可能性)", got, base)
+	}
+
+	// ローンを組むと残高(日額×残回数)が引かれる。
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO player_loans (player_id, nitigaku, kaisuu) VALUES ($1, 20000, 100)
+		 ON CONFLICT (player_id) DO UPDATE SET nitigaku = 20000, kaisuu = 100`, p.ID); err != nil {
+		t.Fatalf("insert loan: %v", err)
+	}
+	if got, want := rankingAssets(t, srv.URL, p.ID), base-20000*100; got != want {
+		t.Errorf("ローンを引いた総資産 = %d, want %d", got, want)
+	}
+
+	// 能力審査も同じ式で見る。現金+普通+定期では1億を超えるが、ローンを引くと
+	// 届かないケースで不合格になること。
+	creditSavings(t, pool, p.ID, 90_000_000)
+	if _, err := pool.Exec(ctx,
+		`UPDATE player_loans SET nitigaku = 100000, kaisuu = 200 WHERE player_id = $1`, p.ID); err != nil {
+		t.Fatalf("update loan: %v", err)
+	}
+	// お金だけを見たいので、パラメータは審査に通る値へ上げておく。
+	if _, err := pool.Exec(ctx,
+		`UPDATE player_status SET kokugo=20000, suugaku=20000, rika=20000, syakai=20000,
+		 eigo=20000, ongaku=20000, bijutsu=20000, looks=20000, tairyoku=20000, kenkou=20000,
+		 speed=20000, power=20000, wanryoku=20000, kyakuryoku=20000, love=20000, omoshirosa=20000
+		 WHERE player_id = $1`, p.ID); err != nil {
+		t.Fatalf("raise params: %v", err)
+	}
+	// 現金50万+普通1億+定期300万=1億350万、ローン2000万 → 8350万で不合格。
+	if shinsaOK(t, srv.URL, p.ID) {
+		t.Error("ローンを引くと1億に届かないのに能力審査に通っている")
+	}
+	// ローンを返し切れば合格する。
+	if _, err := pool.Exec(ctx, `DELETE FROM player_loans WHERE player_id = $1`, p.ID); err != nil {
+		t.Fatalf("clear loan: %v", err)
+	}
+	if !shinsaOK(t, srv.URL, p.ID) {
+		t.Error("ローンが無ければ能力審査に通るはず")
+	}
+}
+
+// creditSuperSavings tops up a player's super time deposit via the ledger.
+func creditSuperSavings(t *testing.T, pool *pgxpool.Pool, playerID, amount int64) {
+	t.Helper()
+	ctx := context.Background()
+	led := ledger.New(pool)
+	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		return led.PostTx(ctx, tx, "test_credit", "", []ledger.Entry{
+			{Account: ledger.SuperSavingsAccount(playerID), Delta: amount},
+			{Account: ledger.SystemAccount("test_faucet"), Delta: -amount},
+		})
+	})
+	if err != nil {
+		t.Fatalf("credit super savings: %v", err)
+	}
+}
+
+// rankingAssets reads one player's 総資産 from the 役場 ranking.
+func rankingAssets(t *testing.T, base string, playerID int64) int64 {
+	t.Helper()
+	resp, err := http.Get(base + "/api/v1/ranking?key=assets")
+	if err != nil {
+		t.Fatalf("ranking: %v", err)
+	}
+	defer resp.Body.Close()
+	var res struct {
+		Entries []struct {
+			ID    int64 `json:"id"`
+			Value int64 `json:"value"`
+		} `json:"entries"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		t.Fatalf("decode ranking: %v", err)
+	}
+	for _, e := range res.Entries {
+		if e.ID == playerID {
+			return e.Value
+		}
+	}
+	t.Fatalf("ランキングに出ていない (player %d)", playerID)
+	return 0
+}
+
+// shinsaOK reads the 能力審査 verdict from the build screen state.
+func shinsaOK(t *testing.T, base string, playerID int64) bool {
+	t.Helper()
+	resp, err := http.Get(base + "/api/v1/players/" + strconv.FormatInt(playerID, 10) + "/building")
+	if err != nil {
+		t.Fatalf("building: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("building: status=%d", resp.StatusCode)
+	}
+	var st struct {
+		ShinsaOK bool `json:"shinsa_ok"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
+		t.Fatalf("decode building: %v", err)
+	}
+	return st.ShinsaOK
+}

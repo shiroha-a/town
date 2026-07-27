@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/shiroha-a/town/internal/building"
+	"github.com/shiroha-a/town/internal/ledger"
 	"github.com/shiroha-a/town/internal/townmap"
 )
 
@@ -105,9 +106,7 @@ func (s *Service) Building(ctx context.Context, playerID int64) (*BuildingState,
 	// 能力審査(株式会社/持ち物販売店の選択条件): 総資産1億+全パラ1万。
 	var assets int64
 	if err := s.pool.QueryRow(ctx,
-		`SELECT COALESCE(SUM(delta), 0) FROM ledger_entry WHERE account IN ($1, $2, $3)`,
-		fmt.Sprintf("player:%d", playerID), fmt.Sprintf("savings:%d", playerID),
-		fmt.Sprintf("super_savings:%d", playerID)).Scan(&assets); err != nil {
+		`SELECT `+ledger.TotalAssetsSQL, playerID).Scan(&assets); err != nil {
 		return nil, fmt.Errorf("sum assets: %w", err)
 	}
 	var minParam int

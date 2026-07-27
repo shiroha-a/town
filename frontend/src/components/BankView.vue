@@ -1,17 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { api, type Player, type StatementEntry, type LoanQuote } from '../api';
+import { yen, totalAssets } from '../money';
 
 const props = defineProps<{ player: Player }>();
 const emit = defineEmits<{ update: [player: Player]; back: [] }>();
 
-const yen = (n: number) => n.toLocaleString('ja-JP');
-// 総資産=所持金+普通口座+スーパー定期-ローン残高(日額×残回数)。
-const total = () =>
-  props.player.money +
-  props.player.savings +
-  props.player.super_savings -
-  props.player.loan_daily * props.player.loan_count;
+const total = () => totalAssets(props.player);
 
 const depositAmt = ref<number>(props.player.money);
 const withdrawAmt = ref<number>(0);

@@ -103,6 +103,20 @@ func (r *Repo) Balance(ctx context.Context, account string) (int64, error) {
 	return bal, nil
 }
 
+// TotalAssetsSQL is the 総資産 formula as a SQL expression, parameterised by the
+// player id ($1): 現金 + 普通口座 + スーパー定期 - ローン残高(日額×残回数)。
+//
+// 画面(街トップ・銀行)と役場のランキングが同じ式を出すよう、お金の側はここに
+// 寄せる。街トップだけスーパー定期とローンを見落としていた実績があるため。
+// $1 は bigint。口座名を組み立てるときも ::bigint::text と明示しているのは、
+// 先に ::text だけを書くとドライバが引数をtextと推定し、player_loans との
+// 比較が bigint = text になって落ちるため。
+const TotalAssetsSQL = `
+  COALESCE((SELECT SUM(e.delta) FROM ledger_entry e WHERE e.account = 'player:'        || $1::bigint::text), 0)
++ COALESCE((SELECT SUM(e.delta) FROM ledger_entry e WHERE e.account = 'savings:'       || $1::bigint::text), 0)
++ COALESCE((SELECT SUM(e.delta) FROM ledger_entry e WHERE e.account = 'super_savings:' || $1::bigint::text), 0)
+- COALESCE((SELECT l.nitigaku * l.kaisuu FROM player_loans l WHERE l.player_id = $1::bigint), 0)`
+
 // TotalPlayerMoney returns the sum of all player balances (money in circulation).
 func (r *Repo) TotalPlayerMoney(ctx context.Context) (int64, error) {
 	var total int64

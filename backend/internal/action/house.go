@@ -227,8 +227,7 @@ func takeBuildPermit(ctx context.Context, tx pgx.Tx, playerID int64, span int) e
 func (s *Service) checkShinsa(ctx context.Context, tx pgx.Tx, playerID int64) (bool, error) {
 	var assets int64
 	if err := tx.QueryRow(ctx,
-		`SELECT COALESCE(SUM(delta), 0) FROM ledger_entry WHERE account IN ($1, $2, $3)`,
-		ledger.PlayerAccount(playerID), ledger.SavingsAccount(playerID), ledger.SuperSavingsAccount(playerID)).Scan(&assets); err != nil {
+		`SELECT `+ledger.TotalAssetsSQL, playerID).Scan(&assets); err != nil {
 		return false, fmt.Errorf("sum assets: %w", err)
 	}
 	if assets < building.ShinsaAsset {

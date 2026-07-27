@@ -19,6 +19,7 @@ import { satietyLabel } from '../params';
 import CommandIcon from './CommandIcon.vue';
 import PowerBar from './PowerBar.vue';
 import { projectedPower } from '../power';
+import { yen, totalAssets } from '../money';
 import GreetingModal from './GreetingModal.vue';
 // v-touch-label: title属性のラベルをモバイルの長押しで表示する
 import { vTouchLabel } from '../touchlabel';
@@ -30,9 +31,7 @@ const emit = defineEmits<{
   logout: [];
 }>();
 
-const yen = (n: number) => n.toLocaleString('ja-JP');
-
-const total = computed(() => props.player.money + props.player.savings);
+const total = computed(() => totalAssets(props.player));
 
 // 体重はg保持なので表示はkg小数第1位に整形する。
 const weightKg = computed(() => (props.player.status.weight_g / 1000).toFixed(1));
