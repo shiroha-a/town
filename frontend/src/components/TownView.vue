@@ -68,40 +68,36 @@ const houses = ref<HouseCell[]>([]);
 const assets = ref<TownAsset[]>([]);
 
 onMounted(async () => {
-  try {
-    facilities.value = await api.townMap();
-  } catch {
-    // マップ取得に失敗しても他機能は使えるよう空配置で継続する。
-    facilities.value = [];
-  }
-  try {
-    assets.value = await api.townAssets();
-  } catch {
-    assets.value = [];
-  }
-  try {
-    townList.value = await api.towns();
-  } catch {
-    // 街一覧が取れなくても他機能は使えるよう空で継続する。
-    townList.value = [];
-  }
-  try {
-    houses.value = await api.houses(props.player.id);
-  } catch {
-    houses.value = [];
-  }
-  try {
-    const s = await api.stocks();
-    stockPrices.value = s.prices;
-  } catch {
-    stockPrices.value = [];
-  }
+  // どれも互いに依存しないので並行して取る。1本ずつawaitすると往復がそのまま
+  // 積み上がり、トンネル越し(1本250ms前後)では待ち時間が6倍になる。
+  // 取れなかったものだけ空にして、他の機能はそのまま使えるようにする。
+  await Promise.all([
+    api.townMap().then(
+      (v) => (facilities.value = v),
+      () => (facilities.value = []),
+    ),
+    api.townAssets().then(
+      (v) => (assets.value = v),
+      () => (assets.value = []),
+    ),
+    api.towns().then(
+      (v) => (townList.value = v),
+      () => (townList.value = []),
+    ),
+    api.houses(props.player.id).then(
+      (v) => (houses.value = v),
+      () => (houses.value = []),
+    ),
+    api.stocks().then(
+      (s) => (stockPrices.value = s.prices),
+      () => (stockPrices.value = []),
+    ),
+    api.greetings(30).then(
+      (v) => (greetings.value = v),
+      () => (greetings.value = []),
+    ),
+  ]);
   refreshUnread();
-  try {
-    greetings.value = await api.greetings(30);
-  } catch {
-    greetings.value = [];
-  }
   // 街を開いた=来訪として足あとに記帳する(1日1回)。
   // ゲストは足あとに残さない(サーバー側でも拒否される)。
   if (!props.player.is_guest) api.attendanceCheckin(props.player.id).catch(() => {});
