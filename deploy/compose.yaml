@@ -64,6 +64,9 @@ services:
     environment:
       TOWN_DATABASE_URL: "postgres://town:town@postgres:5432/town?sslmode=disable"
       TOWN_REDIS_ADDR: "redis:6379"
+      # 通知(Web Push)の送信元を名乗るのに要る。web と同じ値にすること。
+      # 空だと配信元(Apple等)に拒否され、通知だけ黙って届かなくなる。
+      TOWN_BASE_URL: "${TOWN_BASE_URL:-}"
     depends_on:
       postgres:
         condition: service_healthy

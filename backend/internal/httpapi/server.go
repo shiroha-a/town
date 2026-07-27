@@ -20,6 +20,7 @@ import (
 	"github.com/shiroha-a/town/internal/news"
 	"github.com/shiroha-a/town/internal/player"
 	"github.com/shiroha-a/town/internal/profile"
+	"github.com/shiroha-a/town/internal/push"
 	"github.com/shiroha-a/town/internal/ranking"
 	"github.com/shiroha-a/town/internal/serial"
 	"github.com/shiroha-a/town/internal/session"
@@ -44,7 +45,9 @@ type Server struct {
 	news       *news.Service
 	ranking    *ranking.Service
 	serial     *serial.Service
-	greetHub   *greetHub // あいさつSSE配信のプロセス内ハブ
+	// push は通知の送信口。用意していない環境では nil(通知の口は503を返す)。
+	push     *push.Service
+	greetHub *greetHub // あいさつSSE配信のプロセス内ハブ
 
 	// MiAuth(ログイン)まわり。
 	pool           *pgxpool.Pool
@@ -75,6 +78,8 @@ type AuthDeps struct {
 	Sessions      *session.Store
 	Profiles      *profile.Service
 	Emojis        *emoji.Service
+	// Push は通知。nil なら通知機能そのものを出さない。
+	Push *push.Service
 	// WebDir はビルド済みフロントエンドの置き場。空なら配信しない
 	// (開発でViteの開発サーバを使う場合)。
 	WebDir         string
@@ -86,7 +91,7 @@ type AuthDeps struct {
 func NewServer(players *player.Service, actions *action.Service, contentSvc *content.Service, st *settings.Store, tmap *townmap.Store, stockSvc *stock.Service, keibaSvc *keiba.Service, mailSvc *mail.Service, greetingSvc *greeting.Service, attendanceSvc *attendance.Service, cleagueSvc *cleague.Service, newsSvc *news.Service, rankingSvc *ranking.Service, serialSvc *serial.Service, auth AuthDeps) http.Handler {
 	s := &Server{players: players, actions: actions, content: contentSvc, settings: st, townmap: tmap, stock: stockSvc, keiba: keibaSvc, mail: mailSvc, greeting: greetingSvc, attendance: attendanceSvc, cleague: cleagueSvc, news: newsSvc, ranking: rankingSvc, serial: serialSvc, greetHub: newGreetHub(),
 		pool: auth.Pool, miauth: auth.MiAuth, instanceRules: auth.InstanceRules,
-		sessions: auth.Sessions, profiles: auth.Profiles, emojis: auth.Emojis,
+		sessions: auth.Sessions, profiles: auth.Profiles, emojis: auth.Emojis, push: auth.Push,
 		appName: auth.AppName, allowedOrigins: auth.AllowedOrigins, limiter: newLimiter()}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", s.health)
@@ -257,6 +262,14 @@ func NewServer(players *player.Service, actions *action.Service, contentSvc *con
 	mux.HandleFunc("PUT /api/v1/admin/townassets", s.adminUpdateTownAssets)
 	mux.HandleFunc("GET /api/v1/admin/townmap/presets", s.adminFacilityPresets)
 	mux.HandleFunc("PUT /api/v1/admin/townmap/presets", s.adminUpdateFacilityPresets)
+	// 通知(Web Push)。公開鍵は誰でも取れてよい。購読と設定は本人のみ
+	// (/players/{id}/ の形なので認可はミドルウェアが自動で掛ける)。
+	mux.HandleFunc("GET /api/v1/push/key", s.pushKey)
+	mux.HandleFunc("POST /api/v1/players/{id}/push/subscribe", s.pushSubscribe)
+	mux.HandleFunc("POST /api/v1/players/{id}/push/unsubscribe", s.pushUnsubscribe)
+	mux.HandleFunc("GET /api/v1/players/{id}/push/prefs", s.pushPrefs)
+	mux.HandleFunc("PUT /api/v1/players/{id}/push/prefs", s.pushPrefs)
+
 	mux.HandleFunc("GET /api/v1/admin/events", s.adminListEvents)
 	mux.HandleFunc("POST /api/v1/admin/events", s.adminCreateEvent)
 	mux.HandleFunc("PUT /api/v1/admin/events/{eid}", s.adminUpdateEvent)

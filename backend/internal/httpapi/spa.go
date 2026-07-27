@@ -31,8 +31,15 @@ func spaHandler(dir string, api http.Handler) http.Handler {
 		// してよいが、index.html は毎回確認させる(更新が届かなくなるため)。
 		clean := filepath.Clean(r.URL.Path)
 		if p := filepath.Join(dir, clean); clean != "/" && fileExists(p) {
-			if strings.HasPrefix(clean, "/assets/") {
+			switch {
+			case strings.HasPrefix(clean, "/assets/"):
+				// 名前にハッシュが入るので中身は不変。
 				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			case clean == "/sw.js" || clean == "/offline.html":
+				// Service Worker本体は絶対にキャッシュさせない。ここが古いまま
+				// 残ると、更新(通知の受け口を足す等)が端末に何時間も届かない。
+				// 指定が無いとCDN側が既定でキャッシュしてしまうため明示する。
+				w.Header().Set("Cache-Control", "no-cache, max-age=0, must-revalidate")
 			}
 			files.ServeHTTP(w, r)
 			return

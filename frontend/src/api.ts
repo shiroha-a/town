@@ -557,6 +557,14 @@ export interface AdminPlayerPayload {
 }
 
 // 住民が自分で変えられる設定。
+/** 通知の設定。どれを受け取るかは人ごと、購読は端末ごと。 */
+export interface PushPrefs {
+  mail: boolean;
+  energy: boolean;
+  work: boolean;
+  /** この人のどれかの端末が登録済みか。 */
+  subscribed: boolean;
+}
 export interface UserSettings {
   display_name: string;
   /** Misskeyの情報を街のプロフィールに載せるか(既定オフ)。 */
@@ -1227,6 +1235,15 @@ export const api = {
   resolveEmoji: (host: string, name: string) =>
     request<EmojiResolveResult>('POST', '/emojis/resolve', { host, name }),
   usedEmojis: () => request<{ emojis: UsedEmoji[] }>('GET', '/emojis/used').then((r) => r.emojis),
+  // --- 通知(Web Push) ---
+  pushKey: () => request<{ key: string }>('GET', '/push/key'),
+  pushSubscribe: (id: number, sub: { endpoint: string; p256dh: string; auth: string }) =>
+    request<{ subscribed: boolean }>('POST', `/players/${id}/push/subscribe`, sub),
+  pushUnsubscribe: (id: number, sub: { endpoint: string; p256dh: string; auth: string }) =>
+    request<{ subscribed: boolean }>('POST', `/players/${id}/push/unsubscribe`, sub),
+  pushPrefs: (id: number) => request<PushPrefs>('GET', `/players/${id}/push/prefs`),
+  updatePushPrefs: (id: number, p: { mail: boolean; energy: boolean; work: boolean }) =>
+    request<PushPrefs>('PUT', `/players/${id}/push/prefs`, p),
   userSettings: (id: number) => request<UserSettings>('GET', `/players/${id}/settings`),
   updateUserSettings: (id: number, s: UserSettings) =>
     request<UserSettings>('PUT', `/players/${id}/settings`, s),

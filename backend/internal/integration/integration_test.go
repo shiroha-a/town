@@ -38,6 +38,7 @@ import (
 	"github.com/shiroha-a/town/internal/news"
 	"github.com/shiroha-a/town/internal/player"
 	"github.com/shiroha-a/town/internal/profile"
+	pushpkg "github.com/shiroha-a/town/internal/push"
 	"github.com/shiroha-a/town/internal/ranking"
 	"github.com/shiroha-a/town/internal/rng"
 	"github.com/shiroha-a/town/internal/serial"
@@ -5468,4 +5469,177 @@ func shinsaOK(t *testing.T, base string, playerID int64) bool {
 		t.Fatalf("decode building: %v", err)
 	}
 	return st.ShinsaOK
+}
+
+// TestPushNotifications covers 通知の購読と送信の判定。実際の配信は端末とブラウザの
+// 配信サービスが要るので、ここでは「宛先」をこのテスト内のHTTPサーバーにして、
+// サーバー側が誰に何を送ろうとするかを確かめる。
+func TestPushNotifications(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	alice := register(t, srv.URL, "misskey.example", "alice")
+	bob := register(t, srv.URL, "misskey.example", "bob")
+
+	// 通知を受け取る側(ブラウザの配信サービスに相当)。
+	var mu sync.Mutex
+	received := 0
+	sink := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		received++
+		mu.Unlock()
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer sink.Close()
+
+	push := pushService(t, pool, srv.URL)
+
+	// 購読していない人には何も送らない。
+	if err := push.SetPrefs(ctx, bob.ID, pushpkg.Prefs{Mail: true}); err != nil {
+		t.Fatalf("set prefs: %v", err)
+	}
+
+	// aliceだけ購読する。鍵はWeb Pushの暗号化に使われるので、形式の正しいものを渡す。
+	if err := push.Subscribe(ctx, alice.ID, pushpkg.Subscription{
+		Endpoint: sink.URL + "/push",
+		P256dh:   testP256dh,
+		Auth:     testAuth,
+	}); err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+
+	// 設定が全部オフのうちは、未読があっても送らない。
+	sendMail(t, srv.URL, bob.ID, alice.ID, "やっほー")
+	if err := worker.RunNotifications(ctx, pool, push); err != nil {
+		t.Fatalf("run notifications: %v", err)
+	}
+	if got := count(&mu, &received); got != 0 {
+		t.Errorf("設定オフなのに送っている: %d件", got)
+	}
+
+	// メールをオンにすると届く。
+	if err := push.SetPrefs(ctx, alice.ID, pushpkg.Prefs{Mail: true}); err != nil {
+		t.Fatalf("set prefs: %v", err)
+	}
+	if err := worker.RunNotifications(ctx, pool, push); err != nil {
+		t.Fatalf("run notifications: %v", err)
+	}
+	if got := count(&mu, &received); got != 1 {
+		t.Fatalf("メールの通知が送られていない: %d件", got)
+	}
+
+	// 同じ未読で二度は送らない。
+	if err := worker.RunNotifications(ctx, pool, push); err != nil {
+		t.Fatalf("run notifications: %v", err)
+	}
+	if got := count(&mu, &received); got != 1 {
+		t.Errorf("同じ用件を繰り返し送っている: %d件", got)
+	}
+
+	// 新しいメールが来たらまた送る。
+	sendMail(t, srv.URL, bob.ID, alice.ID, "もう一通")
+	if err := worker.RunNotifications(ctx, pool, push); err != nil {
+		t.Fatalf("run notifications: %v", err)
+	}
+	if got := count(&mu, &received); got != 2 {
+		t.Errorf("新着で送られていない: %d件", got)
+	}
+
+	// 宛先が消えた(410)ら購読を捨てる。
+	gone := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusGone)
+	}))
+	defer gone.Close()
+	if _, err := pool.Exec(ctx,
+		`UPDATE push_subscriptions SET endpoint = $2 WHERE player_id = $1`,
+		alice.ID, gone.URL+"/push"); err != nil {
+		t.Fatalf("point at gone: %v", err)
+	}
+	sendMail(t, srv.URL, bob.ID, alice.ID, "三通目")
+	if err := worker.RunNotifications(ctx, pool, push); err != nil {
+		t.Fatalf("run notifications: %v", err)
+	}
+	var left int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM push_subscriptions WHERE player_id = $1`, alice.ID).Scan(&left); err != nil {
+		t.Fatalf("count subs: %v", err)
+	}
+	if left != 0 {
+		t.Errorf("消えた宛先の購読が残っている: %d件", left)
+	}
+}
+
+// count reads the counter under its lock.
+func count(mu *sync.Mutex, n *int) int {
+	mu.Lock()
+	defer mu.Unlock()
+	return *n
+}
+
+// pushService builds a push service against the test database.
+func pushService(t *testing.T, pool *pgxpool.Pool, baseURL string) *pushpkg.Service {
+	t.Helper()
+	p, err := pushpkg.New(context.Background(), pool, baseURL, nil)
+	if err != nil {
+		t.Fatalf("push service: %v", err)
+	}
+	return p
+}
+
+// sendMail posts one message from one player to another.
+func sendMail(t *testing.T, base string, fromID, toID int64, body string) {
+	t.Helper()
+	payload, _ := json.Marshal(map[string]any{"recipient_id": toID, "body": body})
+	resp, err := http.Post(base+"/api/v1/players/"+strconv.FormatInt(fromID, 10)+"/mail/send",
+		"application/json", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("send mail: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("send mail: status=%d", resp.StatusCode)
+	}
+}
+
+// Web Pushの暗号化に使う購読側の鍵。形式が正しければ中身は何でもよい。
+const (
+	testP256dh = "BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U"
+	testAuth   = "tBHItJI5svbpez7KI4CCXg"
+)
+
+// TestPushSubscriptionLimit covers 宛先の上限。iOSはSafariのタブとホーム画面の
+// アプリが別々の登録になり、登録し直すたびに宛先も変わるため、放置すると1台の
+// 端末へ同じ通知が何通も届く。
+func TestPushSubscriptionLimit(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	alice := register(t, srv.URL, "misskey.example", "alice")
+	push := pushService(t, pool, srv.URL)
+
+	for i := 0; i < 6; i++ {
+		if err := push.Subscribe(ctx, alice.ID, pushpkg.Subscription{
+			Endpoint: fmt.Sprintf("https://push.example.com/%d", i),
+			P256dh:   testP256dh,
+			Auth:     testAuth,
+		}); err != nil {
+			t.Fatalf("subscribe %d: %v", i, err)
+		}
+	}
+	var n int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM push_subscriptions WHERE player_id = $1`, alice.ID).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n > 3 {
+		t.Errorf("宛先が増え続けている: %d件(上限3)", n)
+	}
+	// 残るのは新しい方。
+	var newest string
+	if err := pool.QueryRow(ctx,
+		`SELECT endpoint FROM push_subscriptions WHERE player_id = $1 ORDER BY created_at DESC LIMIT 1`,
+		alice.ID).Scan(&newest); err != nil {
+		t.Fatalf("newest: %v", err)
+	}
+	if newest != "https://push.example.com/5" {
+		t.Errorf("新しい宛先が残っていない: %s", newest)
+	}
 }
