@@ -35,6 +35,31 @@ function masterOk(job: JobOption): boolean {
 // 前提職をまだマスターしておらず就けない職業は、一覧から除外する。
 const visibleJobs = computed(() => jobs.value.filter(masterOk));
 
+// 体格の条件。パラメータのように列を作ると横に伸びるので、職業名の下に文で出す。
+// 満たしていないものは色を変えて、なぜ就けないのかが分かるようにする。
+interface Limit {
+  text: string;
+  met: boolean;
+}
+function limits(job: JobOption): Limit[] {
+  const st = props.player.status;
+  const out: Limit[] = [];
+  if (job.bmi_min > 0 && job.bmi_max > 0) {
+    out.push({
+      text: `BMI ${job.bmi_min}〜${job.bmi_max}`,
+      met: st.bmi >= job.bmi_min && st.bmi <= job.bmi_max,
+    });
+  } else if (job.bmi_min > 0) {
+    out.push({ text: `BMI ${job.bmi_min}以上`, met: st.bmi >= job.bmi_min });
+  } else if (job.bmi_max > 0) {
+    out.push({ text: `BMI ${job.bmi_max}以下`, met: st.bmi <= job.bmi_max });
+  }
+  if (job.height_min > 0) {
+    out.push({ text: `身長${job.height_min}cm以上`, met: st.height_cm >= job.height_min });
+  }
+  return out;
+}
+
 // プレイヤーの現在値を取得(学力・能力はplayer.paramsに入っている)。
 const playerParam = (key: string): number =>
   (props.player.params as unknown as Record<string, number>)[key] ?? 0;
@@ -82,7 +107,9 @@ async function take(job: JobOption) {
 
     <div class="panel-white">
       <div class="cap">
-        必要パラメータ(不足は赤・達成は緑で表示)／ 身P・頭P消費(1回働くと消費するパワー)
+        必要パラメータ(不足は赤・達成は緑で表示)／ 職業名の横は体格の条件(満たしていないものは赤)／
+        身P・頭P消費(1回働くと消費するパワー)／ ボーナス(レベルアップ時に給料の何倍が出るか)／
+        給料の下は昇給(レベル1ごとに基本給が何%増えるか)
       </div>
       <div class="table-scroll sticky-table">
         <table class="job-table">
@@ -93,6 +120,7 @@ async function take(job: JobOption) {
               <th class="cost">身P<br />消費</th>
               <th class="cost">頭P<br />消費</th>
               <th>給料</th>
+              <th class="bonus">ボー<br />ナス</th>
               <th></th>
             </tr>
           </thead>
@@ -102,6 +130,14 @@ async function take(job: JobOption) {
                 {{ job.name }}
                 <span v-if="job.require_master" class="req-master" :class="{ met: masterOk(job) }">
                   （要「{{ job.require_master }}」マスター）
+                </span>
+                <span
+                  v-for="(lim, i) in limits(job)"
+                  :key="i"
+                  class="limit"
+                  :class="{ ng: !lim.met }"
+                >
+                  {{ lim.text }}
                 </span>
               </td>
               <td
@@ -119,6 +155,10 @@ async function take(job: JobOption) {
                 <span v-if="job.pay_interval > 1" class="interval"
                   >{{ job.pay_interval }}回ごと支給</span
                 >
+                <span v-if="job.raise_rate > 0" class="interval">昇給{{ job.raise_rate }}%/Lv</span>
+              </td>
+              <td class="bonus">
+                <span v-if="job.bonus_rate > 0">×{{ job.bonus_rate }}</span>
               </td>
               <td class="right">
                 <button
@@ -246,13 +286,45 @@ async function take(job: JobOption) {
 .money {
   color: #cc3300;
   font-weight: bold;
+  font-size: 12px;
 }
+/* ボーナスは職業ごとの差が大きく比べたい値なので、給料の隣に列として出す。 */
+.job-table th.bonus {
+  background: #ffeccc;
+  color: #a05a00;
+  font-size: 10px;
+  line-height: 1.1;
+}
+.job-table td.bonus {
+  color: #cc6600;
+  font-weight: bold;
+  background: #fffaf2;
+}
+/* 給料の下に出す補足(支給間隔・昇給)。表の本文と同じ大きさにする。
+   9pxだと読めなかった。 */
 .interval {
   display: block;
-  font-size: 9px;
-  color: #666;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #555;
   font-weight: normal;
   white-space: nowrap;
+}
+/* 体格の条件。満たしていれば控えめに、足りなければ赤で目立たせる。 */
+.limit {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: #eef1e8;
+  color: #556;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.limit.ng {
+  background: #ffe8e8;
+  color: #c33;
+  font-weight: bold;
 }
 .req-master {
   font-size: 10px;

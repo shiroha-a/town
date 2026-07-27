@@ -30,6 +30,13 @@ services:
       # cookieが送られなくなるので 0 のままにする。
       TOWN_COOKIE_SECURE: "0"
 
+  # 通知(Web Push)を送るのはworkerなので、公開アドレスはこちらにも要る。
+  # 配信元(Apple/Googleなど)に名乗る値で、httpsでないと拒否される。
+  # web と同じ値にすること(食い違うと通知だけ黙って届かなくなる)。
+  worker:
+    environment:
+      TOWN_BASE_URL: "https://town.example.com"
+
   # 別のポートで動かしたいとき(同じホストで2環境立てる場合など)。
   # ports は既定だと「追記」マージで元のポートも残るため、!override で置き換える。
   #

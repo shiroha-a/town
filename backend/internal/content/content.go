@@ -466,13 +466,23 @@ type JobOption struct {
 	EnergyCost    int            `json:"energy_cost"`     // 1回の身体パワー消費(ランク係数込み)
 	NouEnergyCost int            `json:"nou_energy_cost"` // 1回の頭脳パワー消費(ランク係数込み)
 	PayInterval   int            `json:"pay_interval"`    // 支払間隔(N回出勤ごと。1=日払い)
+	// 体格の条件。パラメータと違って表に列を作れないので、値をそのまま返して
+	// 画面側で「BMI 17以上」のように文にする。0/未設定は制限なし。
+	BMIMin    int `json:"bmi_min"`
+	BMIMax    int `json:"bmi_max"`
+	HeightMin int `json:"height_min"`
+	// 給与の伸び。ボーナスは支給時の割増(%)、昇給は1回働くごとの基本給の増加。
+	BonusRate int `json:"bonus_rate"`
+	RaiseRate int `json:"raise_rate"`
 }
 
 // ListSelectableJobs returns enabled jobs for the job-office UI.
 func (s *Service) ListSelectableJobs(ctx context.Context) ([]JobOption, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, name, requirements, effect, salary, rank, require_master,
-		        body_cost, nou_cost, pay_interval
+		        body_cost, nou_cost, pay_interval,
+		        COALESCE(bmi_min, 0), COALESCE(bmi_max, 0), COALESCE(height_min, 0),
+		        bonus_rate, raise_rate
 		 FROM content_jobs WHERE enabled ORDER BY rank, id`)
 	if err != nil {
 		return nil, fmt.Errorf("list jobs: %w", err)
@@ -488,7 +498,9 @@ func (s *Service) ListSelectableJobs(ctx context.Context) ([]JobOption, error) {
 		)
 		if err := rows.Scan(&opt.ID, &opt.Name, &reqJSON, &effJSON,
 			&opt.Salary, &opt.Rank, &requireMaster,
-			&bodyCost, &nouCost, &opt.PayInterval); err != nil {
+			&bodyCost, &nouCost, &opt.PayInterval,
+			&opt.BMIMin, &opt.BMIMax, &opt.HeightMin,
+			&opt.BonusRate, &opt.RaiseRate); err != nil {
 			return nil, fmt.Errorf("scan job: %w", err)
 		}
 		opt.Pay = opt.Salary

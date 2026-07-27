@@ -27,6 +27,7 @@ import (
 	"github.com/shiroha-a/town/internal/news"
 	"github.com/shiroha-a/town/internal/player"
 	"github.com/shiroha-a/town/internal/profile"
+	"github.com/shiroha-a/town/internal/push"
 	"github.com/shiroha-a/town/internal/ranking"
 	"github.com/shiroha-a/town/internal/rediscli"
 	"github.com/shiroha-a/town/internal/rng"
@@ -119,6 +120,13 @@ func Run(ctx context.Context, mode string, cfg *config.Config) error {
 
 	emojis := emoji.New(pool, miauthClient)
 	profiles := profile.New(pool, miauthClient, players, emojis)
+	// 通知(Web Push)。VAPID鍵はDBに置き、無ければここで作る(設定不要)。
+	pushSvc, err := push.New(ctx, pool, cfg.Server.BaseURL, logger)
+	if err != nil {
+		logger.Error("push init", "err", err)
+		pushSvc = nil // 通知だけ諦める。ゲーム本体は動かす
+	}
+
 	authDeps := httpapi.AuthDeps{
 		Pool:           pool,
 		MiAuth:         miauthClient,
@@ -126,6 +134,7 @@ func Run(ctx context.Context, mode string, cfg *config.Config) error {
 		Sessions:       sessions,
 		Profiles:       profiles,
 		Emojis:         emojis,
+		Push:           pushSvc,
 		AppName:        cfg.Server.AppName,
 		WebDir:         cfg.Server.WebDir,
 		AllowedOrigins: cfg.Server.AllowedOrigins(),
@@ -135,7 +144,9 @@ func Run(ctx context.Context, mode string, cfg *config.Config) error {
 	case "web":
 		return runWeb(ctx, cfg, logger, players, actions, contentSvc, st, tmap, stockSvc, keibaSvc, mailSvc, greetingSvc, attendanceSvc, cleagueSvc, newsSvc, rankingSvc, serialSvc, authDeps)
 	case "worker":
-		return worker.New(rdb, pool, led, cfg, st, logger).Run(ctx)
+		wk := worker.New(rdb, pool, led, cfg, st, logger)
+		wk.SetPush(pushSvc)
+		return wk.Run(ctx)
 	default:
 		return fmt.Errorf("unknown mode %q (want web|worker)", mode)
 	}

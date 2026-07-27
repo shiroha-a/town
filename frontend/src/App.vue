@@ -32,16 +32,26 @@ import TokutenView from './components/TokutenView.vue';
 import BingoView from './components/BingoView.vue';
 import AdminView from './components/AdminView.vue';
 import PlaceholderView from './components/PlaceholderView.vue';
+import { currentRoute, pushRoute, replaceRoute, type NavParam } from './router';
 
 const player = ref<Player | null>(null);
-const view = ref('town');
+// 表示中の画面はURLと対応させる。リロードしても同じ画面に戻り、ブラウザの
+// 戻るボタンも効く(ホーム画面のショートカットもここに乗る)。
+const view = ref(currentRoute().view);
 
 // ログイン状態はHttpOnly cookieのセッションで持つ(MiAuth)。
 // 起動時に /auth/me で復元し、未ログインならログイン画面を出す。
 const booting = ref(true);
 
+// ブラウザの戻る/進むでURLが変わったら画面を合わせる。
+function onPopState() {
+  const r = currentRoute();
+  applyRoute(r.view, r.param);
+}
+
 onMounted(async () => {
   void loadSite();
+  window.addEventListener('popstate', onPopState);
   try {
     player.value = await api.authMe();
   } catch {
@@ -53,7 +63,8 @@ onMounted(async () => {
 
 function onLogin(p: Player) {
   player.value = p;
-  view.value = 'town';
+  applyRoute('town');
+  replaceRoute('town');
 }
 function onUpdate(p: Player) {
   player.value = p;
@@ -78,7 +89,8 @@ async function onLogout() {
     // 失敗してもクライアント側は未ログイン扱いにする。
   }
   player.value = null;
-  view.value = 'town';
+  applyRoute('town');
+  replaceRoute('town');
   loggedOut.value = true;
 }
 // お試しプレイ(ゲスト)の残り時間。1分ごとに更新し、切れたらログイン画面へ戻す。
@@ -94,20 +106,26 @@ const guestRemainMin = computed(() => {
 // 退会したら未ログインに戻す(セッションはサーバー側で無効になっている)。
 function onRetired() {
   player.value = null;
-  view.value = 'town';
+  applyRoute('town');
+  replaceRoute('town');
 }
 
 // 家訪問(view='house')で開く家のID。街の家クリックからnavigate経由で渡される。
 const houseId = ref<number | null>(null);
 // 建設会社(view='kentiku')の初期建築ターゲット。街マップの空き地クリックから渡される。
 const kentikuTarget = ref<{ town: number; row: number; col: number } | null>(null);
-function navigate(v: string, param?: number | { town: number; row: number; col: number }) {
+/** 画面を切り替える。URLも一緒に進める。 */
+function applyRoute(v: string, param?: NavParam) {
   view.value = v;
   houseId.value = v === 'house' && typeof param === 'number' ? param : null;
-  kentikuTarget.value = v === 'kentiku' && typeof param === 'object' ? param : null;
+  kentikuTarget.value = v === 'kentiku' && param && typeof param === 'object' ? param : null;
+}
+function navigate(v: string, param?: number | { town: number; row: number; col: number }) {
+  applyRoute(v, param ?? null);
+  pushRoute(v, param ?? null);
 }
 function back() {
-  view.value = 'town';
+  navigate('town');
 }
 async function reload() {
   if (player.value) player.value = await api.getPlayer(player.value.id);

@@ -16,6 +16,7 @@ import (
 	"github.com/shiroha-a/town/internal/config"
 	"github.com/shiroha-a/town/internal/gametime"
 	"github.com/shiroha-a/town/internal/ledger"
+	"github.com/shiroha-a/town/internal/push"
 	"github.com/shiroha-a/town/internal/rng"
 	"github.com/shiroha-a/town/internal/settings"
 	"github.com/shiroha-a/town/internal/stock"
@@ -41,7 +42,12 @@ type Worker struct {
 	logger   *slog.Logger
 	loc      *time.Location
 	rng      *rng.Rand
+	// push は通知の送信口。設定していない環境では nil で、その場合は何も送らない。
+	push *push.Service
 }
+
+// SetPush wires the notification sender. app 側で作ったものを渡す。
+func (w *Worker) SetPush(p *push.Service) { w.push = p }
 
 func New(rdb *redis.Client, pool *pgxpool.Pool, led *ledger.Repo, cfg *config.Config, st *settings.Store, logger *slog.Logger) *Worker {
 	// タイムゾーンと日付の切り替わり時刻はDBの設定(管理画面で編集)から取る。
@@ -121,6 +127,9 @@ func (w *Worker) tick(ctx context.Context) {
 	} else if n > 0 {
 		w.logger.Info("guests purged", "players", n)
 	}
+	// 通知(メール着信・パワー満タン・仕事の解禁)。毎tickで全表を見る必要は
+	// ないので、この中で1分に1回へ間引く。
+	maybeNotify(ctx, w.pool, w.push, time.Now())
 	w.runDailyIfNeeded(ctx, time.Now())
 }
 
