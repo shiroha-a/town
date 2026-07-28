@@ -2961,13 +2961,26 @@ func (s *Service) applyEventOutcome(ctx context.Context, tx pgx.Tx, playerID int
 			o.MoneyDelta = 0 // 持ち金不足なら贈らない
 		}
 	case "confiscate":
-		// 所持品からランダムに1個(数量-1)。無ければ何もしない。
+		// 所持品からランダムに1品選び、1セットぶん没収する。無ければ何もしない。
+		// 持ち物一覧も所持判定も残量(remaining_uses)で引いているので、個数だけを
+		// 減らしても品物は手元に残り、没収が効かなかった。残量を1セット耐久ぶん
+		// 減らし、個数はそこから数え直す。
 		if _, err := tx.Exec(ctx,
-			`UPDATE player_items SET quantity = quantity - 1
-			 WHERE (player_id, item_id) = (
+			`UPDATE player_items pi
+			 SET remaining_uses = GREATEST(pi.remaining_uses - GREATEST(ci.durability, 1), 0),
+			     quantity = CEIL(GREATEST(pi.remaining_uses - GREATEST(ci.durability, 1), 0)::numeric
+			                     / GREATEST(ci.durability, 1)),
+			     updated_at = now()
+			 FROM content_items ci
+			 WHERE ci.id = pi.item_id AND (pi.player_id, pi.item_id) = (
 			   SELECT player_id, item_id FROM player_items
-			   WHERE player_id = $1 AND quantity > 0 ORDER BY random() LIMIT 1)`, playerID); err != nil {
+			   WHERE player_id = $1 AND remaining_uses > 0 ORDER BY random() LIMIT 1)`, playerID); err != nil {
 			return fmt.Errorf("confiscate: %w", err)
+		}
+		// 使い切った品は持ち物から消す(日数耐久の期限切れと同じ扱い)。
+		if _, err := tx.Exec(ctx,
+			`DELETE FROM player_items WHERE player_id = $1 AND remaining_uses <= 0`, playerID); err != nil {
+			return fmt.Errorf("confiscate cleanup: %w", err)
 		}
 	default:
 		if o.MoneyDelta != 0 {
