@@ -630,6 +630,10 @@ async function doSell() {
         <button class="btn mini danger" :disabled="busy" @click="doSell">家の売却</button>
       </div>
     </template>
+
+    <div style="text-align: center; margin-top: 8px">
+      <button class="btn" @click="emit('back')">街に戻る</button>
+    </div>
   </div>
 </template>
 
