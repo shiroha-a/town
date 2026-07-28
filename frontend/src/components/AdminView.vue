@@ -17,6 +17,8 @@ import {
   type AdminPlayerSummary,
   type AdminPlayerPayload,
   type GameSettings,
+  type Monster,
+  type MonsterInput,
   type TownFacility,
   type TownAsset,
   type FacilityPreset,
@@ -40,6 +42,7 @@ const open = reactive({
   map: false,
   events: false,
   serials: false,
+  monsters: false,
   bingo: false,
   instances: false,
 });
@@ -66,6 +69,12 @@ const PARAM_OPTIONS = [
   'love',
   'omoshirosa',
 ];
+
+// モンスターが持つ能力。パワーそのもの(energy/nou_energy)と満腹度は導出値・
+// 状態値なので持たせない。
+const MONSTER_PARAMS = PARAM_OPTIONS.filter(
+  (p) => p !== 'energy' && p !== 'nou_energy' && p !== 'satiety',
+);
 
 // アイテムの初期値。content_items の既定値と揃える。
 function blankItem(): AdminItemInput {
@@ -146,6 +155,7 @@ async function refresh() {
     facPresets.value = await api.adminFacilityPresets();
     adminEvents.value = await api.adminListEvents();
     serials.value = await api.adminSerials();
+    monsters.value = await api.adminMonsters();
     instanceData.value = await api.adminInstances();
     townList.value = await api.towns();
     syncTownDraft();
@@ -713,6 +723,66 @@ async function startBingo() {
     await api.adminStartBingo(bingoCfg);
     message.value = 'ビンゴ大会を開始しました。';
     kind.value = 'ok';
+  } catch (e) {
+    fail(e);
+  } finally {
+    busy.value = false;
+  }
+}
+
+// ストリートファイトのモンスター管理。能力はプレイヤーと同じ16項目で、
+// 戦闘のダメージは「攻撃側の能力 − 防御側の同じ能力」なので、ここの数字が
+// そのまま強さになる。
+const monsters = ref<Monster[]>([]);
+const blankMonster = (): MonsterInput & { id: number } => ({
+  id: 0,
+  name: '',
+  level: 1,
+  win_money: 100,
+  lose_money: 100,
+  params: Object.fromEntries(MONSTER_PARAMS.map((k) => [k, 10])),
+  item_rate: 0,
+  reward_item_id: null,
+  icon: 'slime',
+  enabled: true,
+});
+const monsterForm = reactive(blankMonster());
+
+function editMonster(m: Monster) {
+  Object.assign(monsterForm, {
+    ...m,
+    params: Object.fromEntries(MONSTER_PARAMS.map((k) => [k, m.params[k] ?? 0])),
+  });
+}
+function resetMonster() {
+  Object.assign(monsterForm, blankMonster());
+}
+/** 全能力をまとめて同じ値にする(強さの調整はだいたい一律で始めるため)。 */
+function fillMonsterParams(v: number) {
+  for (const k of MONSTER_PARAMS) monsterForm.params[k] = v;
+}
+async function saveMonster() {
+  busy.value = true;
+  try {
+    const { id, ...payload } = monsterForm;
+    if (id > 0) await api.adminUpdateMonster(id, payload);
+    else await api.adminCreateMonster(payload);
+    resetMonster();
+    monsters.value = await api.adminMonsters();
+    message.value = '保存しました。';
+    kind.value = 'ok';
+  } catch (e) {
+    fail(e);
+  } finally {
+    busy.value = false;
+  }
+}
+async function deleteMonster(id: number) {
+  busy.value = true;
+  try {
+    await api.adminDeleteMonster(id);
+    if (monsterForm.id === id) resetMonster();
+    monsters.value = await api.adminMonsters();
   } catch (e) {
     fail(e);
   } finally {
@@ -1986,6 +2056,134 @@ async function deleteEdit() {
                   開始する
                 </button>
               </div>
+            </section>
+          </div>
+        </section>
+
+        <!-- ストリートファイトのモンスター -->
+        <section class="fold">
+          <button class="fold-head" @click="open.monsters = !open.monsters">
+            <span class="caret">{{ open.monsters ? '▼' : '▶' }}</span>
+            ストリートファイト（{{ monsters.length }}）
+          </button>
+          <div v-if="open.monsters" class="fold-body">
+            <section class="panel">
+              <h3>
+                {{ monsterForm.id > 0 ? `モンスター編集 #${monsterForm.id}` : 'モンスター追加' }}
+                <span class="hint">
+                  ※ダメージは「攻撃側の能力 − 防御側の同じ能力」。住民の能力より低いと
+                  一方的にやられます</span
+                >
+              </h3>
+              <div class="field-row">
+                <label>名前<input v-model="monsterForm.name" placeholder="例: スライム" /></label>
+                <label class="narrow"
+                  >レベル<input type="number" min="1" v-model.number="monsterForm.level"
+                /></label>
+                <label class="narrow"
+                  >勝つと奪える額<input
+                    type="number"
+                    min="0"
+                    v-model.number="monsterForm.win_money"
+                /></label>
+                <label class="narrow"
+                  >負けると奪われる額<input
+                    type="number"
+                    min="0"
+                    v-model.number="monsterForm.lose_money"
+                /></label>
+              </div>
+              <div class="field-row">
+                <label
+                  >景品
+                  <select v-model="monsterForm.reward_item_id">
+                    <option :value="null">なし</option>
+                    <option v-for="it in items" :key="it.id" :value="it.id">{{ it.name }}</option>
+                  </select>
+                </label>
+                <label class="narrow"
+                  >当たりやすさ(1/N)<input
+                    type="number"
+                    min="0"
+                    v-model.number="monsterForm.item_rate"
+                /></label>
+                <label class="narrow">画像<input v-model="monsterForm.icon" /></label>
+                <label class="chk">
+                  <ToggleSwitch v-model="monsterForm.enabled" />出現させる
+                </label>
+              </div>
+              <div class="hint">
+                景品は当たりやすさが1以上のときだけ出ます(1なら必ず、10なら10回に1回)。
+              </div>
+
+              <div class="ops-head">能力</div>
+              <div class="mon-params">
+                <label v-for="k in MONSTER_PARAMS" :key="k" class="mon-param">
+                  <span>{{ PARAM_FULL[k] ?? k }}</span>
+                  <input type="number" min="0" v-model.number="monsterForm.params[k]" />
+                </label>
+              </div>
+              <div class="field-row">
+                <span class="hint">まとめて設定:</span>
+                <button class="btn mini" @click="fillMonsterParams(5)">5</button>
+                <button class="btn mini" @click="fillMonsterParams(50)">50</button>
+                <button class="btn mini" @click="fillMonsterParams(300)">300</button>
+                <button class="btn mini" @click="fillMonsterParams(1000)">1000</button>
+              </div>
+
+              <div class="actions">
+                <button
+                  class="btn primary"
+                  :disabled="busy || !monsterForm.name"
+                  @click="saveMonster"
+                >
+                  {{ monsterForm.id > 0 ? '更新' : '追加' }}
+                </button>
+                <button v-if="monsterForm.id > 0" class="btn" @click="resetMonster">
+                  新規追加に戻る
+                </button>
+              </div>
+            </section>
+
+            <section class="panel">
+              <h3>モンスター一覧</h3>
+              <table class="list-table">
+                <thead>
+                  <tr>
+                    <th>名前</th>
+                    <th>Lv</th>
+                    <th>勝ち</th>
+                    <th>負け</th>
+                    <th>景品</th>
+                    <th>出現</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="m in monsters" :key="m.id">
+                    <td>{{ m.name }}</td>
+                    <td>{{ m.level }}</td>
+                    <td class="r">{{ m.win_money.toLocaleString('ja-JP') }}円</td>
+                    <td class="r">{{ m.lose_money.toLocaleString('ja-JP') }}円</td>
+                    <td>
+                      <template v-if="m.reward_name">
+                        {{ m.reward_name }}（1/{{ m.item_rate }}）
+                      </template>
+                      <template v-else>-</template>
+                    </td>
+                    <td>{{ m.enabled ? '○' : '×' }}</td>
+                    <td>
+                      <button class="btn mini" @click="editMonster(m)">編集</button>
+                      <button class="btn mini" :disabled="busy" @click="deleteMonster(m.id)">
+                        削除
+                      </button>
+                    </td>
+                  </tr>
+                  <tr v-if="monsters.length === 0">
+                    <td colspan="7" class="muted">まだ登録がありません。</td>
+                  </tr>
+                </tbody>
+              </table>
             </section>
           </div>
         </section>
@@ -3348,6 +3546,24 @@ async function deleteEdit() {
 }
 .op-row input[type='number'] {
   width: 70px;
+}
+/* モンスターの能力16項目。1項目ずつ縦に並べると縦長すぎるので折り返す。 */
+.mon-params {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-bottom: 6px;
+}
+.mon-param {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+.mon-param input {
+  width: 70px;
+  padding: 1px 3px;
+  font-size: 12px;
 }
 /* 「ランダム」チェックはパラメータ効果のときだけ出る補助的な指定なので、
    数値入力より控えめに見せる。 */

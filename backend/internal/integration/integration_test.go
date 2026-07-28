@@ -45,6 +45,7 @@ import (
 	"github.com/shiroha-a/town/internal/session"
 	"github.com/shiroha-a/town/internal/settings"
 	"github.com/shiroha-a/town/internal/stock"
+	"github.com/shiroha-a/town/internal/streetfight"
 	"github.com/shiroha-a/town/internal/townmap"
 	"github.com/shiroha-a/town/internal/worker"
 
@@ -166,7 +167,7 @@ func setup(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 	http.DefaultClient.Transport = sessionTransport{base: http.DefaultTransport}
 	t.Cleanup(func() { http.DefaultClient.Transport = prevTransport })
 
-	srv := httptest.NewServer(httpapi.NewServer(svc, actions, contentSvc, st, tmap, stock.New(pool), keiba.New(pool, rng.New(7)), mail.New(pool, time.UTC, 5), greeting.New(pool), attendance.New(pool, time.UTC, 5), cleague.New(pool), news.New(pool), ranking.New(pool), serial.New(pool, rng.New(3)),
+	srv := httptest.NewServer(httpapi.NewServer(svc, actions, contentSvc, st, tmap, stock.New(pool), keiba.New(pool, rng.New(7)), mail.New(pool, time.UTC, 5), greeting.New(pool), attendance.New(pool, time.UTC, 5), cleague.New(pool), streetfight.New(pool), news.New(pool), ranking.New(pool), serial.New(pool, rng.New(3)),
 		httpapi.AuthDeps{
 			Pool:           pool,
 			MiAuth:         miauth.NewClient(),
@@ -5641,5 +5642,101 @@ func TestPushSubscriptionLimit(t *testing.T) {
 	}
 	if newest != "https://push.example.com/5" {
 		t.Errorf("新しい宛先が残っていない: %s", newest)
+	}
+}
+
+// TestStreetFight covers ストリートファイト(レガシー game.cgi mode=battle):
+// 通りすがりのモンスターと殴り合い、勝てばお金を奪い、削られたパワーはそのまま
+// 自分のパワーとして残る。
+func TestStreetFight(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	admin := register(t, srv.URL, "misskey.example", "admin0") // 1人目=admin
+	alice := register(t, srv.URL, "misskey.example", "alice")
+
+	// 種の3体は消して、確実に勝てる相手だけを残す。
+	if _, err := pool.Exec(ctx, `DELETE FROM battle_monsters`); err != nil {
+		t.Fatalf("clear monsters: %v", err)
+	}
+	code, body := adminPost(t, srv.URL, "/api/v1/admin/monsters", admin.ID, map[string]any{
+		"name": "かかし", "level": 1, "win_money": 500, "lose_money": 100,
+		"params": map[string]int{
+			"kokugo": 0, "suugaku": 0, "rika": 0, "syakai": 0, "eigo": 0, "ongaku": 0,
+			"bijutsu": 0, "looks": 0, "tairyoku": 0, "kenkou": 0, "speed": 0, "power": 0,
+			"wanryoku": 0, "kyakuryoku": 0, "love": 0, "omoshirosa": 0,
+		},
+		"item_rate": 0, "icon": "slime", "enabled": true,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("create monster: status=%d body=%s", code, body)
+	}
+
+	// 全能力で上回っていれば負けようがない。
+	if _, err := pool.Exec(ctx,
+		`UPDATE player_status SET kokugo = 100, suugaku = 100, rika = 100, syakai = 100,
+		        eigo = 100, ongaku = 100, bijutsu = 100, looks = 100, tairyoku = 100,
+		        kenkou = 100, speed = 100, power = 100, wanryoku = 100, kyakuryoku = 100,
+		        love = 100, omoshirosa = 100
+		 WHERE player_id = $1`, alice.ID); err != nil {
+		t.Fatalf("boost params: %v", err)
+	}
+	// パワー上限はパラメータから導出されるが、ここは戦闘そのものを見たいので
+	// 十分な量を直接入れておく。
+	if _, err := pool.Exec(ctx,
+		`UPDATE player_status SET energy = 500, energy_max = 500,
+		        nou_energy = 500, nou_energy_max = 500 WHERE player_id = $1`, alice.ID); err != nil {
+		t.Fatalf("set power: %v", err)
+	}
+
+	readMoney := func() int64 {
+		var v int64
+		if err := pool.QueryRow(ctx,
+			`SELECT COALESCE(SUM(delta),0) FROM ledger_entry WHERE account = $1`,
+			"player:"+strconv.FormatInt(alice.ID, 10)).Scan(&v); err != nil {
+			t.Fatalf("read money: %v", err)
+		}
+		return v
+	}
+	before := readMoney()
+	resp, err := http.Post(srv.URL+"/api/v1/players/"+strconv.FormatInt(alice.ID, 10)+"/streetfight",
+		"application/json", bytes.NewReader([]byte(`{"idempotency_key":"sf1"}`)))
+	if err != nil {
+		t.Fatalf("streetfight: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("streetfight status = %d body=%s", resp.StatusCode, b)
+	}
+	var got struct {
+		Result struct {
+			Monster struct {
+				Name string `json:"name"`
+			} `json:"monster"`
+			Outcome string `json:"outcome"`
+			Money   int64  `json:"money"`
+			Turns   []struct {
+				Attacker string `json:"attacker"`
+				Damage   int    `json:"damage"`
+			} `json:"turns"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Result.Monster.Name != "かかし" {
+		t.Errorf("相手 = %q, want かかし", got.Result.Monster.Name)
+	}
+	if got.Result.Outcome != "win" {
+		t.Fatalf("結果 = %q, want win", got.Result.Outcome)
+	}
+	if got.Result.Money != 500 {
+		t.Errorf("取り分 = %d, want 500", got.Result.Money)
+	}
+	if len(got.Result.Turns) == 0 {
+		t.Fatal("ターンのログが空")
+	}
+	if after := readMoney(); after != before+500 {
+		t.Errorf("所持金 = %d, want %d", after, before+500)
 	}
 }

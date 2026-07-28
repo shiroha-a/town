@@ -338,6 +338,7 @@ const commands = computed(() => {
     { key: 'item', img: 'item', alt: 'アイテム使用' },
     { key: 'mail', img: 'mail', alt: 'メール' },
     { key: 'doukyo', img: 'doukyo', alt: 'キャラ作成' },
+    { key: 'streetfight', img: 'battle', alt: 'ストリートファイト' },
     { key: 'aisatu', img: 'aisatu', alt: 'あいさつ' },
     { key: 'ashiato', img: 'ashiato', alt: '足あと帳' },
   );

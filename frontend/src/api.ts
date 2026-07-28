@@ -885,6 +885,54 @@ export interface BattleResp {
   result: BattleResult;
 }
 
+// ストリートファイト(通りすがりのモンスターとの殴り合い)。
+export interface Monster {
+  id: number;
+  name: string;
+  level: number;
+  win_money: number;
+  lose_money: number;
+  params: Record<string, number>;
+  /** 景品の当たりやすさ(1/item_rate)。0=景品なし。 */
+  item_rate: number;
+  reward_item_id: number | null;
+  reward_name: string;
+  icon: string;
+  enabled: boolean;
+}
+export interface FightTurn {
+  attacker: 'player' | 'monster';
+  ability: string;
+  line: string;
+  text: string;
+  damage: number;
+  /** 'nou'=頭脳パワー / 'energy'=身体パワー。効かなかった回は空。 */
+  target: string;
+  player_energy: number;
+  player_nou: number;
+  monster_energy: number;
+  monster_nou: number;
+}
+export interface FightResult {
+  monster: Monster;
+  monster_energy_max: number;
+  monster_nou_max: number;
+  turns: FightTurn[];
+  outcome: 'win' | 'lose' | 'draw';
+  reason: string;
+  energy: number;
+  nou: number;
+  money: number;
+  reward_item_id: number | null;
+  reward_name: string;
+}
+export interface FightResp {
+  player: Player;
+  result: FightResult;
+}
+/** モンスターの作成/更新ペイロード(管理画面)。 */
+export type MonsterInput = Omit<Monster, 'id' | 'reward_name'>;
+
 // 建設会社(建築系)
 export interface BuildingTown {
   no: number;
@@ -1331,6 +1379,12 @@ export const api = {
   adminDeleteSerial: (sid: number) =>
     request<{ deleted: boolean }>('DELETE', `/admin/serials/${sid}`),
   adminSerialUses: (sid: number) => request<SerialUse[]>('GET', `/admin/serials/${sid}/uses`),
+  adminMonsters: () => request<Monster[]>('GET', '/admin/monsters'),
+  adminCreateMonster: (m: MonsterInput) => request<Monster>('POST', '/admin/monsters', m),
+  adminUpdateMonster: (id: number, m: MonsterInput) =>
+    request<Monster>('PUT', `/admin/monsters/${id}`, m),
+  adminDeleteMonster: (id: number) =>
+    request<{ deleted: boolean }>('DELETE', `/admin/monsters/${id}`),
   rankingKeys: () => request<RankingKey[]>('GET', '/ranking/keys'),
   ranking: (key: string, self: number) =>
     request<RankingResult>('GET', `/ranking?key=${key}&self=${self}`),
@@ -1410,6 +1464,10 @@ export const api = {
   battle: (id: number, opponentId: number) =>
     request<BattleResp>('POST', `/players/${id}/character/battle`, {
       opponent_id: opponentId,
+      idempotency_key: newIdempotencyKey(),
+    }),
+  streetFight: (id: number) =>
+    request<FightResp>('POST', `/players/${id}/streetfight`, {
       idempotency_key: newIdempotencyKey(),
     }),
   attendanceBoard: () => request<AttendanceBoard>('GET', '/attendance'),
