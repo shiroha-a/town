@@ -46,6 +46,13 @@ defineProps<{ name: string }>();
       <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
       <circle cx="12" cy="7" r="4" />
     </g>
+    <!-- ストリートファイト(握りこぶし)。レガシー battle.gif も拳だった。 -->
+    <g v-else-if="name === 'battle'">
+      <path d="M6 11V8.5a1.5 1.5 0 0 1 3 0V11" />
+      <path d="M9 11V7.5a1.5 1.5 0 0 1 3 0V11" />
+      <path d="M12 11V8a1.5 1.5 0 0 1 3 0v3" />
+      <path d="M15 11V9.5a1.5 1.5 0 0 1 3 0V15a6 6 0 0 1-6 6h-1a5 5 0 0 1-5-5v-4" />
+    </g>
     <!-- あいさつ(吹き出し) -->
     <g v-else-if="name === 'aisatu'">
       <path

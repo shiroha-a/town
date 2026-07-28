@@ -26,6 +26,7 @@ import (
 	"github.com/shiroha-a/town/internal/session"
 	"github.com/shiroha-a/town/internal/settings"
 	"github.com/shiroha-a/town/internal/stock"
+	"github.com/shiroha-a/town/internal/streetfight"
 	"github.com/shiroha-a/town/internal/townmap"
 )
 
@@ -42,6 +43,7 @@ type Server struct {
 	greeting   *greeting.Service
 	attendance *attendance.Service
 	cleague    *cleague.Service
+	monsters   *streetfight.Service
 	news       *news.Service
 	ranking    *ranking.Service
 	serial     *serial.Service
@@ -88,8 +90,8 @@ type AuthDeps struct {
 }
 
 // NewServer builds the HTTP handler for the REST API.
-func NewServer(players *player.Service, actions *action.Service, contentSvc *content.Service, st *settings.Store, tmap *townmap.Store, stockSvc *stock.Service, keibaSvc *keiba.Service, mailSvc *mail.Service, greetingSvc *greeting.Service, attendanceSvc *attendance.Service, cleagueSvc *cleague.Service, newsSvc *news.Service, rankingSvc *ranking.Service, serialSvc *serial.Service, auth AuthDeps) http.Handler {
-	s := &Server{players: players, actions: actions, content: contentSvc, settings: st, townmap: tmap, stock: stockSvc, keiba: keibaSvc, mail: mailSvc, greeting: greetingSvc, attendance: attendanceSvc, cleague: cleagueSvc, news: newsSvc, ranking: rankingSvc, serial: serialSvc, greetHub: newGreetHub(),
+func NewServer(players *player.Service, actions *action.Service, contentSvc *content.Service, st *settings.Store, tmap *townmap.Store, stockSvc *stock.Service, keibaSvc *keiba.Service, mailSvc *mail.Service, greetingSvc *greeting.Service, attendanceSvc *attendance.Service, cleagueSvc *cleague.Service, monsterSvc *streetfight.Service, newsSvc *news.Service, rankingSvc *ranking.Service, serialSvc *serial.Service, auth AuthDeps) http.Handler {
+	s := &Server{players: players, actions: actions, content: contentSvc, settings: st, townmap: tmap, stock: stockSvc, keiba: keibaSvc, mail: mailSvc, greeting: greetingSvc, attendance: attendanceSvc, cleague: cleagueSvc, monsters: monsterSvc, news: newsSvc, ranking: rankingSvc, serial: serialSvc, greetHub: newGreetHub(),
 		pool: auth.Pool, miauth: auth.MiAuth, instanceRules: auth.InstanceRules,
 		sessions: auth.Sessions, profiles: auth.Profiles, emojis: auth.Emojis, push: auth.Push,
 		appName: auth.AppName, allowedOrigins: auth.AllowedOrigins, limiter: newLimiter()}
@@ -116,6 +118,10 @@ func NewServer(players *player.Service, actions *action.Service, contentSvc *con
 	mux.HandleFunc("POST /api/v1/players/{id}/bingo/claim", s.bingoClaim)
 	mux.HandleFunc("POST /api/v1/admin/bingo", s.adminStartBingo)
 	mux.HandleFunc("POST /api/v1/players/{id}/serial/redeem", s.redeemSerial)
+	mux.HandleFunc("GET /api/v1/admin/monsters", s.adminListMonsters)
+	mux.HandleFunc("POST /api/v1/admin/monsters", s.adminCreateMonster)
+	mux.HandleFunc("PUT /api/v1/admin/monsters/{mid}", s.adminUpdateMonster)
+	mux.HandleFunc("DELETE /api/v1/admin/monsters/{mid}", s.adminDeleteMonster)
 	mux.HandleFunc("GET /api/v1/admin/serials", s.adminListSerials)
 	mux.HandleFunc("POST /api/v1/admin/serials", s.adminCreateSerial)
 	mux.HandleFunc("PUT /api/v1/admin/serials/{sid}", s.adminUpdateSerial)
@@ -157,6 +163,7 @@ func NewServer(players *player.Service, actions *action.Service, contentSvc *con
 	mux.HandleFunc("POST /api/v1/players/{id}/character", s.setCharacterName)
 	mux.HandleFunc("POST /api/v1/players/{id}/character/grow", s.growCharacter)
 	mux.HandleFunc("POST /api/v1/players/{id}/character/battle", s.battle)
+	mux.HandleFunc("POST /api/v1/players/{id}/streetfight", s.streetFight)
 	mux.HandleFunc("GET /api/v1/items", s.shopItems)
 	mux.HandleFunc("GET /api/v1/facilities/{facility}/menu", s.facilityMenu)
 	mux.HandleFunc("POST /api/v1/players/{id}/eat", s.eat)

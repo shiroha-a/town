@@ -12,6 +12,7 @@ import {
   type TownAsset,
   type Town,
   type HouseCell,
+  type ItemStack,
   type MoveResult,
   type WorkResponse,
 } from '../api';
@@ -337,6 +338,7 @@ const commands = computed(() => {
     { key: 'item', img: 'item', alt: 'アイテム使用' },
     { key: 'mail', img: 'mail', alt: 'メール' },
     { key: 'doukyo', img: 'doukyo', alt: 'キャラ作成' },
+    { key: 'streetfight', img: 'battle', alt: 'ストリートファイト' },
     { key: 'aisatu', img: 'aisatu', alt: 'あいさつ' },
     { key: 'ashiato', img: 'ashiato', alt: '足あと帳' },
   );
@@ -607,6 +609,14 @@ const paramMax = computed(() =>
   Math.max(1, ...[...zunou, ...shintai, ...others].map((p) => props.player.params[p.key])),
 );
 const paramBar = (v: number) => Math.max(3, Math.round((v / paramMax.value) * 100));
+
+// 所有物欄の数量表示。日数耐久の品(カード類)は個数ではなく残り日数が中身なので
+// そちらを出す。個数はquantityではなくセット数(残量÷1セット耐久)から出す:
+// quantityは残量とずれることがあり、持っているのに「0個」と出てしまう。
+function itemAmount(it: ItemStack): string {
+  if (it.durability_unit === 'day') return `残り${it.remaining_uses}日`;
+  return `${it.sets}個`;
+}
 </script>
 
 <template>
@@ -821,7 +831,7 @@ const paramBar = (v: number) => Math.max(3, Math.round((v / paramMax.value) * 10
               <span class="honbun2">所有物</span>：購入商品 {{ player.items.length }} /
               {{ player.item_kind_limit || '∞' }}<br />
               <span class="honbun5" v-for="it in player.items" :key="it.item_id"
-                >○{{ it.name }}({{ it.quantity }}個)
+                >○{{ it.name }}({{ itemAmount(it) }})
               </span>
             </div>
             <div class="honbun2 warp-box">

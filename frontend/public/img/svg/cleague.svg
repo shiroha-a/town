@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <ellipse cx="16" cy="30" rx="11.5" ry="1.5" fill="#000" opacity="0.12"/>
+  <!-- 会場の建物。レガシー chara_battle.gif の「Cリーグ看板 + 3つの窓」を写す。 -->
+  <rect x="5" y="13" width="22" height="16.5" rx="1" fill="#e9eff7" stroke="#c6d3e3" stroke-width="0.6"/>
+  <rect x="7.5" y="17.5" width="4.5" height="4.5" fill="#7fb2e5"/>
+  <rect x="13.75" y="17.5" width="4.5" height="4.5" fill="#7fb2e5"/>
+  <rect x="20" y="17.5" width="4.5" height="4.5" fill="#7fb2e5"/>
+  <rect x="13.5" y="25" width="5" height="4.5" fill="#b8c7da"/>
+  <!-- 看板 -->
+  <rect x="4" y="4" width="24" height="9" rx="1.5" fill="#2f6fc4"/>
+  <!-- 文字幅はフォントに左右されるので textLength で看板の内側に固定する。 -->
+  <text
+    x="16"
+    y="10.6"
+    text-anchor="middle"
+    textLength="20"
+    lengthAdjust="spacingAndGlyphs"
+    font-family="sans-serif"
+    font-weight="700"
+    font-size="6.4"
+    fill="#ffffff"
+  >Cリーグ</text>
+</svg>

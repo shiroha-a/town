@@ -95,6 +95,10 @@ const currentProps = computed(() => games.find((g) => g.key === selected.value)?
         @update="emit('update', $event)"
       />
     </template>
+
+    <div style="text-align: center; margin-top: 8px">
+      <button class="btn" @click="emit('back')">街に戻る</button>
+    </div>
   </div>
 </template>
 

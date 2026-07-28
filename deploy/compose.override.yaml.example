@@ -26,9 +26,9 @@ services:
       # 生成例: openssl rand -base64 32
       TOWN_TOKEN_KEY: "CHANGE_ME"
 
-      # HTTPSでのみ公開するなら 1。素のHTTP(Tailscale等)でも開く環境では
-      # cookieが送られなくなるので 0 のままにする。
-      TOWN_COOKIE_SECURE: "0"
+      # HTTPSでのみ公開するなら 1(推奨)。素のHTTPでも開く環境では
+      # cookieが送られずログインできなくなるので 0 にする。
+      TOWN_COOKIE_SECURE: "1"
 
   # 通知(Web Push)を送るのはworkerなので、公開アドレスはこちらにも要る。
   # 配信元(Apple/Googleなど)に名乗る値で、httpsでないと拒否される。

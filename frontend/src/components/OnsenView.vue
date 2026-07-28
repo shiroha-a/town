@@ -265,7 +265,7 @@ async function backToTown() {
       </div>
 
       <div style="text-align: center; margin-top: 8px">
-        <button class="btn" @click="backToTown">街へ戻る</button>
+        <button class="btn" @click="backToTown">街に戻る</button>
       </div>
     </template>
   </div>

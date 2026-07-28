@@ -11,8 +11,10 @@ services:
       POSTGRES_PASSWORD: town
       POSTGRES_DB: town
     ports:
-      # ホストの5432は使用中のため55432で公開
-      - "55432:5432"
+      # アプリはこのポートを使わない(コンテナ間の postgres:5432 を通る)ので、
+      # ここはホストからの手作業(テスト実行・psql)専用。127.0.0.1 に縛らないと
+      # LAN から town/town で丸ごと読み書きできてしまう。
+      - "127.0.0.1:55432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./initdb:/docker-entrypoint-initdb.d:ro
@@ -26,8 +28,8 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     ports:
-      # ホストの6379は使用中のため56379で公開
-      - "56379:6379"
+      # 認証を掛けていないので postgres と同じくホストからのみ。
+      - "127.0.0.1:56379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s

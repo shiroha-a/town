@@ -292,6 +292,10 @@ async function retire() {
         </div>
       </section>
     </div>
+
+    <div style="text-align: center; margin-top: 8px">
+      <button class="btn" @click="emit('back')">街に戻る</button>
+    </div>
   </div>
 </template>
 
