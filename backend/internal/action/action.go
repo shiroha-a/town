@@ -3415,7 +3415,9 @@ func (s *Service) readState(ctx context.Context, tx pgx.Tx, playerID int64) (eff
 }
 
 func (s *Service) applyEffect(ctx context.Context, tx pgx.Tx, playerID int64, actionType string, eff effects.Effect, state effects.State) error {
-	plan := eff.Plan(state)
+	// ランダム指定のある効果(ランダム品)はここで値が決まる。試算用のPlanは
+	// 設定値そのままを返すので、実際に適用するこちらだけが乱数を引く。
+	plan := eff.PlanWith(state, s.rng)
 
 	for _, pc := range plan.Params {
 		col, ok := statusColumns[pc.Name]

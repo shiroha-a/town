@@ -454,6 +454,8 @@ export interface EffectOp {
   amount: number;
   // add_disease限定: 指定するとその病気のときだけ効く(空=万能)。
   disease?: string;
+  // add_param限定: 実際に上がる値を0〜amountの乱数にする(レガシーの「ランダム品」)。
+  random?: boolean;
 }
 // add_diseaseで指定できる病名(バックエンドのeffects.AllDiseasesと対応)。
 export const DISEASE_OPTIONS = ['風邪', '下痢', '肺炎', '結核', '脳腫瘍', '癌'];

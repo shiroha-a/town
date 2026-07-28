@@ -1514,6 +1514,13 @@ async function deleteEdit() {
                     <option v-for="d in DISEASE_OPTIONS" :key="d" :value="d">{{ d }}のみ</option>
                   </select>
                   <input type="number" v-model.number="op.amount" />
+                  <label
+                    v-if="op.op === 'add_param'"
+                    class="op-random"
+                    title="上がる値を0〜この数のランダムにする(レガシーのランダム品)"
+                  >
+                    <input type="checkbox" v-model="op.random" />ランダム
+                  </label>
                   <button class="btn mini" @click="item.effect.splice(i, 1)">×</button>
                 </div>
                 <button class="btn mini" @click="addOp(item.effect)">＋効果を追加</button>
@@ -2635,6 +2642,13 @@ async function deleteEdit() {
               <option v-for="d in DISEASE_OPTIONS" :key="d" :value="d">{{ d }}のみ</option>
             </select>
             <input type="number" v-model.number="op.amount" />
+            <label
+              v-if="op.op === 'add_param'"
+              class="op-random"
+              title="上がる値を0〜この数のランダムにする(レガシーのランダム品)"
+            >
+              <input type="checkbox" v-model="op.random" />ランダム
+            </label>
             <button class="btn mini" @click="editing.effect.splice(i, 1)">×</button>
           </div>
           <button class="btn mini" @click="addOp(editing.effect)">＋効果を追加</button>
@@ -3332,6 +3346,20 @@ async function deleteEdit() {
 }
 .op-row input[type='number'] {
   width: 70px;
+}
+/* 「ランダム」チェックはパラメータ効果のときだけ出る補助的な指定なので、
+   数値入力より控えめに見せる。 */
+.op-random {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+  color: #445;
+  white-space: nowrap;
+}
+.op-row .op-random input[type='checkbox'] {
+  width: auto;
+  margin: 0;
 }
 .ge {
   color: #667;

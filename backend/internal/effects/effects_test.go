@@ -1,6 +1,9 @@
 package effects
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseEffect(t *testing.T) {
 	eff, err := ParseEffect([]byte(`[{"op":"add_money","amount":1000},{"op":"add_param","param":"energy","amount":-1}]`))
@@ -69,6 +72,69 @@ func TestEffectPlanClampsToMax(t *testing.T) {
 	plan := eff.Plan(State{Params: map[string]ParamState{"energy": {Value: 8, Max: 10}}})
 	if plan.Params[0].NewValue != 10 {
 		t.Errorf("new value = %d, want 10 (max clamp)", plan.Params[0].NewValue)
+	}
+}
+
+// fixedRoller is a Roller that always returns the same value (n-1 when the draw
+// is capped below it), so a test can pin the drawn amount.
+type fixedRoller struct{ v int }
+
+func (f fixedRoller) IntN(n int) int {
+	if f.v >= n {
+		return n - 1
+	}
+	return f.v
+}
+
+func TestParseEffectRandomOnlyForParams(t *testing.T) {
+	if _, err := ParseEffect([]byte(`[{"op":"add_money","amount":100,"random":true}]`)); err == nil {
+		t.Error("expected error: random on add_money")
+	}
+	eff, err := ParseEffect([]byte(`[{"op":"add_param","param":"kokugo","amount":10,"random":true}]`))
+	if err != nil {
+		t.Fatalf("ParseEffect: %v", err)
+	}
+	if !eff.Ops[0].Random {
+		t.Error("random flag was dropped")
+	}
+}
+
+func TestEffectPlanWithRandomDrawsWithinRange(t *testing.T) {
+	eff, err := ParseEffect([]byte(`[{"op":"add_param","param":"kokugo","amount":10,"random":true}]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := func() State {
+		return State{Params: map[string]ParamState{"kokugo": {Value: 0, Max: 1000}}}
+	}
+	// 乱数を引かないPlanは設定値そのまま(試算・一覧表示はこの値)。
+	if got := eff.Plan(st()).Params[0].NewValue; got != 10 {
+		t.Errorf("Plan (deterministic) = %d, want 10", got)
+	}
+	// 0 と 上限(=amount) の両端が出せること。レガシー int(rand($v + 1)) と同じ。
+	if got := eff.PlanWith(st(), fixedRoller{0}).Params[0].NewValue; got != 0 {
+		t.Errorf("PlanWith(roll 0) = %d, want 0", got)
+	}
+	if got := eff.PlanWith(st(), fixedRoller{99}).Params[0].NewValue; got != 10 {
+		t.Errorf("PlanWith(roll max) = %d, want 10", got)
+	}
+	if got := eff.PlanWith(st(), fixedRoller{3}).Params[0].NewValue; got != 3 {
+		t.Errorf("PlanWith(roll 3) = %d, want 3", got)
+	}
+}
+
+func TestEffectPlanWithRandomNegative(t *testing.T) {
+	eff, _ := ParseEffect([]byte(`[{"op":"add_param","param":"kokugo","amount":-10,"random":true}]`))
+	st := State{Params: map[string]ParamState{"kokugo": {Value: 50, Max: 1000}}}
+	if got := eff.PlanWith(st, fixedRoller{4}).Params[0].NewValue; got != 46 {
+		t.Errorf("PlanWith(roll 4) = %d, want 46 (50-4)", got)
+	}
+}
+
+func TestSpecialSummaryMentionsRandom(t *testing.T) {
+	eff, _ := ParseEffect([]byte(`[{"op":"add_param","param":"kokugo","amount":10,"random":true}]`))
+	if s := eff.SpecialSummary(); !strings.Contains(s, "ランダム") {
+		t.Errorf("SpecialSummary = %q, want it to mention ランダム", s)
 	}
 }
 

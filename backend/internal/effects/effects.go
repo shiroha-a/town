@@ -54,6 +54,10 @@ type Op struct {
 	// contains this text (legacy basic0.cgi: 風邪薬 only helps 風邪 etc).
 	// Empty means unconditional (legacy 万能).
 	Disease string
+	// Random draws the applied amount from [0, Amount] instead of using Amount
+	// as-is (legacy basic0.cgi の商品目「ランダム品」= int(rand($v + 1)))。
+	// Amountが負なら [Amount, 0]。add_param のみ。
+	Random bool
 }
 
 // Effect is an ordered list of operations applied atomically.
@@ -66,6 +70,7 @@ type opJSON struct {
 	Param   string `json:"param,omitempty"`
 	Amount  int64  `json:"amount"`
 	Disease string `json:"disease,omitempty"`
+	Random  bool   `json:"random,omitempty"`
 }
 
 // ParseEffect parses and validates effect JSON.
@@ -76,6 +81,11 @@ func ParseEffect(data []byte) (Effect, error) {
 	}
 	eff := Effect{Ops: make([]Op, 0, len(raw))}
 	for i, r := range raw {
+		// ランダムはパラメータ上昇にだけ許す(レガシーの「ランダム品」もパラメータ
+		// だけを振っていた)。お金や体重で通すと蛇口の見積もりが立たなくなる。
+		if r.Random && r.Op != "add_param" {
+			return Effect{}, fmt.Errorf("effect[%d]: random is only for add_param", i)
+		}
 		switch r.Op {
 		case "add_money":
 			eff.Ops = append(eff.Ops, Op{Kind: r.Op, Amount: r.Amount})
@@ -83,7 +93,7 @@ func ParseEffect(data []byte) (Effect, error) {
 			if !knownParams[r.Param] {
 				return Effect{}, fmt.Errorf("effect[%d]: unknown param %q", i, r.Param)
 			}
-			eff.Ops = append(eff.Ops, Op{Kind: r.Op, Param: r.Param, Amount: r.Amount})
+			eff.Ops = append(eff.Ops, Op{Kind: r.Op, Param: r.Param, Amount: r.Amount, Random: r.Random})
 		case "add_weight_g", "add_height_cm":
 			// 体重(g)/身長(cm)。レガシー basic0.cgi の ウエイトアップ/ダイエット/身長/縮み。
 			eff.Ops = append(eff.Ops, Op{Kind: r.Op, Amount: r.Amount})
@@ -120,7 +130,11 @@ func (e Effect) SpecialSummary() string {
 	// 病気は「万能」と病名別を分けて集計する(同じ薬に両方入ることは想定しないが、
 	// 入っていても順に並べて表示できるようにしておく)。
 	var parts []string
+	var random bool
 	for _, op := range e.Ops {
+		if op.Random {
+			random = true
+		}
 		switch op.Kind {
 		case "add_weight_g":
 			weightG += op.Amount
@@ -145,6 +159,10 @@ func (e Effect) SpecialSummary() string {
 		out = append(out, fmt.Sprintf("身長%+dcm", heightCm))
 	}
 	out = append(out, parts...)
+	if random {
+		// 表の数値は「最大でこれだけ」の意味になるので、そこを断っておく。
+		out = append(out, "上がる値はランダム(0〜表の数値)")
+	}
 	return strings.Join(out, "・")
 }
 
@@ -308,10 +326,38 @@ const (
 	DiseaseFloor = -150 // 病気指数の下限(暴走防止のクリップ)
 )
 
+// Roller supplies the randomness for ops marked Random. rng.Rand satisfies it.
+type Roller interface {
+	// IntN returns a value in [0, n).
+	IntN(n int) int
+}
+
 // Plan computes the result of applying the effect to the state. Parameters are
 // clamped to [0, max]. Money is returned as a raw delta; the ledger remains the
 // source of truth for balances.
-func (e Effect) Plan(s State) Plan {
+//
+// Random ops keep their full amount here: this is the deterministic view used by
+// the admin's effect simulator and by the shop tables, where the configured
+// value reads as "how much this can give at most".
+func (e Effect) Plan(s State) Plan { return e.plan(s, nil) }
+
+// PlanWith is Plan with a random source, so ops marked Random draw their amount
+// from [0, Amount] (負なら [Amount, 0])。実際にプレイヤーへ適用するときはこちら。
+func (e Effect) PlanWith(s State, r Roller) Plan { return e.plan(s, r) }
+
+// rollAmount returns the amount to apply for one op.
+func rollAmount(op Op, r Roller) int64 {
+	if !op.Random || r == nil || op.Amount == 0 {
+		return op.Amount
+	}
+	// レガシー int(rand($v + 1)) と同じく両端を含む。
+	if op.Amount > 0 {
+		return int64(r.IntN(int(op.Amount) + 1))
+	}
+	return -int64(r.IntN(int(-op.Amount) + 1))
+}
+
+func (e Effect) plan(s State, r Roller) Plan {
 	var plan Plan
 	cur := make(map[string]int, len(s.Params))
 	orig := make(map[string]int, len(s.Params))
@@ -329,7 +375,7 @@ func (e Effect) Plan(s State) Plan {
 				order = append(order, op.Param)
 			}
 			// [0, max] にクランプ
-			cur[op.Param] = max(0, min(cur[op.Param]+int(op.Amount), ps.Max))
+			cur[op.Param] = max(0, min(cur[op.Param]+int(rollAmount(op, r)), ps.Max))
 		case "add_weight_g":
 			old := s.WeightG
 			if plan.Weight != nil {
