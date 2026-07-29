@@ -18,6 +18,7 @@ import (
 	"github.com/shiroha-a/town/internal/content"
 	"github.com/shiroha-a/town/internal/db"
 	"github.com/shiroha-a/town/internal/emoji"
+	"github.com/shiroha-a/town/internal/feedback"
 	"github.com/shiroha-a/town/internal/greeting"
 	"github.com/shiroha-a/town/internal/httpapi"
 	"github.com/shiroha-a/town/internal/keiba"
@@ -101,6 +102,7 @@ func Run(ctx context.Context, mode string, cfg *config.Config) error {
 	attendanceSvc := attendance.New(pool, loc, game.DayBoundaryHour)
 	cleagueSvc := cleague.New(pool)
 	monsterSvc := streetfight.New(pool)
+	feedbackSvc := feedback.New(pool)
 	newsSvc := news.New(pool)
 	rankingSvc := ranking.New(pool)
 	serialSvc := serial.New(pool, rng.New(0))
@@ -144,7 +146,7 @@ func Run(ctx context.Context, mode string, cfg *config.Config) error {
 
 	switch mode {
 	case "web":
-		return runWeb(ctx, cfg, logger, players, actions, contentSvc, st, tmap, stockSvc, keibaSvc, mailSvc, greetingSvc, attendanceSvc, cleagueSvc, monsterSvc, newsSvc, rankingSvc, serialSvc, authDeps)
+		return runWeb(ctx, cfg, logger, players, actions, contentSvc, st, tmap, stockSvc, keibaSvc, mailSvc, greetingSvc, attendanceSvc, cleagueSvc, monsterSvc, feedbackSvc, newsSvc, rankingSvc, serialSvc, authDeps)
 	case "worker":
 		wk := worker.New(rdb, pool, led, cfg, st, logger)
 		wk.SetPush(pushSvc)
@@ -154,10 +156,10 @@ func Run(ctx context.Context, mode string, cfg *config.Config) error {
 	}
 }
 
-func runWeb(ctx context.Context, cfg *config.Config, logger *slog.Logger, players *player.Service, actions *action.Service, contentSvc *content.Service, st *settings.Store, tmap *townmap.Store, stockSvc *stock.Service, keibaSvc *keiba.Service, mailSvc *mail.Service, greetingSvc *greeting.Service, attendanceSvc *attendance.Service, cleagueSvc *cleague.Service, monsterSvc *streetfight.Service, newsSvc *news.Service, rankingSvc *ranking.Service, serialSvc *serial.Service, authDeps httpapi.AuthDeps) error {
+func runWeb(ctx context.Context, cfg *config.Config, logger *slog.Logger, players *player.Service, actions *action.Service, contentSvc *content.Service, st *settings.Store, tmap *townmap.Store, stockSvc *stock.Service, keibaSvc *keiba.Service, mailSvc *mail.Service, greetingSvc *greeting.Service, attendanceSvc *attendance.Service, cleagueSvc *cleague.Service, monsterSvc *streetfight.Service, feedbackSvc *feedback.Service, newsSvc *news.Service, rankingSvc *ranking.Service, serialSvc *serial.Service, authDeps httpapi.AuthDeps) error {
 	srv := &http.Server{
 		Addr:              cfg.Server.HTTPAddr,
-		Handler:           httpapi.NewServer(players, actions, contentSvc, st, tmap, stockSvc, keibaSvc, mailSvc, greetingSvc, attendanceSvc, cleagueSvc, monsterSvc, newsSvc, rankingSvc, serialSvc, authDeps),
+		Handler:           httpapi.NewServer(players, actions, contentSvc, st, tmap, stockSvc, keibaSvc, mailSvc, greetingSvc, attendanceSvc, cleagueSvc, monsterSvc, feedbackSvc, newsSvc, rankingSvc, serialSvc, authDeps),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

@@ -31,6 +31,7 @@ import GiftShopView from './components/GiftShopView.vue';
 import TokutenView from './components/TokutenView.vue';
 import BingoView from './components/BingoView.vue';
 import StreetFightView from './components/StreetFightView.vue';
+import MeyasuView from './components/MeyasuView.vue';
 import AdminView from './components/AdminView.vue';
 import PlaceholderView from './components/PlaceholderView.vue';
 import { currentRoute, pushRoute, replaceRoute, type NavParam } from './router';
@@ -188,6 +189,7 @@ const facilityTitles: Record<string, string> = {
   mail: 'メール',
   doukyo: 'キャラ作成',
   streetfight: 'ストリートファイト',
+  meyasu: '目安箱',
   tsuri: '釣りゲーム',
   gifutoya: 'ギフト屋',
   tokuten: '特典交換所',
@@ -298,6 +300,7 @@ const facilityTitles: Record<string, string> = {
       @back="back"
       @retired="onRetired"
     />
+    <MeyasuView v-else-if="view === 'meyasu'" :player="player" @back="back" />
     <StreetFightView
       v-else-if="view === 'streetfight'"
       :player="player"

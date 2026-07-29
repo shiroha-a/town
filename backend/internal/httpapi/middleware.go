@@ -51,7 +51,7 @@ var loginRequiredPatterns = map[string]bool{
 // guestBlocked reports whether a お試しプレイ(ゲスト)には使わせない経路か。
 // ゲストは1時間で消える使い捨てなので、次の3つに当たる操作を止める:
 //
-//   - 街に痕跡が残るもの(建築・掲示板・あいさつ・出席)
+//   - 街に痕跡が残るもの(建築・掲示板・あいさつ・出席・目安箱)
 //   - 他人へ価値を渡せるもの(振込・メール・ギフト・闇市・会社)。ゲストは
 //     いくらでも作れるため、ここを開けると無限の蛇口になる
 //   - ゲストには意味がないもの(銀行・ローン・Misskey連携・シリアルコード)
@@ -62,6 +62,7 @@ func guestBlocked(pattern string) bool {
 	case strings.Contains(pattern, "/bank/"),
 		strings.Contains(pattern, "/building/"),
 		strings.Contains(pattern, "/mail"),
+		strings.Contains(pattern, "/feedback"),
 		strings.Contains(pattern, "/greetings"),
 		strings.Contains(pattern, "/gifts"),
 		strings.Contains(pattern, "/serial/"),

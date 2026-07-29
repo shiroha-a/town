@@ -28,6 +28,7 @@ import (
 	"github.com/shiroha-a/town/internal/content"
 	"github.com/shiroha-a/town/internal/db"
 	"github.com/shiroha-a/town/internal/emoji"
+	"github.com/shiroha-a/town/internal/feedback"
 	"github.com/shiroha-a/town/internal/gametime"
 	"github.com/shiroha-a/town/internal/greeting"
 	"github.com/shiroha-a/town/internal/httpapi"
@@ -167,7 +168,7 @@ func setup(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 	http.DefaultClient.Transport = sessionTransport{base: http.DefaultTransport}
 	t.Cleanup(func() { http.DefaultClient.Transport = prevTransport })
 
-	srv := httptest.NewServer(httpapi.NewServer(svc, actions, contentSvc, st, tmap, stock.New(pool), keiba.New(pool, rng.New(7)), mail.New(pool, time.UTC, 5), greeting.New(pool), attendance.New(pool, time.UTC, 5), cleague.New(pool), streetfight.New(pool), news.New(pool), ranking.New(pool), serial.New(pool, rng.New(3)),
+	srv := httptest.NewServer(httpapi.NewServer(svc, actions, contentSvc, st, tmap, stock.New(pool), keiba.New(pool, rng.New(7)), mail.New(pool, time.UTC, 5), greeting.New(pool), attendance.New(pool, time.UTC, 5), cleague.New(pool), streetfight.New(pool), feedback.New(pool), news.New(pool), ranking.New(pool), serial.New(pool, rng.New(3)),
 		httpapi.AuthDeps{
 			Pool:           pool,
 			MiAuth:         miauth.NewClient(),
@@ -1609,6 +1610,25 @@ func adminPut(t *testing.T, base, path string, actingID int64, body any) (int, [
 		t.Fatalf("new request: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if actingID > 0 {
+		req.Header.Set("X-Acting-Player-Id", strconv.FormatInt(actingID, 10))
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("%s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, data
+}
+
+// adminDelete sends a DELETE as the given player (認可ガード用のヘッダ付き)。
+func adminDelete(t *testing.T, base, path string, actingID int64) (int, []byte) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodDelete, base+path, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
 	if actingID > 0 {
 		req.Header.Set("X-Acting-Player-Id", strconv.FormatInt(actingID, 10))
 	}
@@ -5738,5 +5758,126 @@ func TestStreetFight(t *testing.T) {
 	}
 	if after := readMoney(); after != before+500 {
 		t.Errorf("所持金 = %d, want %d", after, before+500)
+	}
+}
+
+// TestFeedback covers 目安箱: 投稿・賛同(1人1票)・コメント・状態変更と、
+// 誰が何を消せるか。
+func TestFeedback(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	admin := register(t, srv.URL, "misskey.example", "admin0") // 1人目=admin
+	alice := register(t, srv.URL, "misskey.example", "alice")
+	bob := register(t, srv.URL, "misskey.example", "bob")
+
+	post := func(actingID int64, path string, body any) (int, []byte) {
+		t.Helper()
+		return adminPost(t, srv.URL, path, actingID, body)
+	}
+
+	// aliceが不具合を投げる。
+	code, body := post(alice.ID, "/api/v1/players/"+strconv.FormatInt(alice.ID, 10)+"/feedback",
+		map[string]any{"kind": "bug", "title": "給料の表がはみ出す", "body": "職業安定所で右端が切れます"})
+	if code != http.StatusOK {
+		t.Fatalf("create: status=%d body=%s", code, body)
+	}
+	var created struct {
+		Post struct {
+			ID     int64  `json:"id"`
+			Kind   string `json:"kind"`
+			Status string `json:"status"`
+			Votes  int    `json:"votes"`
+		} `json:"post"`
+	}
+	if err := json.Unmarshal(body, &created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	pid := created.Post.ID
+	if created.Post.Status != "open" {
+		t.Errorf("初期状態 = %q, want open", created.Post.Status)
+	}
+
+	// 連投は弾く(同じ人が続けて投げると一覧が埋まる)。
+	code, _ = post(alice.ID, "/api/v1/players/"+strconv.FormatInt(alice.ID, 10)+"/feedback",
+		map[string]any{"kind": "request", "title": "もうひとつ", "body": "すぐ次を投げる"})
+	if code != http.StatusUnprocessableEntity {
+		t.Errorf("連投の応答 = %d, want 422", code)
+	}
+
+	// bobが賛同 → 1票。もう一度押すと取り消しで0票に戻る。
+	votePath := "/api/v1/players/" + strconv.FormatInt(bob.ID, 10) + "/feedback/" +
+		strconv.FormatInt(pid, 10) + "/vote"
+	if code, body = post(bob.ID, votePath, nil); code != http.StatusOK {
+		t.Fatalf("vote: status=%d body=%s", code, body)
+	}
+	var voted struct {
+		Post struct {
+			Votes int  `json:"votes"`
+			Voted bool `json:"voted"`
+		} `json:"post"`
+	}
+	_ = json.Unmarshal(body, &voted)
+	if voted.Post.Votes != 1 || !voted.Post.Voted {
+		t.Errorf("賛同後 = %d票 voted=%v, want 1票 voted=true", voted.Post.Votes, voted.Post.Voted)
+	}
+	if code, body = post(bob.ID, votePath, nil); code != http.StatusOK {
+		t.Fatalf("unvote: status=%d", code)
+	}
+	_ = json.Unmarshal(body, &voted)
+	if voted.Post.Votes != 0 || voted.Post.Voted {
+		t.Errorf("取り消し後 = %d票 voted=%v, want 0票 voted=false", voted.Post.Votes, voted.Post.Voted)
+	}
+
+	// 管理者の返信は運営印が付き、投稿者にはメールが届く。
+	code, body = post(admin.ID, "/api/v1/players/"+strconv.FormatInt(admin.ID, 10)+"/feedback/"+
+		strconv.FormatInt(pid, 10)+"/comments", map[string]any{"body": "直しました"})
+	if code != http.StatusOK {
+		t.Fatalf("comment: status=%d body=%s", code, body)
+	}
+	var withComment struct {
+		Comments []struct {
+			ID      int64  `json:"id"`
+			IsStaff bool   `json:"is_staff"`
+			Body    string `json:"body"`
+		} `json:"comments"`
+	}
+	_ = json.Unmarshal(body, &withComment)
+	if len(withComment.Comments) != 1 || !withComment.Comments[0].IsStaff {
+		t.Fatalf("コメント = %+v, want 運営印つき1件", withComment.Comments)
+	}
+	var mails int
+	if err := pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM messages WHERE owner_id = $1 AND direction = 'received'`, alice.ID).Scan(&mails); err != nil {
+		t.Fatalf("count mail: %v", err)
+	}
+	if mails != 1 {
+		t.Errorf("投稿者へのメール = %d通, want 1通", mails)
+	}
+
+	// 状態を動かせるのは管理者だけ。
+	statusPath := "/api/v1/admin/feedback/" + strconv.FormatInt(pid, 10) + "/status"
+	if code, _ = adminPut(t, srv.URL, statusPath, alice.ID, map[string]any{"status": "done"}); code != http.StatusForbidden {
+		t.Errorf("住民の状態変更 = %d, want 403", code)
+	}
+	if code, body = adminPut(t, srv.URL, statusPath, admin.ID, map[string]any{"status": "done"}); code != http.StatusOK {
+		t.Fatalf("状態変更: status=%d body=%s", code, body)
+	}
+
+	// 他人の投稿は消せない。本人なら消せる。
+	delPath := func(actor int64) string {
+		return "/api/v1/players/" + strconv.FormatInt(actor, 10) + "/feedback/" + strconv.FormatInt(pid, 10)
+	}
+	if code, _ = adminDelete(t, srv.URL, delPath(bob.ID), bob.ID); code != http.StatusForbidden {
+		t.Errorf("他人の投稿の削除 = %d, want 403", code)
+	}
+	if code, _ = adminDelete(t, srv.URL, delPath(alice.ID), alice.ID); code != http.StatusOK {
+		t.Errorf("本人の削除 = %d, want 200", code)
+	}
+	var left int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM feedback_posts`).Scan(&left); err != nil {
+		t.Fatalf("count posts: %v", err)
+	}
+	if left != 0 {
+		t.Errorf("残った投稿 = %d, want 0", left)
 	}
 }

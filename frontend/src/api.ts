@@ -933,6 +933,52 @@ export interface FightResp {
 /** モンスターの作成/更新ペイロード(管理画面)。 */
 export type MonsterInput = Omit<Monster, 'id' | 'reward_name'>;
 
+// 目安箱(要望・不具合の投稿所)。
+export interface FeedbackPost {
+  id: number;
+  author_id: number | null;
+  author_name: string;
+  /** bug=不具合 / request=要望 / question=質問 */
+  kind: string;
+  kind_label: string;
+  /** open=受付 / triage=検討中 / doing=対応中 / done=対応済み / wontfix=見送り */
+  status: string;
+  status_label: string;
+  title: string;
+  body: string;
+  votes: number;
+  /** 自分が賛同済みか。 */
+  voted: boolean;
+  comments: number;
+  created_at: string;
+  updated_at: string;
+}
+export interface FeedbackComment {
+  id: number;
+  author_id: number | null;
+  author_name: string;
+  /** 運営(管理者)の返信。 */
+  is_staff: boolean;
+  body: string;
+  created_at: string;
+}
+export interface FeedbackDetail {
+  post: FeedbackPost;
+  comments: FeedbackComment[];
+}
+export const FEEDBACK_KINDS = [
+  { value: 'bug', label: '不具合' },
+  { value: 'request', label: '要望' },
+  { value: 'question', label: '質問' },
+];
+export const FEEDBACK_STATUSES = [
+  { value: 'open', label: '受付' },
+  { value: 'triage', label: '検討中' },
+  { value: 'doing', label: '対応中' },
+  { value: 'done', label: '対応済み' },
+  { value: 'wontfix', label: '見送り' },
+];
+
 // 建設会社(建築系)
 export interface BuildingTown {
   no: number;
@@ -1379,6 +1425,26 @@ export const api = {
   adminDeleteSerial: (sid: number) =>
     request<{ deleted: boolean }>('DELETE', `/admin/serials/${sid}`),
   adminSerialUses: (sid: number) => request<SerialUse[]>('GET', `/admin/serials/${sid}/uses`),
+  feedbackList: (kind = '', status = '', sort = 'new') => {
+    const q = new URLSearchParams();
+    if (kind) q.set('kind', kind);
+    if (status) q.set('status', status);
+    if (sort) q.set('sort', sort);
+    return request<FeedbackPost[]>('GET', `/feedback?${q.toString()}`);
+  },
+  feedbackGet: (pid: number) => request<FeedbackDetail>('GET', `/feedback/${pid}`),
+  feedbackCreate: (id: number, kind: string, title: string, body: string) =>
+    request<FeedbackDetail>('POST', `/players/${id}/feedback`, { kind, title, body }),
+  feedbackComment: (id: number, pid: number, body: string) =>
+    request<FeedbackDetail>('POST', `/players/${id}/feedback/${pid}/comments`, { body }),
+  feedbackVote: (id: number, pid: number) =>
+    request<FeedbackDetail>('POST', `/players/${id}/feedback/${pid}/vote`),
+  feedbackDelete: (id: number, pid: number) =>
+    request<{ deleted: boolean }>('DELETE', `/players/${id}/feedback/${pid}`),
+  feedbackDeleteComment: (id: number, cid: number) =>
+    request<{ deleted: boolean }>('DELETE', `/players/${id}/feedback/comments/${cid}`),
+  adminFeedbackStatus: (pid: number, status: string) =>
+    request<FeedbackDetail>('PUT', `/admin/feedback/${pid}/status`, { status }),
   adminMonsters: () => request<Monster[]>('GET', '/admin/monsters'),
   adminCreateMonster: (m: MonsterInput) => request<Monster>('POST', '/admin/monsters', m),
   adminUpdateMonster: (id: number, m: MonsterInput) =>

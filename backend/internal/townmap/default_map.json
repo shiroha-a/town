@@ -16,6 +16,7 @@
     {"key": "casino", "img": "game", "alt": "ゲームセンター", "town": 0, "col": 2, "row": 6, "dest": 0, "ready": true},
     {"key": "tokuten", "img": "tokuten", "alt": "特典交換所", "town": 0, "col": 4, "row": 6, "dest": 0, "ready": true},
     {"key": "doukyo", "img": "cleague", "alt": "Cリーグ会場", "town": 0, "col": 5, "row": 6, "dest": 0, "ready": true},
+    {"key": "meyasu", "img": "meyasu", "alt": "目安箱", "town": 0, "col": 6, "row": 6, "dest": 0, "ready": true},
     {"key": "gifutoya", "img": "gifutoya", "alt": "ギフト屋", "town": 0, "col": 13, "row": 6, "dest": 0, "ready": true},
     {"key": "kentiku", "img": "kentiku", "alt": "建設会社", "town": 0, "col": 15, "row": 6, "dest": 0, "ready": true},
     {"key": "hanbai", "img": "hanbai", "alt": "自動販売機", "town": 0, "col": 2, "row": 7, "dest": 0, "ready": true},
