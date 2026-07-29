@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, nextTick, onMounted } from 'vue';
 import {
   api,
   type Player,
@@ -197,13 +197,29 @@ async function saveShop() {
   });
 }
 
+// 卸問屋と商品リストは同時に開かない。卸問屋は扱える品を全部並べるので表が
+// 数百行あり、両方開くとあとから開いたほうがその下に隠れて、押しても何も
+// 起きていないように見える。開いたパネルの頭までスクロールもする。
+async function showPanel(open: () => Promise<void>) {
+  await run(open);
+  await nextTick();
+  panelRef.value?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+}
+const panelRef = ref<HTMLElement | null>(null);
+
 // --- 卸問屋(仕入れ) ---
 const orosiState = ref<OrosiState | null>(null);
 const shiireQty = ref<Record<number, number>>({});
 async function openOrosi() {
   const h = house.value;
   if (!h) return;
-  await run(async () => {
+  // 同じボタンをもう一度押したら閉じる。
+  if (orosiState.value) {
+    closeOrosi();
+    return;
+  }
+  closePrice();
+  await showPanel(async () => {
     orosiState.value = await api.orosi(props.player.id, h.id);
   });
 }
@@ -233,7 +249,12 @@ const priceDraft = ref<Record<number, number>>({});
 async function openPrice() {
   const h = house.value;
   if (!h) return;
-  await run(async () => {
+  if (priceStock.value) {
+    closePrice();
+    return;
+  }
+  closeOrosi();
+  await showPanel(async () => {
     priceStock.value = await api.houseShopStock(props.player.id, h.id);
     const d: Record<number, number> = {};
     for (const it of priceStock.value.items) d[it.item_id] = it.shelf;
@@ -377,7 +398,11 @@ async function doSell() {
       </div>
 
       <!-- 公開中コンテンツの詳細設定: お店(レガシー omise_settei相当) -->
-      <div v-if="shopConfigured" class="panel-white sec">
+      <div
+        v-if="shopConfigured"
+        class="panel-white sec"
+        :class="{ wide: orosiState || priceStock }"
+      >
         <div class="sec-head">■お店の設定</div>
         <div class="row-line">
           <label class="fld"
@@ -413,7 +438,7 @@ async function doSell() {
         </div>
 
         <!-- 卸問屋 -->
-        <div v-if="orosiState" class="sub-panel">
+        <div v-if="orosiState" ref="panelRef" class="sub-panel">
           <div class="sub-head">
             <span class="sub-title">卸問屋（{{ orosiState.syubetu }}）</span>
             <span class="sub-info"
@@ -471,7 +496,7 @@ async function doSell() {
         </div>
 
         <!-- 商品リスト・価格設定 -->
-        <div v-if="priceStock && priceStock.has_shop" class="sub-panel">
+        <div v-if="priceStock && priceStock.has_shop" ref="panelRef" class="sub-panel">
           <div class="sub-head">
             <span class="sub-title">商品リスト・価格設定</span>
             <span class="sub-info"
@@ -679,6 +704,12 @@ async function doSell() {
   margin-top: 8px;
   max-width: 640px;
 }
+/* 卸問屋・商品リストの表は640pxのままだと右端の「仕入れる」「設定」が
+   横スクロールの外に出てしまう。開いている間だけ、その表が要る分
+   (卸問屋655px + 枠の余白)まで広げる。 */
+.panel-white.wide {
+  max-width: 700px;
+}
 .house-tabs {
   display: flex;
   flex-wrap: wrap;
@@ -829,6 +860,9 @@ async function doSell() {
 }
 .scroll {
   overflow-x: auto;
+  /* 親がflexだと min-width:auto が効いて縮まず、表が枠から溢れる。 */
+  max-width: 100%;
+  min-width: 0;
 }
 .tbl {
   border-collapse: collapse;
