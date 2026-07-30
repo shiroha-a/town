@@ -17,11 +17,37 @@ export function registerServiceWorker(): void {
   });
 }
 
-/** Unregisters everything. 不具合時に手で呼べるよう残しておく。 */
-export async function unregisterServiceWorker(): Promise<void> {
+/**
+ * Asks the browser to re-fetch sw.js. 前面に戻ったときに呼ぶ。
+ *
+ * ブラウザが自前で更新を確かめるのはページ遷移のときだが、この画面は遷移を
+ * pushStateでやるので、放っておくとSW側の修正(通知の受け口・キャッシュの
+ * 扱いなど)がいつまでも届かない。
+ */
+export async function checkServiceWorkerUpdate(): Promise<void> {
   if (!('serviceWorker' in navigator)) return;
-  const regs = await navigator.serviceWorker.getRegistrations();
-  await Promise.all(regs.map((r) => r.unregister()));
-  const keys = await caches.keys();
-  await Promise.all(keys.map((k) => caches.delete(k)));
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    await reg?.update();
+  } catch {
+    // 圏外などで失敗する。次の機会にまた見る。
+  }
+}
+
+/**
+ * Unregisters the worker and drops every cache. 取り違えたものを掴んだまま
+ * 直せないのが一番困るので、ユーザー設定と /reset.html から呼べるようにしてある。
+ *
+ * ログインはHttpOnly cookieのセッションなので、これで外れることはない。
+ */
+export async function unregisterServiceWorker(): Promise<void> {
+  if ('serviceWorker' in navigator) {
+    const regs = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(regs.map((r) => r.unregister()));
+  }
+  // SWに対応していないブラウザでもキャッシュだけは残っていることがある。
+  if ('caches' in window) {
+    const keys = await caches.keys();
+    await Promise.all(keys.map((k) => caches.delete(k)));
+  }
 }

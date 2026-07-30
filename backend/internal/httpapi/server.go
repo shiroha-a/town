@@ -360,6 +360,11 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+		// API応答は溜めさせない。ログイン状態や所持金が古いまま出ると実害が出る。
+		// 指定が無いと中間キャッシュやブラウザの経験的キャッシュに委ねることになる。
+		// 別の値を返したいハンドラ(アップロード画像・あいさつSSE)は、この後で
+		// 自分でSetし直すのでそちらが勝つ。
+		h.Set("Cache-Control", "no-store")
 		next.ServeHTTP(w, r)
 	})
 }

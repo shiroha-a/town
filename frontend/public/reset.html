@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>キャッシュの破棄</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #e8dcc0;
+        color: #333;
+        font-family: 'MS PGothic', Osaka, 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif;
+      }
+      .box {
+        background: #fff;
+        border: 1px solid #999;
+        padding: 20px 24px;
+        max-width: 340px;
+        text-align: center;
+        line-height: 1.8;
+      }
+      h1 {
+        font-size: 16px;
+        color: #663300;
+        margin: 0 0 8px;
+      }
+      p {
+        font-size: 13px;
+        margin: 0 0 14px;
+        text-align: left;
+      }
+      button {
+        font: inherit;
+        font-size: 13px;
+        padding: 4px 16px;
+        cursor: pointer;
+      }
+      .done {
+        color: #14456e;
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- 最後の手段。ゲーム本体(ビルドしたJS)が壊れていて設定画面まで行けなくても、
+         このURLを直に開けば手元に溜めたものを捨てられる。だからこのページは
+         ビルドを通さない素のHTMLにしてあり、ゲーム側のJSを一切読まない。 -->
+    <div class="box">
+      <h1>キャッシュの破棄</h1>
+      <p>
+        更新したはずの画面や画像が古いまま出るときに使ってください。この端末に溜めた画像や
+        プログラムを捨てます。街のデータは消えません。ログインも外れません。
+      </p>
+      <button id="go">破棄して街へ戻る</button>
+      <div id="msg" class="done"></div>
+    </div>
+    <!-- 中身を別ファイルにしているのはCSPのため。script-src 'self' なので
+         インラインスクリプトは実行されない。 -->
+    <script src="/reset.js"></script>
+  </body>
+</html>

@@ -10,7 +10,7 @@
 // 事前キャッシュ(precache)はしない。ビルド成果物の名前がハッシュ付きで変わるため、
 // 一覧を作るとビルド側との二重管理になる。代わりに実際に使われたものを都度貯める。
 
-const VERSION = 'v4';
+const VERSION = 'v5';
 const ASSETS = `town-assets-${VERSION}`; // ハッシュ付きJS/CSS・画像
 const PAGES = `town-pages-${VERSION}`; // オフラインページ
 const OFFLINE = '/offline.html';
@@ -33,16 +33,29 @@ self.addEventListener('activate', (e) => {
   );
 });
 
-/** キャッシュしてよい静的ファイルか。 */
-function isStatic(url) {
+/**
+ * 名前が変われば別物になるファイルか。中身が変わることはないので、手元にあれば
+ * それを使って取りに行かなくてよい。
+ */
+function isImmutable(url) {
   return (
-    url.pathname.startsWith('/assets/') || // ハッシュ付きJS/CSS(中身は不変)
+    url.pathname.startsWith('/assets/') || // ハッシュ付きJS/CSS
+    // 管理者がアップロードした街の背景画像。/api/ の下にあるが中身は画像で、
+    // 名前にIDが入るため貯めてよい。
+    url.pathname.startsWith('/api/v1/assets/')
+  );
+}
+
+/**
+ * 同じ名前で中身が変わりうるファイルか。同梱の画像はファイル名にハッシュが
+ * 入らないので、アイコンを描き直しても名前が変わらない。手元のものを即返しつつ
+ * 裏で取り直し、次回から新しいものが出るようにする。
+ */
+function isRevalidated(url) {
+  return (
     url.pathname.startsWith('/img/') ||
     url.pathname.startsWith('/icons/') ||
-    url.pathname === '/icon.svg' ||
-    // 管理者がアップロードした街の背景画像。/api/ の下にあるが中身は画像で、
-    // 名前が変われば別物になるため貯めてよい。
-    url.pathname.startsWith('/api/v1/assets/')
+    url.pathname === '/icon.svg'
   );
 }
 
@@ -104,20 +117,32 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // 静的ファイルはキャッシュ優先(名前が変われば別物として取り直される)。
-  if (isStatic(url)) {
+  // 中身が変わらないものはキャッシュ優先(名前が変われば別物として取り直される)。
+  if (isImmutable(url)) {
+    e.respondWith(caches.match(req).then((hit) => hit || fetchAndStore(req)));
+    return;
+  }
+
+  // 同じ名前で差し替わりうる画像は、手元のものを即返してから裏で取り直す。
+  if (isRevalidated(url)) {
     e.respondWith(
-      caches.match(req).then(
-        (hit) =>
-          hit ||
-          fetch(req).then((res) => {
-            if (res.ok) {
-              const copy = res.clone();
-              caches.open(ASSETS).then((c) => c.put(req, copy));
-            }
-            return res;
-          }),
-      ),
+      caches.match(req).then((hit) => {
+        if (!hit) return fetchAndStore(req);
+        // 差し替えが次回に間に合うよう、応答を返した後も取り直しを走らせる。
+        e.waitUntil(fetchAndStore(req).catch(() => {}));
+        return hit;
+      }),
     );
   }
 });
+
+/** 取ってきて手元にも残す。 */
+function fetchAndStore(req) {
+  return fetch(req).then((res) => {
+    if (res.ok) {
+      const copy = res.clone();
+      caches.open(ASSETS).then((c) => c.put(req, copy));
+    }
+    return res;
+  });
+}

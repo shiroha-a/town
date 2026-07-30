@@ -32,10 +32,14 @@
         font-size: 13px;
         margin: 0 0 14px;
       }
-      button {
-        font: inherit;
+      .retry {
+        display: inline-block;
         font-size: 13px;
         padding: 4px 16px;
+        border: 1px solid #999;
+        background: #f0f0f0;
+        color: #333;
+        text-decoration: none;
         cursor: pointer;
       }
     </style>
@@ -46,7 +50,9 @@
       <!-- この街はサーバーで動いているので、通信できないと何も進められない。
            オフラインで遊べるふりはせず、その旨だけを出す。 -->
       <p>電波の届く場所でもう一度お試しください。</p>
-      <button onclick="location.reload()">再読み込み</button>
+      <!-- ボタンではなくリンクにしているのはCSPのため。script-src 'self' なので
+           onclick(インラインスクリプト)は実行されず、押しても何も起きなかった。 -->
+      <a class="retry" href="/">もう一度開く</a>
     </div>
   </body>
 </html>
