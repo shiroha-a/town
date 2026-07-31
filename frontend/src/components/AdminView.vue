@@ -30,6 +30,7 @@ import {
   type MoneyMovement,
   type Suspension,
   type ModPost,
+  type PlayerLog,
 } from '../api';
 import { PARAM_FULL } from '../params';
 
@@ -1306,6 +1307,8 @@ async function openEditPlayer(id: number) {
       : null;
     suspendDays.value = 0;
     suspendReason.value = row?.suspend_reason ?? '';
+    playerLog.value = null;
+    logOpen.value = false;
     editingPlayer.value = {
       id: p.id,
       display_name: p.display_name,
@@ -1580,6 +1583,31 @@ async function deleteEdit() {
   } finally {
     busy.value = false;
   }
+}
+
+// --- 行動ログ ---
+//
+// 「この人がいつ何をしたか」を追う手段がpsqlしかなかった。ユーザーを見ている
+// ときに知りたいものなので、編集モーダルの中に置く。件数が多いので既定は畳む。
+const playerLog = ref<PlayerLog | null>(null);
+const logOpen = ref(false);
+async function toggleLog() {
+  logOpen.value = !logOpen.value;
+  if (!logOpen.value || playerLog.value || !editingPlayer.value) return;
+  busy.value = true;
+  try {
+    playerLog.value = await api.adminPlayerLog(editingPlayer.value.id, 100);
+  } catch (e) {
+    fail(e);
+  } finally {
+    busy.value = false;
+  }
+}
+/** detailは行動ごとに形が違うので、そのまま1行にして出す。 */
+function detailText(d: unknown): string {
+  if (d === null || d === undefined) return '';
+  const t = JSON.stringify(d);
+  return t === '{}' ? '' : t;
 }
 
 // --- 書き込みの管理 ---
@@ -3669,6 +3697,60 @@ function fmtTime(iso: string): string {
             <button class="btn mini" :disabled="busy || !addItemID" @click="addHeld">追加</button>
           </div>
         </div>
+        <div class="ops">
+          <button class="log-head" @click="toggleLog">
+            <span class="caret">{{ logOpen ? '▼' : '▶' }}</span> 行動ログ
+            <span class="hint">※直近100件</span>
+          </button>
+          <div v-if="logOpen && playerLog" class="log-body">
+            <div class="ops-head">操作（{{ playerLog.actions.length }}）</div>
+            <div class="table-scroll log-scroll">
+              <table class="list-table">
+                <thead>
+                  <tr>
+                    <th>日時</th>
+                    <th class="l">操作</th>
+                    <th class="l">中身</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-if="playerLog.actions.length === 0">
+                    <td colspan="3" class="muted">記録がありません。</td>
+                  </tr>
+                  <tr v-for="a in playerLog.actions" :key="a.id">
+                    <td class="nowrap">{{ fmtTime(a.created_at) }}</td>
+                    <td class="l">{{ a.type }}</td>
+                    <td class="l detail">{{ detailText(a.detail) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="ops-head">ステータスの変化（{{ playerLog.status.length }}）</div>
+            <div class="table-scroll log-scroll">
+              <table class="list-table">
+                <thead>
+                  <tr>
+                    <th>日時</th>
+                    <th class="l">項目</th>
+                    <th class="l">変化</th>
+                    <th class="l">理由</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-if="playerLog.status.length === 0">
+                    <td colspan="4" class="muted">記録がありません。</td>
+                  </tr>
+                  <tr v-for="h in playerLog.status" :key="h.id">
+                    <td class="nowrap">{{ fmtTime(h.created_at) }}</td>
+                    <td class="l">{{ h.field }}</td>
+                    <td class="l nowrap">{{ h.old_value ?? '-' }} → {{ h.new_value ?? '-' }}</td>
+                    <td class="l">{{ h.reason ?? '' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
         <div class="actions">
           <button class="btn primary" :disabled="busy" @click="savePlayer">保存</button>
           <button class="btn danger" :disabled="busy" @click="deletePlayer">論理削除</button>
@@ -3728,6 +3810,31 @@ function fmtTime(iso: string): string {
 }
 .held-num {
   width: 68px;
+}
+
+/* 行動ログ */
+.log-head {
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: bold;
+  color: #334;
+  cursor: pointer;
+}
+.log-scroll {
+  max-height: 200px;
+  overflow-y: auto;
+  margin-bottom: 6px;
+}
+.log-body .detail {
+  font-size: 10px;
+  color: #667;
+  word-break: break-all;
+  max-width: 300px;
 }
 
 /* 書き込みの管理 */

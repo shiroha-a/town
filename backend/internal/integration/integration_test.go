@@ -2337,6 +2337,63 @@ func TestAdminPosts(t *testing.T) {
 	}
 }
 
+// 行動ログ。「この人がいつ何をしたか」を管理画面から追えること。
+func TestAdminPlayerLog(t *testing.T) {
+	srv, _ := setup(t)
+	admin := register(t, srv.URL, "misskey.example", "root")
+	alice := register(t, srv.URL, "misskey.example", "alice")
+	changeJob(t, srv.URL, alice.ID, "アルバイト", "j-alice")
+	doWork(t, srv.URL, alice.ID, "w-alice")
+
+	path := "/api/v1/admin/players/" + strconv.FormatInt(alice.ID, 10) + "/log"
+	if code, _ := adminGet(t, srv.URL, path, alice.ID); code != http.StatusForbidden {
+		t.Errorf("一般ユーザー = %d, want 403", code)
+	}
+
+	code, body := adminGet(t, srv.URL, path, admin.ID)
+	if code != http.StatusOK {
+		t.Fatalf("ログ = %d: %s", code, body)
+	}
+	var log struct {
+		Actions []struct {
+			Type string `json:"type"`
+		} `json:"actions"`
+		Status []struct {
+			Field string `json:"field"`
+		} `json:"status"`
+	}
+	json.Unmarshal(body, &log)
+	// 就職と就労が新しい順に並ぶ。
+	if len(log.Actions) < 2 {
+		t.Fatalf("操作の記録 = %d件, want 2件以上: %+v", len(log.Actions), log.Actions)
+	}
+	if log.Actions[0].Type != "work" {
+		t.Errorf("直近の操作 = %q, want work", log.Actions[0].Type)
+	}
+	var sawJob bool
+	for _, a := range log.Actions {
+		if a.Type == "job_change" || a.Type == "job" {
+			sawJob = true
+		}
+	}
+	if !sawJob {
+		t.Errorf("就職の記録が無い: %+v", log.Actions)
+	}
+
+	// 他人のぶんが混ざらない。
+	_, body = adminGet(t, srv.URL,
+		"/api/v1/admin/players/"+strconv.FormatInt(admin.ID, 10)+"/log", admin.ID)
+	var mine struct {
+		Actions []struct {
+			Type string `json:"type"`
+		} `json:"actions"`
+	}
+	json.Unmarshal(body, &mine)
+	if len(mine.Actions) != 0 {
+		t.Errorf("何もしていない管理者に記録がある: %+v", mine.Actions)
+	}
+}
+
 // TestTownMap covers the town map API: GET is public, PUT is admin-only, updates
 // persist and are validated (grid bounds / one-facility-per-cell).
 func TestTownMap(t *testing.T) {

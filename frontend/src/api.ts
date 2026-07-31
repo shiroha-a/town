@@ -637,6 +637,29 @@ export interface ModPost {
   created_at: string;
 }
 
+/** 住民の行動ログ1件。 */
+export interface ActionLogEntry {
+  id: number;
+  type: string;
+  detail: unknown;
+  created_at: string;
+}
+
+/** ステータスが動いた履歴1件。 */
+export interface StatusHistoryEntry {
+  id: number;
+  field: string;
+  old_value: string | null;
+  new_value: string | null;
+  reason: string | null;
+  created_at: string;
+}
+
+export interface PlayerLog {
+  actions: ActionLogEntry[];
+  status: StatusHistoryEntry[];
+}
+
 /** 凍結の状態。 */
 export interface Suspension {
   active: boolean;
@@ -2065,6 +2088,8 @@ export const api = {
     ),
   adminDeletePost: (source: string, id: number) =>
     request<{ deleted: boolean }>('DELETE', `/admin/posts/${source}/${id}`),
+  adminPlayerLog: (id: number, limit = 100) =>
+    request<PlayerLog>('GET', `/admin/players/${id}/log?limit=${limit}`),
   // 取り消しは逆仕訳を1本足す(台帳は追記専用なので行は消さない)。
   adminReverseTx: (txId: number) =>
     request<{ reversed: boolean; tx_id: number }>('POST', '/admin/money/reverse', {

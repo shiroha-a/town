@@ -151,3 +151,85 @@ func (s *Server) adminDeletePost(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
 }
+
+type actionLogResp struct {
+	ID        int64           `json:"id"`
+	Type      string          `json:"type"`
+	Detail    json.RawMessage `json:"detail"`
+	CreatedAt time.Time       `json:"created_at"`
+}
+
+type statusHistoryResp struct {
+	ID        int64     `json:"id"`
+	Field     string    `json:"field"`
+	OldValue  *string   `json:"old_value"`
+	NewValue  *string   `json:"new_value"`
+	Reason    *string   `json:"reason"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type playerLogResp struct {
+	Actions []actionLogResp     `json:"actions"`
+	Status  []statusHistoryResp `json:"status"`
+}
+
+// adminPlayerLog returns what a resident did and how their stats moved.
+// psqlを叩かずに「この人がいつ何をしたか」を追えるようにするためのもの。
+func (s *Server) adminPlayerLog(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	id, _, ok := adminPathIDs(w, r, false)
+	if !ok {
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	out := playerLogResp{Actions: []actionLogResp{}, Status: []statusHistoryResp{}}
+
+	rows, err := s.pool.Query(r.Context(),
+		`SELECT id, action_type, detail, created_at FROM action_log
+		 WHERE player_id = $1 ORDER BY id DESC LIMIT $2`, id, limit)
+	if err != nil {
+		writeInternal(w, r, err)
+		return
+	}
+	for rows.Next() {
+		var a actionLogResp
+		if err := rows.Scan(&a.ID, &a.Type, &a.Detail, &a.CreatedAt); err != nil {
+			rows.Close()
+			writeInternal(w, r, err)
+			return
+		}
+		out.Actions = append(out.Actions, a)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		writeInternal(w, r, err)
+		return
+	}
+
+	hrows, err := s.pool.Query(r.Context(),
+		`SELECT id, field, old_value, new_value, reason, created_at FROM status_history
+		 WHERE player_id = $1 ORDER BY id DESC LIMIT $2`, id, limit)
+	if err != nil {
+		writeInternal(w, r, err)
+		return
+	}
+	defer hrows.Close()
+	for hrows.Next() {
+		var h statusHistoryResp
+		if err := hrows.Scan(&h.ID, &h.Field, &h.OldValue, &h.NewValue, &h.Reason, &h.CreatedAt); err != nil {
+			writeInternal(w, r, err)
+			return
+		}
+		out.Status = append(out.Status, h)
+	}
+	if err := hrows.Err(); err != nil {
+		writeInternal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}

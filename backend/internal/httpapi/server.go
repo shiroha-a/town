@@ -308,6 +308,7 @@ func NewServer(players *player.Service, actions *action.Service, contentSvc *con
 	// 書き込みの管理。出どころを横断した1本の時系列にして、そこから消す。
 	mux.HandleFunc("GET /api/v1/admin/posts", s.adminListPosts)
 	mux.HandleFunc("DELETE /api/v1/admin/posts/{source}/{postId}", s.adminDeletePost)
+	mux.HandleFunc("GET /api/v1/admin/players/{id}/log", s.adminPlayerLog)
 	api := recoverer(securityHeaders(s.authGuard(mux)))
 	if auth.WebDir == "" {
 		return api
