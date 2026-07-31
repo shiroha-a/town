@@ -454,6 +454,8 @@ async function login() {
 }
 .message.error {
   margin-top: 12px;
+  /* 凍結の知らせは「理由: 〜」を改行して出すので、改行を潰さない。 */
+  white-space: pre-line;
 }
 .exchanging {
   background: #fff;

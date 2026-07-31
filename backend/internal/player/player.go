@@ -518,6 +518,8 @@ type AdminPlayerSummary struct {
 	Username string
 	// IsGuest はお試しプレイの一時アカウント。
 	IsGuest bool
+	// Suspension は凍結(ログイン不可)の状態。凍結していなければ Until が nil。
+	Suspension Suspension
 }
 
 // Acct renders @user@host, or an empty string while the username is unknown.
@@ -533,7 +535,8 @@ func (s *Service) AdminList(ctx context.Context) ([]AdminPlayerSummary, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT p.id, p.display_name, ps.job, ps.job_level,
 		        COALESCE((SELECT array_agg(role ORDER BY role) FROM player_roles WHERE player_id = p.id), '{}'),
-		        p.instance_host, p.remote_user_id, COALESCE(mp.username, ''), p.is_guest
+		        p.instance_host, p.remote_user_id, COALESCE(mp.username, ''), p.is_guest,`+
+			SuspensionSQL+`
 		 FROM players p
 		 JOIN player_status ps ON ps.player_id = p.id
 		 LEFT JOIN misskey_profiles mp ON mp.player_id = p.id
@@ -545,7 +548,9 @@ func (s *Service) AdminList(ctx context.Context) ([]AdminPlayerSummary, error) {
 	for rows.Next() {
 		var a AdminPlayerSummary
 		if err := rows.Scan(&a.ID, &a.DisplayName, &a.Job, &a.JobLevel, &a.Roles,
-			&a.InstanceHost, &a.RemoteUserID, &a.Username, &a.IsGuest); err != nil {
+			&a.InstanceHost, &a.RemoteUserID, &a.Username, &a.IsGuest,
+			&a.Suspension.Suspended, &a.Suspension.Forever, &a.Suspension.Until,
+			&a.Suspension.Reason); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("scan admin player: %w", err)
 		}

@@ -2051,6 +2051,89 @@ func TestAdminBroadcastMail(t *testing.T) {
 	}
 }
 
+// 凍結。ログインできなくなり、開いていたセッションも消える。退会とは別で解除できる。
+func TestAdminSuspendPlayer(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	admin := register(t, srv.URL, "misskey.example", "root")
+	alice := register(t, srv.URL, "misskey.example", "alice")
+	path := "/api/v1/admin/players/" + strconv.FormatInt(alice.ID, 10) + "/suspend"
+
+	if code, _ := adminPost(t, srv.URL, path, alice.ID,
+		map[string]any{"days": 3}); code != http.StatusForbidden {
+		t.Errorf("一般ユーザー = %d, want 403", code)
+	}
+	// 管理者は凍結できない(解除する手段ごと失うため)。
+	adminPath := "/api/v1/admin/players/" + strconv.FormatInt(admin.ID, 10) + "/suspend"
+	if code, _ := adminPost(t, srv.URL, adminPath, admin.ID,
+		map[string]any{"days": 1}); code != http.StatusUnprocessableEntity {
+		t.Errorf("管理者の凍結 = %d, want 422", code)
+	}
+
+	// セッションが消えることを見るため、先に1本作っておく。
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO sessions (token_hash, player_id, expires_at)
+		 VALUES (decode('00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff','hex'), $1, now() + interval '1 day')`,
+		alice.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	code, body := adminPost(t, srv.URL, path, admin.ID,
+		map[string]any{"days": 3, "reason": "荒らし行為のため"})
+	if code != http.StatusOK {
+		t.Fatalf("凍結 = %d: %s", code, body)
+	}
+	var sus struct {
+		Active  bool    `json:"active"`
+		Forever bool    `json:"forever"`
+		Until   *string `json:"until"`
+		Reason  string  `json:"reason"`
+	}
+	json.Unmarshal(body, &sus)
+	if !sus.Active || sus.Forever || sus.Until == nil || sus.Reason != "荒らし行為のため" {
+		t.Fatalf("凍結の状態 = %+v", sus)
+	}
+	var n int
+	pool.QueryRow(ctx, `SELECT count(*) FROM sessions WHERE player_id = $1`, alice.ID).Scan(&n)
+	if n != 0 {
+		t.Errorf("セッションが残っている: %d本", n)
+	}
+	// 一覧に目印が出る。
+	_, body = adminGet(t, srv.URL, "/api/v1/admin/players", admin.ID)
+	var list []struct {
+		ID        int64  `json:"id"`
+		Suspended bool   `json:"suspended"`
+		Reason    string `json:"suspend_reason"`
+	}
+	json.Unmarshal(body, &list)
+	var found bool
+	for _, u := range list {
+		if u.ID == alice.ID && u.Suspended && u.Reason == "荒らし行為のため" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("一覧に凍結の目印が出ていない")
+	}
+
+	// 無期限。until は返さない('infinity'は日付として扱えないため)。
+	_, body = adminPost(t, srv.URL, path, admin.ID, map[string]any{"days": 0, "reason": "無期限"})
+	json.Unmarshal(body, &sus)
+	if !sus.Active || !sus.Forever || sus.Until != nil {
+		t.Fatalf("無期限の状態 = %+v", sus)
+	}
+
+	// 解除。
+	code, body = adminDelete(t, srv.URL, path, admin.ID)
+	if code != http.StatusOK {
+		t.Fatalf("解除 = %d: %s", code, body)
+	}
+	json.Unmarshal(body, &sus)
+	if sus.Active || sus.Reason != "" {
+		t.Errorf("解除後の状態 = %+v", sus)
+	}
+}
+
 // TestTownMap covers the town map API: GET is public, PUT is admin-only, updates
 // persist and are validated (grid bounds / one-facility-per-cell).
 func TestTownMap(t *testing.T) {

@@ -168,6 +168,16 @@ func (s *Server) authCallback(w http.ResponseWriter, r *http.Request) {
 		writeInternal(w, r, err)
 		return
 	}
+	// 凍結中なら入れない。判定はここ1か所で足りる: 凍結すると同時にその人の
+	// セッションを消しているので、凍結中の住民が有効なセッションを持つことは
+	// 新しく発行しない限り起きない。リクエストごとに見る必要がない。
+	if sus, err := s.players.GetSuspension(r.Context(), p.ID); err != nil {
+		writeInternal(w, r, err)
+		return
+	} else if sus.Active() {
+		writeError(w, http.StatusForbidden, sus.Message())
+		return
+	}
 	// Misskeyのアクセストークンを保存(prof表示やフォローで使う)。
 	if err := s.players.SetMisskeyToken(r.Context(), p.ID, res.Token); err != nil {
 		writeInternal(w, r, err)

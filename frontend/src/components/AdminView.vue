@@ -28,6 +28,7 @@ import {
   type AdminItemTotal,
   type MoneyAudit,
   type MoneyMovement,
+  type Suspension,
 } from '../api';
 import { PARAM_FULL } from '../params';
 
@@ -1292,6 +1293,17 @@ async function openEditPlayer(id: number) {
   try {
     const p = await api.getPlayer(id);
     await loadHeldItems(id);
+    const row = players.value.find((u) => u.id === id);
+    suspension.value = row
+      ? {
+          active: row.suspended,
+          forever: row.suspend_forever,
+          until: row.suspended_until,
+          reason: row.suspend_reason,
+        }
+      : null;
+    suspendDays.value = 0;
+    suspendReason.value = row?.suspend_reason ?? '';
     editingPlayer.value = {
       id: p.id,
       display_name: p.display_name,
@@ -1568,6 +1580,59 @@ async function deleteEdit() {
   }
 }
 
+// --- 凍結(ログイン不可) ---
+//
+// 荒らしへの対応が論理削除しか無かった。凍結は解除できる別物で、理由は本人にも
+// 見せる。凍結すると同時にその人のセッションが消えるので、開いたままの画面も
+// 次の操作で止まる。
+const suspension = ref<Suspension | null>(null);
+const suspendDays = ref(0); // 0=無期限
+const suspendReason = ref('');
+
+function suspendLabel(s: Suspension | null): string {
+  if (!s || !s.active) return '凍結していません';
+  const when = s.forever ? '無期限' : new Date(s.until!).toLocaleString('ja-JP');
+  return `凍結中（${when}）` + (s.reason ? ` 理由: ${s.reason}` : '');
+}
+async function runSuspend(fn: () => Promise<Suspension>, done: string) {
+  busy.value = true;
+  message.value = '';
+  try {
+    suspension.value = await fn();
+    message.value = done;
+    kind.value = 'ok';
+    await refresh(); // 一覧の目印を更新する
+  } catch (e) {
+    fail(e);
+  } finally {
+    busy.value = false;
+  }
+}
+function doSuspend() {
+  const p = editingPlayer.value;
+  if (!p) return;
+  const when = suspendDays.value > 0 ? `${suspendDays.value}日間` : '無期限で';
+  if (
+    !window.confirm(
+      `「${p.display_name}」を${when}凍結しますか?\n\n` +
+        `理由: ${suspendReason.value || '(未入力)'}\n\n` +
+        `※ログインできなくなり、いま開いている画面も次の操作で止まります。\n` +
+        `※データは消えません。いつでも解除できます。`,
+    )
+  ) {
+    return;
+  }
+  return runSuspend(
+    () => api.adminSuspendPlayer(p.id, suspendDays.value, suspendReason.value),
+    '凍結しました。',
+  );
+}
+function doUnsuspend() {
+  const p = editingPlayer.value;
+  if (!p) return;
+  return runSuspend(() => api.adminUnsuspendPlayer(p.id), '凍結を解除しました。');
+}
+
 // --- 一斉メール ---
 //
 // お知らせ専用の仕組みは作らず、既にあるゲーム内メールに乗せる。受信箱・端末への
@@ -1731,7 +1796,12 @@ function fmtTime(iso: string): string {
                       <td>{{ u.job }}</td>
                       <td>{{ u.job_level }}</td>
                       <td class="r">{{ u.money.toLocaleString('ja-JP') }}円</td>
-                      <td>{{ u.roles.includes('admin') ? '管理者' : '' }}</td>
+                      <td>
+                        {{ u.roles.includes('admin') ? '管理者' : '' }}
+                        <span v-if="u.suspended" class="susp-tag" :title="u.suspend_reason"
+                          >凍結</span
+                        >
+                      </td>
                     </tr>
                   </tbody>
                 </table>
@@ -3363,6 +3433,47 @@ function fmtTime(iso: string): string {
         </div>
         <div class="ops">
           <div class="ops-head">
+            凍結（ログイン不可）<span class="hint">
+              ※退会とは別物です。データは消えず、いつでも解除できます</span
+            >
+          </div>
+          <div class="susp-state" :class="{ on: suspension?.active }">
+            {{ suspendLabel(suspension) }}
+          </div>
+          <div class="susp-form">
+            <label
+              >日数
+              <input
+                class="susp-days"
+                type="number"
+                min="0"
+                v-model.number="suspendDays"
+                title="0で無期限"
+              />
+            </label>
+            <span class="hint">0で無期限</span>
+            <input
+              class="susp-reason"
+              v-model="suspendReason"
+              maxlength="200"
+              placeholder="理由（本人にも見せます）"
+            />
+            <button class="btn danger-btn" :disabled="busy" data-test="suspend" @click="doSuspend">
+              凍結する
+            </button>
+            <button
+              v-if="suspension?.active"
+              class="btn"
+              :disabled="busy"
+              data-test="unsuspend"
+              @click="doUnsuspend"
+            >
+              解除
+            </button>
+          </div>
+        </div>
+        <div class="ops">
+          <div class="ops-head">
             所持アイテム（{{ heldItems.length }}種）
             <span class="hint">
               ※残量が実体です。個数は残量÷1セットの耐久で数え直されます。0にすると外れます
@@ -3488,6 +3599,39 @@ function fmtTime(iso: string): string {
 }
 .held-num {
   width: 68px;
+}
+
+/* 凍結 */
+.susp-tag {
+  display: inline-block;
+  background: #c23a1b;
+  color: #fff;
+  font-size: 10px;
+  padding: 0 4px;
+  border-radius: 2px;
+  margin-left: 4px;
+}
+.susp-state {
+  font-size: 12px;
+  color: #556;
+  margin-bottom: 6px;
+}
+.susp-state.on {
+  color: #c23a1b;
+  font-weight: bold;
+}
+.susp-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.susp-days {
+  width: 60px;
+}
+.susp-reason {
+  flex: 1 1 200px;
+  min-width: 160px;
 }
 
 /* 一斉メール */

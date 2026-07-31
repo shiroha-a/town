@@ -618,6 +618,19 @@ export interface AdminPlayerSummary {
   instance_host: string;
   remote_user_id: string;
   is_guest: boolean;
+  /** 凍結(ログイン不可)。suspended_untilは無期限のときnull。 */
+  suspended: boolean;
+  suspend_forever: boolean;
+  suspended_until: string | null;
+  suspend_reason: string;
+}
+
+/** 凍結の状態。 */
+export interface Suspension {
+  active: boolean;
+  forever: boolean;
+  until: string | null;
+  reason: string;
 }
 // プレイヤーの管理者編集ペイロード。
 export interface AdminPlayerPayload {
@@ -2027,6 +2040,11 @@ export const api = {
   // 一斉メール。宛先は退会していない非ゲスト全員(自分を除く)。
   adminBroadcastMail: (body: string) =>
     request<{ sent: number }>('POST', '/admin/mail/broadcast', { body }),
+  // 凍結。days<=0で無期限。凍結するとその人のセッションも消える。
+  adminSuspendPlayer: (id: number, days: number, reason: string) =>
+    request<Suspension>('POST', `/admin/players/${id}/suspend`, { days, reason }),
+  adminUnsuspendPlayer: (id: number) =>
+    request<Suspension>('DELETE', `/admin/players/${id}/suspend`),
   // 取り消しは逆仕訳を1本足す(台帳は追記専用なので行は消さない)。
   adminReverseTx: (txId: number) =>
     request<{ reversed: boolean; tx_id: number }>('POST', '/admin/money/reverse', {
