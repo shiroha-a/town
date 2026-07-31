@@ -617,6 +617,7 @@ export interface AdminPlayerSummary {
   acct: string;
   instance_host: string;
   remote_user_id: string;
+  is_guest: boolean;
 }
 // プレイヤーの管理者編集ペイロード。
 export interface AdminPlayerPayload {
@@ -2023,6 +2024,9 @@ export const api = {
   adminDeletePlayerItem: (id: number, itemId: number) =>
     request<AdminHeldItem[]>('DELETE', `/admin/players/${id}/items/${itemId}`),
   adminItemTotals: () => request<AdminItemTotal[]>('GET', '/admin/items/totals'),
+  // 一斉メール。宛先は退会していない非ゲスト全員(自分を除く)。
+  adminBroadcastMail: (body: string) =>
+    request<{ sent: number }>('POST', '/admin/mail/broadcast', { body }),
   // 取り消しは逆仕訳を1本足す(台帳は追記専用なので行は消さない)。
   adminReverseTx: (txId: number) =>
     request<{ reversed: boolean; tx_id: number }>('POST', '/admin/money/reverse', {

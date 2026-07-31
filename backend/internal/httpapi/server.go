@@ -302,6 +302,7 @@ func NewServer(players *player.Service, actions *action.Service, contentSvc *con
 	mux.HandleFunc("GET /api/v1/admin/items/totals", s.adminItemTotals)
 	mux.HandleFunc("GET /api/v1/admin/money", s.adminMoneyAudit)
 	mux.HandleFunc("POST /api/v1/admin/money/reverse", s.adminReverseTx)
+	mux.HandleFunc("POST /api/v1/admin/mail/broadcast", s.adminBroadcastMail)
 	api := recoverer(securityHeaders(s.authGuard(mux)))
 	if auth.WebDir == "" {
 		return api

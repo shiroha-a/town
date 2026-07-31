@@ -1973,6 +1973,84 @@ func TestAdminReverseTx(t *testing.T) {
 	}
 }
 
+// 一斉メール。全員の受信箱に1通ずつ届き、送信者には控えが1通だけ残る。
+// 日次の送信上限には掛からない(運営の告知が途中で止まると意味が無いため)。
+func TestAdminBroadcastMail(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	admin := register(t, srv.URL, "misskey.example", "root")
+	alice := register(t, srv.URL, "misskey.example", "alice")
+	bob := register(t, srv.URL, "misskey.example", "bob")
+
+	if code, _ := adminPost(t, srv.URL, "/api/v1/admin/mail/broadcast", alice.ID,
+		map[string]any{"body": "x"}); code != http.StatusForbidden {
+		t.Errorf("一般ユーザー = %d, want 403", code)
+	}
+	if code, _ := adminPost(t, srv.URL, "/api/v1/admin/mail/broadcast", admin.ID,
+		map[string]any{"body": "   "}); code != http.StatusUnprocessableEntity {
+		t.Errorf("空の本文 = %d, want 422", code)
+	}
+
+	code, body := adminPost(t, srv.URL, "/api/v1/admin/mail/broadcast", admin.ID,
+		map[string]any{"body": "メンテのお知らせです。"})
+	if code != http.StatusOK {
+		t.Fatalf("送信 = %d: %s", code, body)
+	}
+	var res struct {
+		Sent int `json:"sent"`
+	}
+	json.Unmarshal(body, &res)
+	if res.Sent != 2 {
+		t.Errorf("送信数 = %d, want 2", res.Sent)
+	}
+
+	count := func(owner int64, dir string) int {
+		t.Helper()
+		var n int
+		if err := pool.QueryRow(ctx,
+			`SELECT count(*) FROM messages WHERE owner_id = $1 AND direction = $2`,
+			owner, dir).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if count(alice.ID, "received") != 1 || count(bob.ID, "received") != 1 {
+		t.Errorf("受信 alice=%d bob=%d, want 1通ずつ", count(alice.ID, "received"), count(bob.ID, "received"))
+	}
+	// 送信者には控えが1通。宛先ぶんの送信済みは作らない。
+	if n := count(admin.ID, "sent"); n != 1 {
+		t.Errorf("送信者の控え = %d通, want 1", n)
+	}
+	if n := count(admin.ID, "received"); n != 0 {
+		t.Errorf("送信者にも届いている = %d通, want 0", n)
+	}
+
+	// ゲストには送らない(1時間で消えるため)。
+	var guestID int64
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO players (instance_host, remote_user_id, display_name, is_guest)
+		 VALUES ('guest.local', 'g1', 'おためし', true) RETURNING id`).Scan(&guestID); err != nil {
+		t.Fatal(err)
+	}
+	_, body = adminPost(t, srv.URL, "/api/v1/admin/mail/broadcast", admin.ID,
+		map[string]any{"body": "2通目"})
+	json.Unmarshal(body, &res)
+	if res.Sent != 2 {
+		t.Errorf("ゲストを含めた送信数 = %d, want 2(ゲストは除く)", res.Sent)
+	}
+	if n := count(guestID, "received"); n != 0 {
+		t.Errorf("ゲストに届いている = %d通, want 0", n)
+	}
+
+	// 日次上限(30通)を超えても送れる。
+	for i := 0; i < mail.DailySendLimit+2; i++ {
+		if c, b := adminPost(t, srv.URL, "/api/v1/admin/mail/broadcast", admin.ID,
+			map[string]any{"body": "連投" + strconv.Itoa(i)}); c != http.StatusOK {
+			t.Fatalf("%d通目で止まった: %d %s", i+3, c, b)
+		}
+	}
+}
+
 // TestTownMap covers the town map API: GET is public, PUT is admin-only, updates
 // persist and are validated (grid bounds / one-facility-per-cell).
 func TestTownMap(t *testing.T) {

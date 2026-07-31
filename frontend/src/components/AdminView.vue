@@ -50,6 +50,7 @@ const open = reactive({
   bingo: false,
   instances: false,
   money: false,
+  broadcast: false,
 });
 
 // 効果/条件で対象にできるパラメータ。
@@ -1567,6 +1568,40 @@ async function deleteEdit() {
   }
 }
 
+// --- 一斉メール ---
+//
+// お知らせ専用の仕組みは作らず、既にあるゲーム内メールに乗せる。受信箱・端末への
+// 通知・保存の扱いがそのまま使えるため。宛先は退会していない非ゲスト全員。
+const bcBody = ref('');
+const bcTargets = computed(
+  () => players.value.filter((u) => !u.is_guest && u.id !== props.player.id).length,
+);
+async function sendBroadcast() {
+  const body = bcBody.value.trim();
+  if (!body) return;
+  if (
+    !window.confirm(
+      `${bcTargets.value}人の受信箱に送ります。よろしいですか?\n\n` +
+        `${body.slice(0, 120)}${body.length > 120 ? '…' : ''}\n\n` +
+        `※通知をオンにしている人の端末にも「メールが届きました」と出ます。`,
+    )
+  ) {
+    return;
+  }
+  busy.value = true;
+  message.value = '';
+  try {
+    const res = await api.adminBroadcastMail(body);
+    message.value = `${res.sent}人に送りました。`;
+    kind.value = 'ok';
+    bcBody.value = '';
+  } catch (e) {
+    fail(e);
+  } finally {
+    busy.value = false;
+  }
+}
+
 // --- お金の動き ---
 //
 // お金は複式の台帳(ledger_tx / ledger_entry)に全部残っているので、集計も履歴も
@@ -1700,6 +1735,41 @@ function fmtTime(iso: string): string {
                     </tr>
                   </tbody>
                 </table>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <!-- 一斉メール -->
+        <section class="fold">
+          <button class="fold-head" @click="open.broadcast = !open.broadcast">
+            <span class="caret">{{ open.broadcast ? '▼' : '▶' }}</span> 一斉メール
+          </button>
+          <div v-if="open.broadcast" class="fold-body">
+            <section class="panel">
+              <h3>
+                住民全員へお知らせを送る<span class="hint">
+                  ※ゲーム内メールで届きます。通知をオンにしている人の端末にも出ます</span
+                >
+              </h3>
+              <textarea
+                v-model="bcBody"
+                class="bc-body"
+                rows="6"
+                maxlength="2000"
+                placeholder="お知らせの本文（2000文字まで）"
+              ></textarea>
+              <div class="bc-bar">
+                <span class="hint">宛先 {{ bcTargets }}人（お試しプレイ中の人と自分は除く）</span>
+                <span class="hint">{{ bcBody.length }} / 2000</span>
+                <button
+                  class="btn primary"
+                  :disabled="busy || !bcBody.trim()"
+                  data-test="broadcast-send"
+                  @click="sendBroadcast"
+                >
+                  送信
+                </button>
               </div>
             </section>
           </div>
@@ -3418,6 +3488,25 @@ function fmtTime(iso: string): string {
 }
 .held-num {
   width: 68px;
+}
+
+/* 一斉メール */
+.bc-body {
+  width: 100%;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 6px;
+}
+.bc-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+.bc-bar .btn {
+  margin-left: auto;
 }
 
 /* お金・持ち物の集計 */
