@@ -1679,6 +1679,300 @@ func adminDelete(t *testing.T, base, path string, actingID int64) (int, []byte) 
 	return resp.StatusCode, data
 }
 
+func adminGet(t *testing.T, base, path string, actingID int64) (int, []byte) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, base+path, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	if actingID > 0 {
+		req.Header.Set("X-Acting-Player-Id", strconv.FormatInt(actingID, 10))
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("%s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, data
+}
+
+type adminHeldItem struct {
+	ItemID        int64  `json:"item_id"`
+	Name          string `json:"name"`
+	Quantity      int    `json:"quantity"`
+	RemainingUses int    `json:"remaining_uses"`
+	Sets          int    `json:"sets"`
+	Durability    int    `json:"durability"`
+}
+
+// 管理画面からの所持アイテム操作。数え方(quantity)はサーバー側が持つ決まりなので、
+// 残量を入れれば個数がついてくること、0で外れることを見る。
+func TestAdminPlayerItems(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	admin := register(t, srv.URL, "misskey.example", "root")  // 最初=admin
+	alice := register(t, srv.URL, "misskey.example", "alice") // 一般
+
+	// パン(耐久6)。残量とセット数がずれる品でないと数え直しを確かめられない。
+	var bread int64
+	if err := pool.QueryRow(ctx, `SELECT id FROM content_items WHERE name = 'パン'`).Scan(&bread); err != nil {
+		t.Fatal(err)
+	}
+	itemsPath := "/api/v1/admin/players/" + strconv.FormatInt(alice.ID, 10) + "/items"
+	onePath := itemsPath + "/" + strconv.FormatInt(bread, 10)
+
+	// 権限。未ログインは401、一般ユーザーは403。
+	if code, _ := adminGet(t, srv.URL, itemsPath, 0); code != http.StatusUnauthorized {
+		t.Errorf("未ログイン = %d, want 401", code)
+	}
+	if code, _ := adminGet(t, srv.URL, itemsPath, alice.ID); code != http.StatusForbidden {
+		t.Errorf("一般ユーザー = %d, want 403", code)
+	}
+
+	// 何も持っていない状態。
+	code, body := adminGet(t, srv.URL, itemsPath, admin.ID)
+	if code != http.StatusOK {
+		t.Fatalf("一覧 = %d: %s", code, body)
+	}
+	var held []adminHeldItem
+	json.Unmarshal(body, &held)
+	if len(held) != 0 {
+		t.Fatalf("初期状態で持ち物がある: %+v", held)
+	}
+
+	// 残量14を入れる。耐久6なので個数は ceil(14/6) = 3 になるはず。
+	code, body = adminPut(t, srv.URL, onePath, admin.ID, map[string]any{"remaining_uses": 14})
+	if code != http.StatusOK {
+		t.Fatalf("設定 = %d: %s", code, body)
+	}
+	json.Unmarshal(body, &held)
+	if len(held) != 1 || held[0].RemainingUses != 14 || held[0].Quantity != 3 || held[0].Sets != 3 {
+		t.Fatalf("設定後 = %+v, want 残量14/個数3/セット3", held)
+	}
+
+	// 減らしても数え直される。
+	_, body = adminPut(t, srv.URL, onePath, admin.ID, map[string]any{"remaining_uses": 7})
+	json.Unmarshal(body, &held)
+	if len(held) != 1 || held[0].Quantity != 2 {
+		t.Fatalf("減らした後 = %+v, want 個数2", held)
+	}
+
+	// 0にすると持ち物から外れる(残量>0の行だけを持つ決まり)。
+	_, body = adminPut(t, srv.URL, onePath, admin.ID, map[string]any{"remaining_uses": 0})
+	json.Unmarshal(body, &held)
+	if len(held) != 0 {
+		t.Fatalf("0にしても残っている: %+v", held)
+	}
+
+	// 明示的な削除。
+	adminPut(t, srv.URL, onePath, admin.ID, map[string]any{"remaining_uses": 6})
+	code, body = adminDelete(t, srv.URL, onePath, admin.ID)
+	if code != http.StatusOK {
+		t.Fatalf("削除 = %d: %s", code, body)
+	}
+	json.Unmarshal(body, &held)
+	if len(held) != 0 {
+		t.Fatalf("削除後も残っている: %+v", held)
+	}
+
+	// 存在しないアイテムは404。
+	if code, _ := adminPut(t, srv.URL, itemsPath+"/999999", admin.ID,
+		map[string]any{"remaining_uses": 1}); code != http.StatusNotFound {
+		t.Errorf("存在しないアイテム = %d, want 404", code)
+	}
+}
+
+// お金の確認。台帳から引くだけなので、実際に動かしたお金が集計と履歴に出ること、
+// 複式の帳尻(zero_sum)が0のままであることを見る。
+func TestAdminMoneyAudit(t *testing.T) {
+	srv, _ := setup(t)
+	admin := register(t, srv.URL, "misskey.example", "root")
+	alice := register(t, srv.URL, "misskey.example", "alice")
+	changeJob(t, srv.URL, alice.ID, "アルバイト", "j-alice")
+	doWork(t, srv.URL, alice.ID, "w-alice")
+
+	type audit struct {
+		PlayerID int64 `json:"player_id"`
+		Cash     int64 `json:"cash"`
+		Total    int64 `json:"total"`
+		ZeroSum  int64 `json:"zero_sum"`
+		Reasons  []struct {
+			Reason string `json:"reason"`
+			Count  int64  `json:"count"`
+			Net    int64  `json:"net"`
+		} `json:"reasons"`
+		System  []struct{ Account string } `json:"system"`
+		History []struct {
+			PlayerID int64  `json:"player_id"`
+			Kind     string `json:"kind"`
+			Delta    int64  `json:"delta"`
+			Reason   string `json:"reason"`
+		} `json:"history"`
+	}
+
+	if code, _ := adminGet(t, srv.URL, "/api/v1/admin/money", alice.ID); code != http.StatusForbidden {
+		t.Errorf("一般ユーザー = %d, want 403", code)
+	}
+
+	// 全ユーザー。2人ぶんの初期資金と給料が入っている。
+	code, body := adminGet(t, srv.URL, "/api/v1/admin/money", admin.ID)
+	if code != http.StatusOK {
+		t.Fatalf("全体 = %d: %s", code, body)
+	}
+	var all audit
+	json.Unmarshal(body, &all)
+	if all.Cash != 1001040 { // 50万×2 + 給料1000 + 労働ボーナス40
+		t.Errorf("全体の現金 = %d, want 1001040", all.Cash)
+	}
+	if all.ZeroSum != 0 {
+		t.Errorf("台帳の帳尻 = %d, want 0", all.ZeroSum)
+	}
+	if len(all.System) == 0 {
+		t.Error("街の勘定が空")
+	}
+	var workNet int64
+	for _, r := range all.Reasons {
+		if r.Reason == "work" {
+			workNet = r.Net
+		}
+	}
+	if workNet != 1040 {
+		t.Errorf("workの差引 = %d, want 1040", workNet)
+	}
+
+	// ユーザーを絞ると、その人の動きだけになる。
+	_, body = adminGet(t, srv.URL,
+		"/api/v1/admin/money?player_id="+strconv.FormatInt(alice.ID, 10), admin.ID)
+	var one audit
+	json.Unmarshal(body, &one)
+	if one.Cash != 501040 {
+		t.Errorf("aliceの現金 = %d, want 501040", one.Cash)
+	}
+	if len(one.System) != 0 {
+		t.Error("個人指定で街の勘定が返っている")
+	}
+	if len(one.History) == 0 {
+		t.Fatal("履歴が空")
+	}
+	for _, h := range one.History {
+		if h.PlayerID != alice.ID {
+			t.Fatalf("他人の動きが混ざっている: %+v", h)
+		}
+	}
+	if one.History[0].Reason != "work" || one.History[0].Delta != 1040 {
+		t.Errorf("直近の動き = %+v, want work +1040", one.History[0])
+	}
+}
+
+// お金の取り消し。台帳は追記専用なので、行を消すのではなく符号を反転した取引を
+// 1本足して残高を戻す。元の記録も取り消しの記録も両方残り、帳尻は0のまま。
+func TestAdminReverseTx(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	admin := register(t, srv.URL, "misskey.example", "root")
+	alice := register(t, srv.URL, "misskey.example", "alice")
+	changeJob(t, srv.URL, alice.ID, "アルバイト", "j-alice")
+	after, _ := doWork(t, srv.URL, alice.ID, "w-alice")
+	if after.Money != 501040 {
+		t.Fatalf("給料受取後 = %d, want 501040", after.Money)
+	}
+
+	// 直前の給料の取引IDを引く。
+	var txID int64
+	if err := pool.QueryRow(ctx,
+		`SELECT id FROM ledger_tx WHERE reason = 'work' ORDER BY id DESC LIMIT 1`).Scan(&txID); err != nil {
+		t.Fatal(err)
+	}
+
+	if code, _ := adminPost(t, srv.URL, "/api/v1/admin/money/reverse", alice.ID,
+		map[string]any{"tx_id": txID}); code != http.StatusForbidden {
+		t.Errorf("一般ユーザー = %d, want 403", code)
+	}
+	if code, _ := adminPost(t, srv.URL, "/api/v1/admin/money/reverse", admin.ID,
+		map[string]any{"tx_id": 999999}); code != http.StatusNotFound {
+		t.Errorf("存在しない取引 = %d, want 404", code)
+	}
+
+	code, body := adminPost(t, srv.URL, "/api/v1/admin/money/reverse", admin.ID,
+		map[string]any{"tx_id": txID})
+	if code != http.StatusOK {
+		t.Fatalf("取り消し = %d: %s", code, body)
+	}
+	// 給料1040が戻り、初期資金だけになる。
+	var money int64
+	if err := pool.QueryRow(ctx,
+		`SELECT COALESCE(SUM(delta), 0) FROM ledger_entry WHERE account = 'player:' || $1::bigint::text`,
+		alice.ID).Scan(&money); err != nil {
+		t.Fatal(err)
+	}
+	if money != 500000 {
+		t.Errorf("取り消し後の所持金 = %d, want 500000", money)
+	}
+	// 元の記録は消えていない。取り消しの記帳が1件増えている。
+	var origCount, revCount int
+	pool.QueryRow(ctx, `SELECT count(*) FROM ledger_tx WHERE id = $1`, txID).Scan(&origCount)
+	pool.QueryRow(ctx, `SELECT count(*) FROM ledger_tx WHERE ref = 'reverse:' || $1::bigint::text`, txID).Scan(&revCount)
+	if origCount != 1 || revCount != 1 {
+		t.Errorf("元=%d件 取消=%d件, want 1件ずつ", origCount, revCount)
+	}
+	// 複式の帳尻は崩れない。
+	if sum, err := ledger.New(pool).AuditZeroSum(ctx); err != nil || sum != 0 {
+		t.Errorf("台帳の帳尻 = %d (err=%v), want 0", sum, err)
+	}
+
+	// 二重の取り消しは弾く。
+	if c, _ := adminPost(t, srv.URL, "/api/v1/admin/money/reverse", admin.ID,
+		map[string]any{"tx_id": txID}); c != http.StatusUnprocessableEntity {
+		t.Errorf("二重取り消し = %d, want 422", c)
+	}
+
+	// 履歴に取消済みの印が付く。
+	_, body = adminGet(t, srv.URL,
+		"/api/v1/admin/money?player_id="+strconv.FormatInt(alice.ID, 10), admin.ID)
+	var audit struct {
+		History []struct {
+			TxID       int64 `json:"tx_id"`
+			Reversed   bool  `json:"reversed"`
+			IsReversal bool  `json:"is_reversal"`
+		} `json:"history"`
+	}
+	json.Unmarshal(body, &audit)
+	var sawOrig, sawRev bool
+	for _, h := range audit.History {
+		if h.TxID == txID && h.Reversed {
+			sawOrig = true
+		}
+		if h.IsReversal {
+			sawRev = true
+		}
+	}
+	if !sawOrig {
+		t.Error("元の取引に取消済みの印が付いていない")
+	}
+	if !sawRev {
+		t.Error("取り消しの記帳が履歴に出ていない")
+	}
+
+	// 使い切った後の取り消しは、持ち金がマイナスになるので止める。
+	var initTx int64
+	if err := pool.QueryRow(ctx,
+		`SELECT t.id FROM ledger_tx t JOIN ledger_entry e ON e.tx_id = t.id
+		 WHERE t.reason = 'initial_grant' AND e.account = 'player:' || $1::bigint::text
+		 LIMIT 1`, alice.ID).Scan(&initTx); err != nil {
+		t.Fatal(err)
+	}
+	// 所持金を1円にしてから初期資金50万の取り消しを試す。
+	adminPut(t, srv.URL, "/api/v1/admin/players/"+strconv.FormatInt(alice.ID, 10), admin.ID,
+		map[string]any{"display_name": "alice", "money": 1, "params": map[string]int{},
+			"job": "アルバイト", "energy": 100, "nou_energy": 100, "satiety": 50,
+			"height_cm": 170, "weight_g": 60000})
+	if c, b := adminPost(t, srv.URL, "/api/v1/admin/money/reverse", admin.ID,
+		map[string]any{"tx_id": initTx}); c != http.StatusUnprocessableEntity {
+		t.Errorf("マイナスになる取り消し = %d, want 422: %s", c, b)
+	}
+}
+
 // TestTownMap covers the town map API: GET is public, PUT is admin-only, updates
 // persist and are validated (grid bounds / one-facility-per-cell).
 func TestTownMap(t *testing.T) {

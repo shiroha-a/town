@@ -506,6 +506,66 @@ export interface AdminItem {
   build_span: number; // 建築許可証(0=通常 / 2=2マスの家)
 }
 
+/** 管理画面で見る、あるユーザーの持ち物1種。 */
+export interface AdminHeldItem {
+  item_id: number;
+  name: string;
+  category: string;
+  quantity: number;
+  remaining_uses: number; // 実体。quantityはこれから導かれる
+  sets: number;
+  durability: number; // 1セットあたりの耐久
+  durability_unit: string; // 'use'(回) or 'day'(日)
+  use_interval_min: number;
+  usable: boolean;
+  next_available_at: string | null;
+}
+
+/** 何がどれだけ世に出回っているか(全ユーザーの合計)。 */
+export interface AdminItemTotal {
+  item_id: number;
+  name: string;
+  category: string;
+  holders: number;
+  sets: number;
+  remaining_uses: number;
+}
+
+/** お金の動き1件(台帳のentry1行)。 */
+export interface MoneyMovement {
+  tx_id: number;
+  player_id: number;
+  kind: string; // cash / savings / super_savings / system
+  delta: number;
+  reason: string;
+  created_at: string;
+  reversed: boolean; // この取引は取り消し済み
+  is_reversal: boolean; // この行自体が取り消しの記帳
+}
+
+/** 理由ごとの集計。inは入った額、outは出た額(正の数)。 */
+export interface MoneyReason {
+  reason: string;
+  count: number;
+  in: number;
+  out: number;
+  net: number;
+}
+
+/** お金の確認。player_id=0なら全ユーザーぶん。 */
+export interface MoneyAudit {
+  player_id: number;
+  cash: number;
+  savings: number;
+  super_savings: number;
+  loan_remain: number;
+  total: number; // 現金+貯金+定期-ローン
+  zero_sum: number; // 台帳の全entry合計。複式なので常に0
+  reasons: MoneyReason[];
+  system: { account: string; balance: number }[];
+  history: MoneyMovement[];
+}
+
 /** アイテムの作成・更新で送る項目(content_itemsの編集できる列)。 */
 export type AdminItemInput = Omit<AdminItem, 'id'>;
 export interface AdminJob {
@@ -1953,6 +2013,24 @@ export const api = {
       params: Record<string, { value: number; max: number }>;
     },
   ) => request<SimResult>('POST', '/admin/simulate', { effect, state }),
+  adminPlayerItems: (id: number) => request<AdminHeldItem[]>('GET', `/admin/players/${id}/items`),
+  // 残量を設定する。0以下なら持ち物から消える。応答は更新後の一覧。
+  adminSetPlayerItem: (id: number, itemId: number, remainingUses: number, clearCooldown = false) =>
+    request<AdminHeldItem[]>('PUT', `/admin/players/${id}/items/${itemId}`, {
+      remaining_uses: remainingUses,
+      clear_cooldown: clearCooldown,
+    }),
+  adminDeletePlayerItem: (id: number, itemId: number) =>
+    request<AdminHeldItem[]>('DELETE', `/admin/players/${id}/items/${itemId}`),
+  adminItemTotals: () => request<AdminItemTotal[]>('GET', '/admin/items/totals'),
+  // 取り消しは逆仕訳を1本足す(台帳は追記専用なので行は消さない)。
+  adminReverseTx: (txId: number) =>
+    request<{ reversed: boolean; tx_id: number }>('POST', '/admin/money/reverse', {
+      tx_id: txId,
+    }),
+  // player_id=0 で全ユーザーぶん。
+  adminMoney: (playerId = 0, limit = 100) =>
+    request<MoneyAudit>('GET', `/admin/money?player_id=${playerId}&limit=${limit}`),
   adminListPlayers: () => request<AdminPlayerSummary[]>('GET', '/admin/players'),
   adminUpdatePlayer: (id: number, payload: AdminPlayerPayload) =>
     request<Player>('PUT', `/admin/players/${id}`, payload),

@@ -24,6 +24,10 @@ import {
   type FacilityPreset,
   type PlotCell,
   type Town,
+  type AdminHeldItem,
+  type AdminItemTotal,
+  type MoneyAudit,
+  type MoneyMovement,
 } from '../api';
 import { PARAM_FULL } from '../params';
 
@@ -45,6 +49,7 @@ const open = reactive({
   monsters: false,
   bingo: false,
   instances: false,
+  money: false,
 });
 
 // 効果/条件で対象にできるパラメータ。
@@ -1285,6 +1290,7 @@ async function openEditPlayer(id: number) {
   message.value = '';
   try {
     const p = await api.getPlayer(id);
+    await loadHeldItems(id);
     editingPlayer.value = {
       id: p.id,
       display_name: p.display_name,
@@ -1307,6 +1313,74 @@ async function openEditPlayer(id: number) {
 }
 function closeEditPlayer() {
   editingPlayer.value = null;
+  heldItems.value = [];
+}
+
+// --- 編集中ユーザーの所持アイテム ---
+//
+// 数え方はサーバーに任せる。quantityはremaining_usesから導く決まりで、画面から
+// 送るとずれる(持っているのに「0個」と出る、没収が効かない等の元になる)。
+const heldItems = ref<AdminHeldItem[]>([]);
+// item_id -> 入力中の残量。一覧を取り直すたびに作り直す。
+const heldEdit = ref<Record<number, number>>({});
+const addItemID = ref<number | null>(null);
+const addSets = ref(1);
+
+function syncHeldEdit() {
+  const m: Record<number, number> = {};
+  for (const it of heldItems.value) m[it.item_id] = it.remaining_uses;
+  heldEdit.value = m;
+}
+async function loadHeldItems(id: number) {
+  heldItems.value = await api.adminPlayerItems(id);
+  syncHeldEdit();
+}
+async function runHeld(fn: () => Promise<AdminHeldItem[]>, done: string) {
+  busy.value = true;
+  message.value = '';
+  try {
+    heldItems.value = await fn();
+    syncHeldEdit();
+    message.value = done;
+    kind.value = 'ok';
+  } catch (e) {
+    fail(e);
+  } finally {
+    busy.value = false;
+  }
+}
+function applyHeld(itemId: number, clearCooldown = false) {
+  const p = editingPlayer.value;
+  if (!p) return;
+  return runHeld(
+    () => api.adminSetPlayerItem(p.id, itemId, heldEdit.value[itemId] ?? 0, clearCooldown),
+    clearCooldown ? 'クールタイムを解除しました。' : '残量を更新しました。',
+  );
+}
+function deleteHeld(itemId: number) {
+  const p = editingPlayer.value;
+  if (!p) return;
+  return runHeld(() => api.adminDeletePlayerItem(p.id, itemId), '持ち物から外しました。');
+}
+function addHeld() {
+  const p = editingPlayer.value;
+  const master = items.value.find((i) => i.id === addItemID.value);
+  if (!p || !master) return;
+  // 既に持っていれば足す。セット数×耐久ぶんが残量になる。
+  const cur = heldItems.value.find((i) => i.item_id === master.id)?.remaining_uses ?? 0;
+  const add = Math.max(1, addSets.value) * Math.max(1, master.durability);
+  return runHeld(
+    () => api.adminSetPlayerItem(p.id, master.id, cur + add, false),
+    `${master.name}を${Math.max(1, addSets.value)}セット持たせました。`,
+  );
+}
+/** クールタイムの残り表示。 */
+function cooldownLabel(iso: string | null): string {
+  if (!iso) return '－';
+  const remain = new Date(iso).getTime() - Date.now();
+  if (!(remain > 0)) return '－';
+  const m = Math.ceil(remain / 60000);
+  return `あと${m}分`;
 }
 async function savePlayer() {
   if (!editingPlayer.value) return;
@@ -1492,6 +1566,80 @@ async function deleteEdit() {
     busy.value = false;
   }
 }
+
+// --- お金の動き ---
+//
+// お金は複式の台帳(ledger_tx / ledger_entry)に全部残っているので、集計も履歴も
+// そこから引くだけでよい。理由(reason)はコード側の記帳名をそのまま出す。訳語を
+// 当てると実際の記帳とずれたときに気づけなくなるため。
+const money = ref<MoneyAudit | null>(null);
+const moneyPlayer = ref(0); // 0=全ユーザー
+const moneyLimit = ref(100);
+const itemTotals = ref<AdminItemTotal[]>([]);
+
+async function loadMoney() {
+  busy.value = true;
+  message.value = '';
+  try {
+    money.value = await api.adminMoney(moneyPlayer.value, moneyLimit.value);
+    itemTotals.value = await api.adminItemTotals();
+  } catch (e) {
+    fail(e);
+  } finally {
+    busy.value = false;
+  }
+}
+function toggleMoney() {
+  open.money = !open.money;
+  if (open.money && !money.value) void loadMoney();
+}
+
+const KIND_LABEL: Record<string, string> = {
+  cash: '現金',
+  savings: '普通口座',
+  super_savings: 'スーパー定期',
+  system: '街',
+};
+function yen(n: number): string {
+  return n.toLocaleString('ja-JP');
+}
+function playerLabel(id: number): string {
+  if (id === 0) return '街';
+  return players.value.find((p) => p.id === id)?.display_name ?? `ID${id}`;
+}
+// 取り消し。台帳は追記専用なので、符号を反転した取引を1本足して残高を戻す
+// (行は消さない。消すと世界のお金の合計を後から検算できなくなる)。
+// 戻るのはお金だけで、買った品物や得た経験値はそのまま残る。
+async function reverseTx(m: MoneyMovement) {
+  const sign = m.delta >= 0 ? '+' : '';
+  if (
+    !window.confirm(
+      `この取引を取り消しますか?\n\n` +
+        `${playerLabel(m.player_id)} ${sign}${yen(m.delta)}円（${m.reason}）\n\n` +
+        `※戻るのはお金だけです。買った品物や得た経験値はそのまま残ります。\n` +
+        `※台帳には取り消しの記帳が1件追加されます（元の記録は消えません）。`,
+    )
+  ) {
+    return;
+  }
+  busy.value = true;
+  message.value = '';
+  try {
+    await api.adminReverseTx(m.tx_id);
+    message.value = `取引#${m.tx_id}を取り消しました。`;
+    kind.value = 'ok';
+    await loadMoney();
+  } catch (e) {
+    fail(e);
+  } finally {
+    busy.value = false;
+  }
+}
+function fmtTime(iso: string): string {
+  const d = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 </script>
 
 <template>
@@ -1549,6 +1697,176 @@ async function deleteEdit() {
                       <td>{{ u.job_level }}</td>
                       <td class="r">{{ u.money.toLocaleString('ja-JP') }}円</td>
                       <td>{{ u.roles.includes('admin') ? '管理者' : '' }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <!-- お金・持ち物の集計 -->
+        <section class="fold">
+          <button class="fold-head" @click="toggleMoney">
+            <span class="caret">{{ open.money ? '▼' : '▶' }}</span> お金・持ち物の集計
+          </button>
+          <div v-if="open.money" class="fold-body">
+            <section class="panel">
+              <h3>
+                対象<span class="hint">
+                  ※お金は複式の台帳から引いています。増減はすべてここに残ります</span
+                >
+              </h3>
+              <div class="money-bar">
+                <select v-model.number="moneyPlayer" @change="loadMoney">
+                  <option :value="0">全ユーザー</option>
+                  <option v-for="u in players" :key="u.id" :value="u.id">
+                    {{ u.display_name }}（ID{{ u.id }}）
+                  </option>
+                </select>
+                <label>履歴の件数<input type="number" v-model.number="moneyLimit" /></label>
+                <button class="btn mini" :disabled="busy" @click="loadMoney">取り直す</button>
+              </div>
+              <div v-if="money" class="money-totals">
+                現金 <b>{{ yen(money.cash) }}</b
+                >円 ／ 普通口座 <b>{{ yen(money.savings) }}</b
+                >円 ／ スーパー定期 <b>{{ yen(money.super_savings) }}</b
+                >円 ／ ローン残 <b>{{ yen(money.loan_remain) }}</b
+                >円<br />
+                総資産 <b class="big">{{ yen(money.total) }}</b
+                >円
+                <span v-if="money.player_id === 0" class="hint">
+                  ／ 台帳の全entry合計 {{ money.zero_sum }}（複式なので0が正常）</span
+                >
+              </div>
+            </section>
+
+            <section v-if="money" class="panel">
+              <h3>理由ごとの出入り<span class="hint"> ※記帳名はコードのまま</span></h3>
+              <div class="table-scroll money-scroll">
+                <table class="list-table">
+                  <thead>
+                    <tr>
+                      <th class="l">理由</th>
+                      <th>件数</th>
+                      <th>入</th>
+                      <th>出</th>
+                      <th>差引</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="r in money.reasons" :key="r.reason">
+                      <td class="l">{{ r.reason }}</td>
+                      <td>{{ r.count }}</td>
+                      <td class="r plus">{{ r.in ? '+' + yen(r.in) : '' }}</td>
+                      <td class="r minus">{{ r.out ? '-' + yen(r.out) : '' }}</td>
+                      <td class="r" :class="r.net >= 0 ? 'plus' : 'minus'">{{ yen(r.net) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section v-if="money && money.system.length" class="panel">
+              <h3>
+                街の勘定<span class="hint">
+                  ※負=そこから出た（蛇口）／正=そこへ吸われた（シンク）</span
+                >
+              </h3>
+              <div class="table-scroll money-scroll">
+                <table class="list-table">
+                  <thead>
+                    <tr>
+                      <th class="l">勘定</th>
+                      <th>残高</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="a in money.system" :key="a.account">
+                      <td class="l">{{ a.account.replace('system:', '') }}</td>
+                      <td class="r" :class="a.balance >= 0 ? 'plus' : 'minus'">
+                        {{ yen(a.balance) }}円
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section v-if="money" class="panel">
+              <h3>直近の動き（{{ money.history.length }}件）</h3>
+              <div class="table-scroll money-scroll">
+                <table class="list-table">
+                  <thead>
+                    <tr>
+                      <th>日時</th>
+                      <th class="l">相手</th>
+                      <th>置き場</th>
+                      <th>増減</th>
+                      <th class="l">理由</th>
+                      <th>取消</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-if="money.history.length === 0">
+                      <td colspan="6" class="muted">記録がありません。</td>
+                    </tr>
+                    <tr
+                      v-for="(m, i) in money.history"
+                      :key="m.tx_id + '-' + i"
+                      :class="{ reversed: m.reversed }"
+                    >
+                      <td>{{ fmtTime(m.created_at) }}</td>
+                      <td class="l">{{ playerLabel(m.player_id) }}</td>
+                      <td>{{ KIND_LABEL[m.kind] ?? m.kind }}</td>
+                      <td class="r" :class="m.delta >= 0 ? 'plus' : 'minus'">
+                        {{ m.delta >= 0 ? '+' : '' }}{{ yen(m.delta) }}
+                      </td>
+                      <td class="l">{{ m.reason }}</td>
+                      <td>
+                        <span v-if="m.reversed" class="hint">取消済</span>
+                        <button
+                          v-else
+                          class="btn mini danger"
+                          :disabled="busy"
+                          @click="reverseTx(m)"
+                        >
+                          取消
+                        </button>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="panel">
+              <h3>
+                持ち物の合計（全ユーザー・{{ itemTotals.length }}種）<span class="hint">
+                  ※ここだけは対象の選択によらず全員ぶんです</span
+                >
+              </h3>
+              <div class="table-scroll money-scroll">
+                <table class="list-table">
+                  <thead>
+                    <tr>
+                      <th class="l">品名</th>
+                      <th class="l">カテゴリ</th>
+                      <th>人数</th>
+                      <th>個数</th>
+                      <th>残量</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-if="itemTotals.length === 0">
+                      <td colspan="5" class="muted">誰も何も持っていません。</td>
+                    </tr>
+                    <tr v-for="t in itemTotals" :key="t.item_id">
+                      <td class="l">{{ t.name }}</td>
+                      <td class="l">{{ t.category }}</td>
+                      <td>{{ t.holders }}</td>
+                      <td>{{ t.sets }}</td>
+                      <td>{{ t.remaining_uses }}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -2973,6 +3291,74 @@ async function deleteEdit() {
             </label>
           </div>
         </div>
+        <div class="ops">
+          <div class="ops-head">
+            所持アイテム（{{ heldItems.length }}種）
+            <span class="hint">
+              ※残量が実体です。個数は残量÷1セットの耐久で数え直されます。0にすると外れます
+            </span>
+          </div>
+          <div class="table-scroll held-scroll">
+            <table class="list-table held-table">
+              <thead>
+                <tr>
+                  <th class="l">品名</th>
+                  <th>残量</th>
+                  <th>単位</th>
+                  <th>個数</th>
+                  <th>CT</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-if="heldItems.length === 0">
+                  <td colspan="6" class="muted">持ち物はありません。</td>
+                </tr>
+                <tr v-for="it in heldItems" :key="it.item_id">
+                  <td class="l">
+                    {{ it.name }}<span class="hint"> {{ it.category }}</span>
+                  </td>
+                  <td>
+                    <input class="held-num" type="number" v-model.number="heldEdit[it.item_id]" />
+                  </td>
+                  <td>{{ it.durability_unit === 'day' ? '日' : '回' }}</td>
+                  <td>{{ it.sets }}</td>
+                  <td>{{ cooldownLabel(it.next_available_at) }}</td>
+                  <td class="held-ops">
+                    <button class="btn mini" :disabled="busy" @click="applyHeld(it.item_id)">
+                      反映
+                    </button>
+                    <button
+                      class="btn mini"
+                      :disabled="busy || !it.next_available_at"
+                      @click="applyHeld(it.item_id, true)"
+                    >
+                      CT解除
+                    </button>
+                    <button
+                      class="btn mini danger"
+                      :disabled="busy"
+                      @click="deleteHeld(it.item_id)"
+                    >
+                      外す
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="held-add">
+            <select v-model.number="addItemID">
+              <option :value="null">アイテムを選ぶ</option>
+              <option v-for="i in items" :key="i.id" :value="i.id">
+                {{ i.name }}（耐久{{ i.durability }}）
+              </option>
+            </select>
+            <input class="held-num" type="number" min="1" v-model.number="addSets" />
+            <span class="hint">セット</span>
+            <button class="btn mini" :disabled="busy || !addItemID" @click="addHeld">追加</button>
+          </div>
+        </div>
         <div class="actions">
           <button class="btn primary" :disabled="busy" @click="savePlayer">保存</button>
           <button class="btn danger" :disabled="busy" @click="deletePlayer">論理削除</button>
@@ -3002,6 +3388,79 @@ async function deleteEdit() {
   margin-left: 8px;
   font-size: 10px;
   color: #889;
+}
+/* 所持アイテムの編集(ユーザー編集モーダル内) */
+.held-scroll {
+  max-height: 240px;
+  overflow-y: auto;
+}
+.held-table .held-num {
+  width: 68px;
+}
+/* 品名が3行に折り返すと表が読めなくなるので、名前の列に幅を確保する
+   (足りなければ表ごと横スクロールする)。 */
+.held-table td.l,
+.held-table th.l {
+  min-width: 170px;
+}
+.held-ops {
+  white-space: nowrap;
+}
+.held-add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+.held-add select {
+  max-width: 260px;
+}
+.held-num {
+  width: 68px;
+}
+
+/* お金・持ち物の集計 */
+.money-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.money-bar input {
+  width: 70px;
+  margin-left: 4px;
+}
+.money-totals {
+  font-size: 12px;
+  line-height: 1.8;
+  background: #f4f7fb;
+  border: 1px solid #c9d4e0;
+  padding: 6px 8px;
+}
+.money-totals .big {
+  font-size: 15px;
+  color: #14456e;
+}
+.money-scroll {
+  max-height: 320px;
+  overflow-y: auto;
+}
+/* 取り消し済みの取引。残高には効いていないので薄くする。 */
+tr.reversed td {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+tr.reversed .hint {
+  text-decoration: none;
+}
+/* 入金は青、出金は赤。金額の符号を色でも分かるようにする。 */
+.plus {
+  color: #1b6ec2;
+}
+.minus {
+  color: #c23a1b;
 }
 .admin-page {
   background-color: #dfe6ee;

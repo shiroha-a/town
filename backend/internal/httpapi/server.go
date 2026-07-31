@@ -295,6 +295,13 @@ func NewServer(players *player.Service, actions *action.Service, contentSvc *con
 	mux.HandleFunc("GET /api/v1/admin/players", s.adminListPlayers)
 	mux.HandleFunc("PUT /api/v1/admin/players/{id}", s.adminUpdatePlayer)
 	mux.HandleFunc("DELETE /api/v1/admin/players/{id}", s.adminDeletePlayer)
+	// 住民の持ち物を直に触る。検証や救済でpsqlを叩かずに済ませるため。
+	mux.HandleFunc("GET /api/v1/admin/players/{id}/items", s.adminListPlayerItems)
+	mux.HandleFunc("PUT /api/v1/admin/players/{id}/items/{itemId}", s.adminSetPlayerItem)
+	mux.HandleFunc("DELETE /api/v1/admin/players/{id}/items/{itemId}", s.adminDeletePlayerItem)
+	mux.HandleFunc("GET /api/v1/admin/items/totals", s.adminItemTotals)
+	mux.HandleFunc("GET /api/v1/admin/money", s.adminMoneyAudit)
+	mux.HandleFunc("POST /api/v1/admin/money/reverse", s.adminReverseTx)
 	api := recoverer(securityHeaders(s.authGuard(mux)))
 	if auth.WebDir == "" {
 		return api
