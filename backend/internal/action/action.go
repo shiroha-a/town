@@ -279,11 +279,22 @@ func (s *Service) DoWork(ctx context.Context, playerID int64, idempotencyKey str
 		if ok, failed := econ.conds.Check(state); !ok {
 			return &ConditionError{Message: conditionMessage(failed)}
 		}
-		if state.Params["energy"].Value < econ.bodyCost {
-			return &ConditionError{Message: "身体パワーが足りません。"}
+		// パワー消費 = 基準 + 基準×ランク係数(隠しランクで重みが変わる。青天井の
+		// パラメータ値には依存しない。基準以下にはならない)。
+		//
+		// 判定をこの消費量で行うのは、給料に乗る労働ボーナスが「消費したパワー」に
+		// 比例するため。基準ぶんだけで働けると、消費は残量で頭打ちになるのに
+		// ボーナスは満額付き、実際には払っていないパワーぶんまで貰えていた。
+		// 職安の一覧が出しているのもこの消費量なので、表示とも揃う。
+		energySpend := jobrule.PowerSpend(econ.bodyCost, econ.rank)
+		nouSpend := jobrule.PowerSpend(econ.nouCost, econ.rank)
+		if state.Params["energy"].Value < energySpend {
+			return &ConditionError{Message: fmt.Sprintf(
+				"身体パワーが足りません。この仕事には%dの身体パワーが必要です。", energySpend)}
 		}
-		if state.Params["nou_energy"].Value < econ.nouCost {
-			return &ConditionError{Message: "頭脳パワーが足りません。"}
+		if state.Params["nou_energy"].Value < nouSpend {
+			return &ConditionError{Message: fmt.Sprintf(
+				"頭脳パワーが足りません。この仕事には%dの頭脳パワーが必要です。", nouSpend)}
 		}
 		// 2b. 体格(BMI)条件。身長は求職時に判定するためここでは体型のみ。
 		var heightCm, weightG, diseaseIndex int
@@ -324,12 +335,8 @@ func (s *Service) DoWork(ctx context.Context, playerID int64, idempotencyKey str
 		}
 		newLevel := newExp / 100
 		leveledUp := newLevel > oldLevel
-		// パワー消費 = 基準 + 基準×ランク係数(隠しランクで重みが変わる。青天井の
-		// パラメータ値には依存しない。基準以下にはならない)。
-		energySpend := jobrule.PowerSpend(econ.bodyCost, econ.rank)
-		nouSpend := jobrule.PowerSpend(econ.nouCost, econ.rank)
 		// 6. 今回の給料(基本給 × レベル × raise_rate% を上乗せ)+ 消費した合計パワーに
-		// 見合う労働ボーナス。
+		// 見合う労働ボーナス。消費量は2で確定済み(足りなければここまで来ない)。
 		workBonus := int64(energySpend+nouSpend) * jobrule.PayPerPower
 		thisSalary := econ.salary + econ.salary*int64(newLevel)*int64(econ.raiseRate)/100 + workBonus
 		// 7. 勤務回数を進め、支払間隔ごとにまとめて支給。

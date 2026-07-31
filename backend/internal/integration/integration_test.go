@@ -391,6 +391,44 @@ func TestCrossPlayerIdempotency(t *testing.T) {
 	}
 }
 
+// 回帰: 労働ボーナスは消費したパワーに比例するので、その消費ぶんを持っていない
+// うちは働けないこと。以前は判定が基準値(body_cost)だけを見ていたため、基準は
+// 満たすが消費には足りない状態で働け、消費は残量で頭打ちになるのにボーナスだけ
+// 満額付いていた(実際には払っていないパワーぶんまで貰えていた)。
+func TestWorkRequiresFullPowerSpend(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	p := register(t, srv.URL, "misskey.example", "worker")
+	changeJob(t, srv.URL, p.ID, "アルバイト", "j-worker")
+
+	// アルバイトは body_cost=1 / rank=1 なので消費は 1 + 1×1 = 2。
+	setEnergy := func(v int) {
+		t.Helper()
+		if _, err := pool.Exec(ctx,
+			`UPDATE player_status SET energy = $1 WHERE player_id = $2`, v, p.ID); err != nil {
+			t.Fatalf("set energy: %v", err)
+		}
+	}
+
+	setEnergy(1) // 基準(1)は満たすが消費(2)に足りない
+	if _, code := doWork(t, srv.URL, p.ID, "w-short"); code != http.StatusUnprocessableEntity {
+		t.Fatalf("消費ぶんが無いのに働けた: status = %d, want 422", code)
+	}
+
+	setEnergy(2)
+	r, code := doWork(t, srv.URL, p.ID, "w-ok")
+	if code != http.StatusOK {
+		t.Fatalf("work status = %d, want 200", code)
+	}
+	// 給料1000 + 労働ボーナス40(消費2×20)。
+	if r.Money != 501040 {
+		t.Errorf("money = %d, want 501040", r.Money)
+	}
+	if r.Status.Energy != 0 {
+		t.Errorf("energy = %d, want 0 (消費2をちょうど使い切る)", r.Status.Energy)
+	}
+}
+
 func changeJob(t *testing.T, base string, id int64, jobName, idemKey string) (playerResp, int) {
 	t.Helper()
 	body, _ := json.Marshal(map[string]any{"job_name": jobName, "idempotency_key": idemKey})
