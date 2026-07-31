@@ -28,6 +28,7 @@ import (
 	"github.com/shiroha-a/town/internal/content"
 	"github.com/shiroha-a/town/internal/db"
 	"github.com/shiroha-a/town/internal/emoji"
+	"github.com/shiroha-a/town/internal/feedback"
 	"github.com/shiroha-a/town/internal/gametime"
 	"github.com/shiroha-a/town/internal/greeting"
 	"github.com/shiroha-a/town/internal/httpapi"
@@ -167,7 +168,7 @@ func setup(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 	http.DefaultClient.Transport = sessionTransport{base: http.DefaultTransport}
 	t.Cleanup(func() { http.DefaultClient.Transport = prevTransport })
 
-	srv := httptest.NewServer(httpapi.NewServer(svc, actions, contentSvc, st, tmap, stock.New(pool), keiba.New(pool, rng.New(7)), mail.New(pool, time.UTC, 5), greeting.New(pool), attendance.New(pool, time.UTC, 5), cleague.New(pool), streetfight.New(pool), news.New(pool), ranking.New(pool), serial.New(pool, rng.New(3)),
+	srv := httptest.NewServer(httpapi.NewServer(svc, actions, contentSvc, st, tmap, stock.New(pool), keiba.New(pool, rng.New(7)), mail.New(pool, time.UTC, 5), greeting.New(pool), attendance.New(pool, time.UTC, 5), cleague.New(pool), streetfight.New(pool), feedback.New(pool), news.New(pool), ranking.New(pool), serial.New(pool, rng.New(3)),
 		httpapi.AuthDeps{
 			Pool:           pool,
 			MiAuth:         miauth.NewClient(),
@@ -387,6 +388,44 @@ func TestCrossPlayerIdempotency(t *testing.T) {
 	}
 	if r2.Money != 501040 {
 		t.Errorf("player2 money = %d, want 501040 (同一キーでも別プレイヤーは独立)", r2.Money)
+	}
+}
+
+// 回帰: 労働ボーナスは消費したパワーに比例するので、その消費ぶんを持っていない
+// うちは働けないこと。以前は判定が基準値(body_cost)だけを見ていたため、基準は
+// 満たすが消費には足りない状態で働け、消費は残量で頭打ちになるのにボーナスだけ
+// 満額付いていた(実際には払っていないパワーぶんまで貰えていた)。
+func TestWorkRequiresFullPowerSpend(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	p := register(t, srv.URL, "misskey.example", "worker")
+	changeJob(t, srv.URL, p.ID, "アルバイト", "j-worker")
+
+	// アルバイトは body_cost=1 / rank=1 なので消費は 1 + 1×1 = 2。
+	setEnergy := func(v int) {
+		t.Helper()
+		if _, err := pool.Exec(ctx,
+			`UPDATE player_status SET energy = $1 WHERE player_id = $2`, v, p.ID); err != nil {
+			t.Fatalf("set energy: %v", err)
+		}
+	}
+
+	setEnergy(1) // 基準(1)は満たすが消費(2)に足りない
+	if _, code := doWork(t, srv.URL, p.ID, "w-short"); code != http.StatusUnprocessableEntity {
+		t.Fatalf("消費ぶんが無いのに働けた: status = %d, want 422", code)
+	}
+
+	setEnergy(2)
+	r, code := doWork(t, srv.URL, p.ID, "w-ok")
+	if code != http.StatusOK {
+		t.Fatalf("work status = %d, want 200", code)
+	}
+	// 給料1000 + 労働ボーナス40(消費2×20)。
+	if r.Money != 501040 {
+		t.Errorf("money = %d, want 501040", r.Money)
+	}
+	if r.Status.Energy != 0 {
+		t.Errorf("energy = %d, want 0 (消費2をちょうど使い切る)", r.Status.Energy)
 	}
 }
 
@@ -1619,6 +1658,866 @@ func adminPut(t *testing.T, base, path string, actingID int64, body any) (int, [
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, data
+}
+
+// adminDelete sends a DELETE as the given player (認可ガード用のヘッダ付き)。
+func adminDelete(t *testing.T, base, path string, actingID int64) (int, []byte) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodDelete, base+path, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	if actingID > 0 {
+		req.Header.Set("X-Acting-Player-Id", strconv.FormatInt(actingID, 10))
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("%s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, data
+}
+
+func adminGet(t *testing.T, base, path string, actingID int64) (int, []byte) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, base+path, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	if actingID > 0 {
+		req.Header.Set("X-Acting-Player-Id", strconv.FormatInt(actingID, 10))
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("%s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, data
+}
+
+type adminHeldItem struct {
+	ItemID        int64  `json:"item_id"`
+	Name          string `json:"name"`
+	Quantity      int    `json:"quantity"`
+	RemainingUses int    `json:"remaining_uses"`
+	Sets          int    `json:"sets"`
+	Durability    int    `json:"durability"`
+}
+
+// 管理画面からの所持アイテム操作。数え方(quantity)はサーバー側が持つ決まりなので、
+// 残量を入れれば個数がついてくること、0で外れることを見る。
+func TestAdminPlayerItems(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	admin := register(t, srv.URL, "misskey.example", "root")  // 最初=admin
+	alice := register(t, srv.URL, "misskey.example", "alice") // 一般
+
+	// パン(耐久6)。残量とセット数がずれる品でないと数え直しを確かめられない。
+	var bread int64
+	if err := pool.QueryRow(ctx, `SELECT id FROM content_items WHERE name = 'パン'`).Scan(&bread); err != nil {
+		t.Fatal(err)
+	}
+	itemsPath := "/api/v1/admin/players/" + strconv.FormatInt(alice.ID, 10) + "/items"
+	onePath := itemsPath + "/" + strconv.FormatInt(bread, 10)
+
+	// 権限。未ログインは401、一般ユーザーは403。
+	if code, _ := adminGet(t, srv.URL, itemsPath, 0); code != http.StatusUnauthorized {
+		t.Errorf("未ログイン = %d, want 401", code)
+	}
+	if code, _ := adminGet(t, srv.URL, itemsPath, alice.ID); code != http.StatusForbidden {
+		t.Errorf("一般ユーザー = %d, want 403", code)
+	}
+
+	// 何も持っていない状態。
+	code, body := adminGet(t, srv.URL, itemsPath, admin.ID)
+	if code != http.StatusOK {
+		t.Fatalf("一覧 = %d: %s", code, body)
+	}
+	var held []adminHeldItem
+	json.Unmarshal(body, &held)
+	if len(held) != 0 {
+		t.Fatalf("初期状態で持ち物がある: %+v", held)
+	}
+
+	// 残量14を入れる。耐久6なので個数は ceil(14/6) = 3 になるはず。
+	code, body = adminPut(t, srv.URL, onePath, admin.ID, map[string]any{"remaining_uses": 14})
+	if code != http.StatusOK {
+		t.Fatalf("設定 = %d: %s", code, body)
+	}
+	json.Unmarshal(body, &held)
+	if len(held) != 1 || held[0].RemainingUses != 14 || held[0].Quantity != 3 || held[0].Sets != 3 {
+		t.Fatalf("設定後 = %+v, want 残量14/個数3/セット3", held)
+	}
+
+	// 減らしても数え直される。
+	_, body = adminPut(t, srv.URL, onePath, admin.ID, map[string]any{"remaining_uses": 7})
+	json.Unmarshal(body, &held)
+	if len(held) != 1 || held[0].Quantity != 2 {
+		t.Fatalf("減らした後 = %+v, want 個数2", held)
+	}
+
+	// 0にすると持ち物から外れる(残量>0の行だけを持つ決まり)。
+	_, body = adminPut(t, srv.URL, onePath, admin.ID, map[string]any{"remaining_uses": 0})
+	json.Unmarshal(body, &held)
+	if len(held) != 0 {
+		t.Fatalf("0にしても残っている: %+v", held)
+	}
+
+	// 明示的な削除。
+	adminPut(t, srv.URL, onePath, admin.ID, map[string]any{"remaining_uses": 6})
+	code, body = adminDelete(t, srv.URL, onePath, admin.ID)
+	if code != http.StatusOK {
+		t.Fatalf("削除 = %d: %s", code, body)
+	}
+	json.Unmarshal(body, &held)
+	if len(held) != 0 {
+		t.Fatalf("削除後も残っている: %+v", held)
+	}
+
+	// 存在しないアイテムは404。
+	if code, _ := adminPut(t, srv.URL, itemsPath+"/999999", admin.ID,
+		map[string]any{"remaining_uses": 1}); code != http.StatusNotFound {
+		t.Errorf("存在しないアイテム = %d, want 404", code)
+	}
+}
+
+// お金の確認。台帳から引くだけなので、実際に動かしたお金が集計と履歴に出ること、
+// 複式の帳尻(zero_sum)が0のままであることを見る。
+func TestAdminMoneyAudit(t *testing.T) {
+	srv, _ := setup(t)
+	admin := register(t, srv.URL, "misskey.example", "root")
+	alice := register(t, srv.URL, "misskey.example", "alice")
+	changeJob(t, srv.URL, alice.ID, "アルバイト", "j-alice")
+	doWork(t, srv.URL, alice.ID, "w-alice")
+
+	type audit struct {
+		PlayerID int64 `json:"player_id"`
+		Cash     int64 `json:"cash"`
+		Total    int64 `json:"total"`
+		ZeroSum  int64 `json:"zero_sum"`
+		Reasons  []struct {
+			Reason string `json:"reason"`
+			Count  int64  `json:"count"`
+			Net    int64  `json:"net"`
+		} `json:"reasons"`
+		System  []struct{ Account string } `json:"system"`
+		History []struct {
+			PlayerID int64  `json:"player_id"`
+			Kind     string `json:"kind"`
+			Delta    int64  `json:"delta"`
+			Reason   string `json:"reason"`
+		} `json:"history"`
+	}
+
+	if code, _ := adminGet(t, srv.URL, "/api/v1/admin/money", alice.ID); code != http.StatusForbidden {
+		t.Errorf("一般ユーザー = %d, want 403", code)
+	}
+
+	// 全ユーザー。2人ぶんの初期資金と給料が入っている。
+	code, body := adminGet(t, srv.URL, "/api/v1/admin/money", admin.ID)
+	if code != http.StatusOK {
+		t.Fatalf("全体 = %d: %s", code, body)
+	}
+	var all audit
+	json.Unmarshal(body, &all)
+	if all.Cash != 1001040 { // 50万×2 + 給料1000 + 労働ボーナス40
+		t.Errorf("全体の現金 = %d, want 1001040", all.Cash)
+	}
+	if all.ZeroSum != 0 {
+		t.Errorf("台帳の帳尻 = %d, want 0", all.ZeroSum)
+	}
+	if len(all.System) == 0 {
+		t.Error("街の勘定が空")
+	}
+	var workNet int64
+	for _, r := range all.Reasons {
+		if r.Reason == "work" {
+			workNet = r.Net
+		}
+	}
+	if workNet != 1040 {
+		t.Errorf("workの差引 = %d, want 1040", workNet)
+	}
+
+	// ユーザーを絞ると、その人の動きだけになる。
+	_, body = adminGet(t, srv.URL,
+		"/api/v1/admin/money?player_id="+strconv.FormatInt(alice.ID, 10), admin.ID)
+	var one audit
+	json.Unmarshal(body, &one)
+	if one.Cash != 501040 {
+		t.Errorf("aliceの現金 = %d, want 501040", one.Cash)
+	}
+	if len(one.System) != 0 {
+		t.Error("個人指定で街の勘定が返っている")
+	}
+	if len(one.History) == 0 {
+		t.Fatal("履歴が空")
+	}
+	for _, h := range one.History {
+		if h.PlayerID != alice.ID {
+			t.Fatalf("他人の動きが混ざっている: %+v", h)
+		}
+	}
+	if one.History[0].Reason != "work" || one.History[0].Delta != 1040 {
+		t.Errorf("直近の動き = %+v, want work +1040", one.History[0])
+	}
+}
+
+// お金の取り消し。台帳は追記専用なので、行を消すのではなく符号を反転した取引を
+// 1本足して残高を戻す。元の記録も取り消しの記録も両方残り、帳尻は0のまま。
+func TestAdminReverseTx(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	admin := register(t, srv.URL, "misskey.example", "root")
+	alice := register(t, srv.URL, "misskey.example", "alice")
+	changeJob(t, srv.URL, alice.ID, "アルバイト", "j-alice")
+	after, _ := doWork(t, srv.URL, alice.ID, "w-alice")
+	if after.Money != 501040 {
+		t.Fatalf("給料受取後 = %d, want 501040", after.Money)
+	}
+
+	// 直前の給料の取引IDを引く。
+	var txID int64
+	if err := pool.QueryRow(ctx,
+		`SELECT id FROM ledger_tx WHERE reason = 'work' ORDER BY id DESC LIMIT 1`).Scan(&txID); err != nil {
+		t.Fatal(err)
+	}
+
+	if code, _ := adminPost(t, srv.URL, "/api/v1/admin/money/reverse", alice.ID,
+		map[string]any{"tx_id": txID}); code != http.StatusForbidden {
+		t.Errorf("一般ユーザー = %d, want 403", code)
+	}
+	if code, _ := adminPost(t, srv.URL, "/api/v1/admin/money/reverse", admin.ID,
+		map[string]any{"tx_id": 999999}); code != http.StatusNotFound {
+		t.Errorf("存在しない取引 = %d, want 404", code)
+	}
+
+	code, body := adminPost(t, srv.URL, "/api/v1/admin/money/reverse", admin.ID,
+		map[string]any{"tx_id": txID})
+	if code != http.StatusOK {
+		t.Fatalf("取り消し = %d: %s", code, body)
+	}
+	// 給料1040が戻り、初期資金だけになる。
+	var money int64
+	if err := pool.QueryRow(ctx,
+		`SELECT COALESCE(SUM(delta), 0) FROM ledger_entry WHERE account = 'player:' || $1::bigint::text`,
+		alice.ID).Scan(&money); err != nil {
+		t.Fatal(err)
+	}
+	if money != 500000 {
+		t.Errorf("取り消し後の所持金 = %d, want 500000", money)
+	}
+	// 元の記録は消えていない。取り消しの記帳が1件増えている。
+	var origCount, revCount int
+	pool.QueryRow(ctx, `SELECT count(*) FROM ledger_tx WHERE id = $1`, txID).Scan(&origCount)
+	pool.QueryRow(ctx, `SELECT count(*) FROM ledger_tx WHERE ref = 'reverse:' || $1::bigint::text`, txID).Scan(&revCount)
+	if origCount != 1 || revCount != 1 {
+		t.Errorf("元=%d件 取消=%d件, want 1件ずつ", origCount, revCount)
+	}
+	// 複式の帳尻は崩れない。
+	if sum, err := ledger.New(pool).AuditZeroSum(ctx); err != nil || sum != 0 {
+		t.Errorf("台帳の帳尻 = %d (err=%v), want 0", sum, err)
+	}
+
+	// 二重の取り消しは弾く。
+	if c, _ := adminPost(t, srv.URL, "/api/v1/admin/money/reverse", admin.ID,
+		map[string]any{"tx_id": txID}); c != http.StatusUnprocessableEntity {
+		t.Errorf("二重取り消し = %d, want 422", c)
+	}
+
+	// 履歴に取消済みの印が付く。
+	_, body = adminGet(t, srv.URL,
+		"/api/v1/admin/money?player_id="+strconv.FormatInt(alice.ID, 10), admin.ID)
+	var audit struct {
+		History []struct {
+			TxID       int64 `json:"tx_id"`
+			Reversed   bool  `json:"reversed"`
+			IsReversal bool  `json:"is_reversal"`
+		} `json:"history"`
+	}
+	json.Unmarshal(body, &audit)
+	var sawOrig, sawRev bool
+	for _, h := range audit.History {
+		if h.TxID == txID && h.Reversed {
+			sawOrig = true
+		}
+		if h.IsReversal {
+			sawRev = true
+		}
+	}
+	if !sawOrig {
+		t.Error("元の取引に取消済みの印が付いていない")
+	}
+	if !sawRev {
+		t.Error("取り消しの記帳が履歴に出ていない")
+	}
+
+	// 使い切った後の取り消しは、持ち金がマイナスになるので止める。
+	var initTx int64
+	if err := pool.QueryRow(ctx,
+		`SELECT t.id FROM ledger_tx t JOIN ledger_entry e ON e.tx_id = t.id
+		 WHERE t.reason = 'initial_grant' AND e.account = 'player:' || $1::bigint::text
+		 LIMIT 1`, alice.ID).Scan(&initTx); err != nil {
+		t.Fatal(err)
+	}
+	// 所持金を1円にしてから初期資金50万の取り消しを試す。
+	adminPut(t, srv.URL, "/api/v1/admin/players/"+strconv.FormatInt(alice.ID, 10), admin.ID,
+		map[string]any{"display_name": "alice", "money": 1, "params": map[string]int{},
+			"job": "アルバイト", "energy": 100, "nou_energy": 100, "satiety": 50,
+			"height_cm": 170, "weight_g": 60000})
+	if c, b := adminPost(t, srv.URL, "/api/v1/admin/money/reverse", admin.ID,
+		map[string]any{"tx_id": initTx}); c != http.StatusUnprocessableEntity {
+		t.Errorf("マイナスになる取り消し = %d, want 422: %s", c, b)
+	}
+}
+
+// 一斉メール。全員の受信箱に1通ずつ届き、送信者には控えが1通だけ残る。
+// 日次の送信上限には掛からない(運営の告知が途中で止まると意味が無いため)。
+func TestAdminBroadcastMail(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	admin := register(t, srv.URL, "misskey.example", "root")
+	alice := register(t, srv.URL, "misskey.example", "alice")
+	bob := register(t, srv.URL, "misskey.example", "bob")
+
+	if code, _ := adminPost(t, srv.URL, "/api/v1/admin/mail/broadcast", alice.ID,
+		map[string]any{"body": "x"}); code != http.StatusForbidden {
+		t.Errorf("一般ユーザー = %d, want 403", code)
+	}
+	if code, _ := adminPost(t, srv.URL, "/api/v1/admin/mail/broadcast", admin.ID,
+		map[string]any{"body": "   "}); code != http.StatusUnprocessableEntity {
+		t.Errorf("空の本文 = %d, want 422", code)
+	}
+
+	code, body := adminPost(t, srv.URL, "/api/v1/admin/mail/broadcast", admin.ID,
+		map[string]any{"body": "メンテのお知らせです。"})
+	if code != http.StatusOK {
+		t.Fatalf("送信 = %d: %s", code, body)
+	}
+	var res struct {
+		Sent int `json:"sent"`
+	}
+	json.Unmarshal(body, &res)
+	if res.Sent != 2 {
+		t.Errorf("送信数 = %d, want 2", res.Sent)
+	}
+
+	count := func(owner int64, dir string) int {
+		t.Helper()
+		var n int
+		if err := pool.QueryRow(ctx,
+			`SELECT count(*) FROM messages WHERE owner_id = $1 AND direction = $2`,
+			owner, dir).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if count(alice.ID, "received") != 1 || count(bob.ID, "received") != 1 {
+		t.Errorf("受信 alice=%d bob=%d, want 1通ずつ", count(alice.ID, "received"), count(bob.ID, "received"))
+	}
+	// 送信者には控えが1通。宛先ぶんの送信済みは作らない。
+	if n := count(admin.ID, "sent"); n != 1 {
+		t.Errorf("送信者の控え = %d通, want 1", n)
+	}
+	if n := count(admin.ID, "received"); n != 0 {
+		t.Errorf("送信者にも届いている = %d通, want 0", n)
+	}
+
+	// ゲストには送らない(1時間で消えるため)。
+	var guestID int64
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO players (instance_host, remote_user_id, display_name, is_guest)
+		 VALUES ('guest.local', 'g1', 'おためし', true) RETURNING id`).Scan(&guestID); err != nil {
+		t.Fatal(err)
+	}
+	_, body = adminPost(t, srv.URL, "/api/v1/admin/mail/broadcast", admin.ID,
+		map[string]any{"body": "2通目"})
+	json.Unmarshal(body, &res)
+	if res.Sent != 2 {
+		t.Errorf("ゲストを含めた送信数 = %d, want 2(ゲストは除く)", res.Sent)
+	}
+	if n := count(guestID, "received"); n != 0 {
+		t.Errorf("ゲストに届いている = %d通, want 0", n)
+	}
+
+	// 日次上限(30通)を超えても送れる。
+	for i := 0; i < mail.DailySendLimit+2; i++ {
+		if c, b := adminPost(t, srv.URL, "/api/v1/admin/mail/broadcast", admin.ID,
+			map[string]any{"body": "連投" + strconv.Itoa(i)}); c != http.StatusOK {
+			t.Fatalf("%d通目で止まった: %d %s", i+3, c, b)
+		}
+	}
+}
+
+// 凍結。ログインできなくなり、開いていたセッションも消える。退会とは別で解除できる。
+func TestAdminSuspendPlayer(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	admin := register(t, srv.URL, "misskey.example", "root")
+	alice := register(t, srv.URL, "misskey.example", "alice")
+	path := "/api/v1/admin/players/" + strconv.FormatInt(alice.ID, 10) + "/suspend"
+
+	if code, _ := adminPost(t, srv.URL, path, alice.ID,
+		map[string]any{"days": 3}); code != http.StatusForbidden {
+		t.Errorf("一般ユーザー = %d, want 403", code)
+	}
+	// 管理者は凍結できない(解除する手段ごと失うため)。
+	adminPath := "/api/v1/admin/players/" + strconv.FormatInt(admin.ID, 10) + "/suspend"
+	if code, _ := adminPost(t, srv.URL, adminPath, admin.ID,
+		map[string]any{"days": 1}); code != http.StatusUnprocessableEntity {
+		t.Errorf("管理者の凍結 = %d, want 422", code)
+	}
+
+	// セッションが消えることを見るため、先に1本作っておく。
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO sessions (token_hash, player_id, expires_at)
+		 VALUES (decode('00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff','hex'), $1, now() + interval '1 day')`,
+		alice.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	code, body := adminPost(t, srv.URL, path, admin.ID,
+		map[string]any{"days": 3, "reason": "荒らし行為のため"})
+	if code != http.StatusOK {
+		t.Fatalf("凍結 = %d: %s", code, body)
+	}
+	var sus struct {
+		Active  bool    `json:"active"`
+		Forever bool    `json:"forever"`
+		Until   *string `json:"until"`
+		Reason  string  `json:"reason"`
+	}
+	json.Unmarshal(body, &sus)
+	if !sus.Active || sus.Forever || sus.Until == nil || sus.Reason != "荒らし行為のため" {
+		t.Fatalf("凍結の状態 = %+v", sus)
+	}
+	var n int
+	pool.QueryRow(ctx, `SELECT count(*) FROM sessions WHERE player_id = $1`, alice.ID).Scan(&n)
+	if n != 0 {
+		t.Errorf("セッションが残っている: %d本", n)
+	}
+	// 一覧に目印が出る。
+	_, body = adminGet(t, srv.URL, "/api/v1/admin/players", admin.ID)
+	var list []struct {
+		ID        int64  `json:"id"`
+		Suspended bool   `json:"suspended"`
+		Reason    string `json:"suspend_reason"`
+	}
+	json.Unmarshal(body, &list)
+	var found bool
+	for _, u := range list {
+		if u.ID == alice.ID && u.Suspended && u.Reason == "荒らし行為のため" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("一覧に凍結の目印が出ていない")
+	}
+
+	// 無期限。until は返さない('infinity'は日付として扱えないため)。
+	_, body = adminPost(t, srv.URL, path, admin.ID, map[string]any{"days": 0, "reason": "無期限"})
+	json.Unmarshal(body, &sus)
+	if !sus.Active || !sus.Forever || sus.Until != nil {
+		t.Fatalf("無期限の状態 = %+v", sus)
+	}
+
+	// 解除。
+	code, body = adminDelete(t, srv.URL, path, admin.ID)
+	if code != http.StatusOK {
+		t.Fatalf("解除 = %d: %s", code, body)
+	}
+	json.Unmarshal(body, &sus)
+	if sus.Active || sus.Reason != "" {
+		t.Errorf("解除後の状態 = %+v", sus)
+	}
+}
+
+// 目安箱の新着は運営に知らせる。返信を投稿者に知らせているのと同じ仕組みで、
+// 向きが逆になるだけ。運営どうしのやり取りでは飛ばさない。
+func TestFeedbackNotifiesAdmins(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	admin := register(t, srv.URL, "misskey.example", "root")
+	alice := register(t, srv.URL, "misskey.example", "alice")
+
+	inbox := func(id int64) []string {
+		t.Helper()
+		rows, err := pool.Query(ctx,
+			`SELECT body FROM messages WHERE owner_id = $1 AND direction = 'received' ORDER BY id`, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var out []string
+		for rows.Next() {
+			var b string
+			rows.Scan(&b)
+			out = append(out, b)
+		}
+		return out
+	}
+	post := func(actingID int64, kind, title, body string) int64 {
+		t.Helper()
+		code, raw := adminPost(t, srv.URL,
+			"/api/v1/players/"+strconv.FormatInt(actingID, 10)+"/feedback", actingID,
+			map[string]any{"kind": kind, "title": title, "body": body})
+		if code != http.StatusOK {
+			t.Fatalf("投稿 = %d: %s", code, raw)
+		}
+		var d struct {
+			Post struct {
+				ID int64 `json:"id"`
+			} `json:"post"`
+		}
+		json.Unmarshal(raw, &d)
+		return d.Post.ID
+	}
+
+	// 住民の投稿 → 管理者の受信箱へ。
+	postID := post(alice.ID, "bug", "画面が崩れる", "スマホで見ると表が溢れます")
+	got := inbox(admin.ID)
+	if len(got) != 1 || !strings.Contains(got[0], "画面が崩れる") {
+		t.Fatalf("管理者の受信箱 = %v, want 新着の知らせ1通", got)
+	}
+	if !strings.Contains(got[0], "不具合") {
+		t.Errorf("種別が入っていない: %q", got[0])
+	}
+	// 送った本人(住民)の送信済みは増えない(知らせは本人が書いたものではない)。
+	var sent int
+	pool.QueryRow(ctx,
+		`SELECT count(*) FROM messages WHERE owner_id = $1 AND direction = 'sent'`, alice.ID).Scan(&sent)
+	if sent != 0 {
+		t.Errorf("投稿者の送信済み = %d通, want 0", sent)
+	}
+
+	// 住民の返信 → 管理者へ。
+	cpath := "/api/v1/players/" + strconv.FormatInt(alice.ID, 10) + "/feedback/" +
+		strconv.FormatInt(postID, 10) + "/comments"
+	if code, raw := adminPost(t, srv.URL, cpath, alice.ID,
+		map[string]any{"body": "追記です"}); code != http.StatusOK {
+		t.Fatalf("返信 = %d: %s", code, raw)
+	}
+	if got := inbox(admin.ID); len(got) != 2 {
+		t.Fatalf("返信後の管理者の受信箱 = %d通, want 2", len(got))
+	}
+
+	// 管理者の返信では管理者に飛ばさない(投稿者には従来どおり届く)。
+	apath := "/api/v1/players/" + strconv.FormatInt(admin.ID, 10) + "/feedback/" +
+		strconv.FormatInt(postID, 10) + "/comments"
+	if code, raw := adminPost(t, srv.URL, apath, admin.ID,
+		map[string]any{"body": "確認します"}); code != http.StatusOK {
+		t.Fatalf("運営の返信 = %d: %s", code, raw)
+	}
+	if got := inbox(admin.ID); len(got) != 2 {
+		t.Errorf("運営の返信で管理者に飛んだ: %d通, want 2のまま", len(got))
+	}
+	if got := inbox(alice.ID); len(got) != 1 || !strings.Contains(got[0], "返信がつきました") {
+		t.Errorf("投稿者への返信通知 = %v", got)
+	}
+
+	// 管理者自身の投稿では自分に送らない。
+	post(admin.ID, "request", "運営メモ", "あとでやる")
+	if got := inbox(admin.ID); len(got) != 2 {
+		t.Errorf("自分の投稿で自分に届いた: %d通, want 2のまま", len(got))
+	}
+}
+
+// 書き込みの管理。出どころを横断して1本の時系列で読め、そこから消せる。
+func TestAdminPosts(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	admin := register(t, srv.URL, "misskey.example", "root")
+	alice := register(t, srv.URL, "misskey.example", "alice")
+	bob := register(t, srv.URL, "misskey.example", "bob")
+
+	// あいさつ・目安箱・家の掲示板をそれぞれ1件ずつ作る。
+	var greetID int64
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO greetings (user_id, user_name, category, body)
+		 VALUES ($1, 'alice', '雑談', 'あらしのかきこみ') RETURNING id`, alice.ID).Scan(&greetID); err != nil {
+		t.Fatal(err)
+	}
+	var fbID int64
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO feedback_posts (author_id, author_name, kind, title, body)
+		 VALUES ($1, 'bob', 'bug', 'ふぐあい', 'こわれています') RETURNING id`, bob.ID).Scan(&fbID); err != nil {
+		t.Fatal(err)
+	}
+	// 掲示板は家に紐づくので、先に家を1軒建てておく。
+	var houseID, bbsID int64
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO player_houses (owner_id, town, grid_row, grid_col, exterior)
+		 VALUES ($1, 0, 1, 1, 'house1') RETURNING id`, alice.ID).Scan(&houseID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO house_bbs (house_id, kind, author_id, author_name, title, body)
+		 VALUES ($1, 'bbs', $2, 'alice', 'だい', 'ほんぶん') RETURNING id`,
+		houseID, alice.ID).Scan(&bbsID); err != nil {
+		t.Fatal(err)
+	}
+
+	if code, _ := adminGet(t, srv.URL, "/api/v1/admin/posts", alice.ID); code != http.StatusForbidden {
+		t.Errorf("一般ユーザー = %d, want 403", code)
+	}
+	if code, _ := adminGet(t, srv.URL, "/api/v1/admin/posts?source=nope", admin.ID); code != http.StatusBadRequest {
+		t.Errorf("知らない出どころ = %d, want 400", code)
+	}
+
+	list := func(query string) []struct {
+		Source string `json:"source"`
+		ID     int64  `json:"id"`
+		Author string `json:"author"`
+		Title  string `json:"title"`
+		Body   string `json:"body"`
+		Where  string `json:"where"`
+	} {
+		t.Helper()
+		code, raw := adminGet(t, srv.URL, "/api/v1/admin/posts"+query, admin.ID)
+		if code != http.StatusOK {
+			t.Fatalf("一覧%s = %d: %s", query, code, raw)
+		}
+		var out []struct {
+			Source string `json:"source"`
+			ID     int64  `json:"id"`
+			Author string `json:"author"`
+			Title  string `json:"title"`
+			Body   string `json:"body"`
+			Where  string `json:"where"`
+		}
+		json.Unmarshal(raw, &out)
+		return out
+	}
+
+	// 全部: 3件が出どころ込みで返る。
+	all := list("")
+	if len(all) != 3 {
+		t.Fatalf("全件 = %d件, want 3: %+v", len(all), all)
+	}
+	seen := map[string]bool{}
+	for _, p := range all {
+		seen[p.Source] = true
+	}
+	if !seen["greeting"] || !seen["feedback"] || !seen["house_bbs"] {
+		t.Errorf("出どころが揃っていない: %v", seen)
+	}
+
+	// 出どころで絞る。
+	if g := list("?source=greeting"); len(g) != 1 || g[0].Body != "あらしのかきこみ" {
+		t.Errorf("あいさつだけ = %+v", g)
+	}
+	// 家の掲示板は置き場所が付く。
+	if b := list("?source=house_bbs"); len(b) != 1 ||
+		b[0].Where != "家#"+strconv.FormatInt(houseID, 10) || b[0].Title != "だい" {
+		t.Errorf("家の掲示板 = %+v", b)
+	}
+	// 投稿者で絞る(荒らし対応の要点)。
+	if a := list("?player_id=" + strconv.FormatInt(alice.ID, 10)); len(a) != 2 {
+		t.Errorf("aliceの書き込み = %d件, want 2", len(a))
+	}
+
+	// 消す。
+	if code, raw := adminDelete(t, srv.URL,
+		"/api/v1/admin/posts/greeting/"+strconv.FormatInt(greetID, 10), admin.ID); code != http.StatusOK {
+		t.Fatalf("削除 = %d: %s", code, raw)
+	}
+	if len(list("")) != 2 {
+		t.Error("削除が効いていない")
+	}
+	// 二度押しても落ちない。
+	if code, _ := adminDelete(t, srv.URL,
+		"/api/v1/admin/posts/greeting/"+strconv.FormatInt(greetID, 10), admin.ID); code != http.StatusOK {
+		t.Errorf("二度目の削除 = %d, want 200", code)
+	}
+	// 知らない出どころは消せない。
+	if code, _ := adminDelete(t, srv.URL, "/api/v1/admin/posts/nope/1", admin.ID); code != http.StatusBadRequest {
+		t.Errorf("知らない出どころの削除 = %d, want 400", code)
+	}
+}
+
+// 行動ログ。「この人がいつ何をしたか」を管理画面から追えること。
+func TestAdminPlayerLog(t *testing.T) {
+	srv, _ := setup(t)
+	admin := register(t, srv.URL, "misskey.example", "root")
+	alice := register(t, srv.URL, "misskey.example", "alice")
+	changeJob(t, srv.URL, alice.ID, "アルバイト", "j-alice")
+	doWork(t, srv.URL, alice.ID, "w-alice")
+
+	path := "/api/v1/admin/players/" + strconv.FormatInt(alice.ID, 10) + "/log"
+	if code, _ := adminGet(t, srv.URL, path, alice.ID); code != http.StatusForbidden {
+		t.Errorf("一般ユーザー = %d, want 403", code)
+	}
+
+	code, body := adminGet(t, srv.URL, path, admin.ID)
+	if code != http.StatusOK {
+		t.Fatalf("ログ = %d: %s", code, body)
+	}
+	var log struct {
+		Actions []struct {
+			Type string `json:"type"`
+		} `json:"actions"`
+		Status []struct {
+			Field string `json:"field"`
+		} `json:"status"`
+	}
+	json.Unmarshal(body, &log)
+	// 就職と就労が新しい順に並ぶ。
+	if len(log.Actions) < 2 {
+		t.Fatalf("操作の記録 = %d件, want 2件以上: %+v", len(log.Actions), log.Actions)
+	}
+	if log.Actions[0].Type != "work" {
+		t.Errorf("直近の操作 = %q, want work", log.Actions[0].Type)
+	}
+	var sawJob bool
+	for _, a := range log.Actions {
+		if a.Type == "job_change" || a.Type == "job" {
+			sawJob = true
+		}
+	}
+	if !sawJob {
+		t.Errorf("就職の記録が無い: %+v", log.Actions)
+	}
+
+	// 他人のぶんが混ざらない。
+	_, body = adminGet(t, srv.URL,
+		"/api/v1/admin/players/"+strconv.FormatInt(admin.ID, 10)+"/log", admin.ID)
+	var mine struct {
+		Actions []struct {
+			Type string `json:"type"`
+		} `json:"actions"`
+	}
+	json.Unmarshal(body, &mine)
+	if len(mine.Actions) != 0 {
+		t.Errorf("何もしていない管理者に記録がある: %+v", mine.Actions)
+	}
+}
+
+// ダッシュボード。「動いているか」が1画面で分かること。
+func TestAdminDashboard(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	admin := register(t, srv.URL, "misskey.example", "root")
+	alice := register(t, srv.URL, "misskey.example", "alice")
+
+	if code, _ := adminGet(t, srv.URL, "/api/v1/admin/dashboard", alice.ID); code != http.StatusForbidden {
+		t.Errorf("一般ユーザー = %d, want 403", code)
+	}
+
+	type dash struct {
+		Host struct {
+			CPUs       int   `json:"cpus"`
+			MemTotalKB int64 `json:"mem_total_kb"`
+			DiskTotalB int64 `json:"disk_total_b"`
+			Proc       struct {
+				RSSBytes   int64   `json:"rss_bytes"`
+				VMSBytes   int64   `json:"vms_bytes"`
+				CPUSeconds float64 `json:"cpu_seconds"`
+				CPUPercent float64 `json:"cpu_percent"`
+				Threads    int     `json:"threads"`
+				OpenFDs    int     `json:"open_fds"`
+				Goroutines int     `json:"goroutines"`
+				HeapAllocB int64   `json:"heap_alloc_b"`
+				GoVersion  string  `json:"go_version"`
+			} `json:"proc"`
+		} `json:"host"`
+		DB struct {
+			SizeB       int64 `json:"size_b"`
+			Connections int   `json:"connections"`
+			MaxConns    int   `json:"max_conns"`
+			Tables      []struct {
+				Table string `json:"table"`
+				Bytes int64  `json:"bytes"`
+			} `json:"tables"`
+		} `json:"db"`
+		Worker struct {
+			Today   string `json:"today"`
+			DaySeen bool   `json:"day_seen"`
+			Recent  []struct {
+				JobType string `json:"job_type"`
+				JobDate string `json:"job_date"`
+			} `json:"recent"`
+		} `json:"worker"`
+		Players struct {
+			Total     int `json:"total"`
+			Guests    int `json:"guests"`
+			Suspended int `json:"suspended"`
+		} `json:"players"`
+	}
+
+	get := func() dash {
+		t.Helper()
+		code, raw := adminGet(t, srv.URL, "/api/v1/admin/dashboard", admin.ID)
+		if code != http.StatusOK {
+			t.Fatalf("ダッシュボード = %d: %s", code, raw)
+		}
+		var d dash
+		if err := json.Unmarshal(raw, &d); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return d
+	}
+
+	d := get()
+	// ホスト。/proc から読めるものは0にならない。
+	if d.Host.CPUs < 1 || d.Host.MemTotalKB <= 0 || d.Host.DiskTotalB <= 0 {
+		t.Errorf("ホストの値が取れていない: %+v", d.Host)
+	}
+	// プロセス自身。RSSは必ず正で、仮想メモリはそれ以上。スレッドとFDも1以上。
+	p := d.Host.Proc
+	if p.RSSBytes <= 0 || p.VMSBytes < p.RSSBytes {
+		t.Errorf("プロセスのメモリ = RSS %d / VMS %d", p.RSSBytes, p.VMSBytes)
+	}
+	if p.Threads < 1 || p.OpenFDs < 1 || p.Goroutines < 1 || p.HeapAllocB <= 0 {
+		t.Errorf("プロセスの値が取れていない: %+v", p)
+	}
+	// CPUは累計が0以上、使用率は0〜(コア数×100)%の範囲に収まる。
+	if p.CPUSeconds <= 0 {
+		t.Errorf("累計CPU時間 = %v, want 正の値", p.CPUSeconds)
+	}
+	if p.CPUPercent < 0 || p.CPUPercent > float64(d.Host.CPUs)*100 {
+		t.Errorf("CPU使用率 = %v%%, コア数=%d", p.CPUPercent, d.Host.CPUs)
+	}
+	if p.GoVersion == "" {
+		t.Error("Goのバージョンが空")
+	}
+	// DB。
+	if d.DB.SizeB <= 0 || d.DB.Connections < 1 || d.DB.MaxConns < 1 {
+		t.Errorf("DBの値が取れていない: %+v", d.DB)
+	}
+	if len(d.DB.Tables) == 0 {
+		t.Error("表の一覧が空")
+	}
+	// 住民の内訳。
+	if d.Players.Total != 2 || d.Players.Guests != 0 || d.Players.Suspended != 0 {
+		t.Errorf("住民の内訳 = %+v, want 住民2/ゲスト0/凍結0", d.Players)
+	}
+	// 日次処理は一度も走っていない。
+	if d.Worker.DaySeen || len(d.Worker.Recent) != 0 {
+		t.Errorf("走っていないのに実行済みに見えている: %+v", d.Worker)
+	}
+	if d.Worker.Today == "" {
+		t.Error("街の今日が空")
+	}
+
+	// 今日ぶんを記録すると「実行済み」に変わる。
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO worker_jobs (job_date, job_type) VALUES ($1::date, 'daily')`,
+		d.Worker.Today); err != nil {
+		t.Fatal(err)
+	}
+	// 凍結を1件作ると内訳に出る。
+	if err := testPlayerSvc.AdminSuspend(ctx, alice.ID, 0, "検証"); err != nil {
+		t.Fatal(err)
+	}
+	d = get()
+	if !d.Worker.DaySeen {
+		t.Error("今日ぶんを記録しても実行済みにならない")
+	}
+	if d.Players.Suspended != 1 {
+		t.Errorf("凍結中 = %d人, want 1", d.Players.Suspended)
+	}
 }
 
 // TestTownMap covers the town map API: GET is public, PUT is admin-only, updates
@@ -4754,6 +5653,134 @@ func TestUseItemRequiresEnoughPower(t *testing.T) {
 	}
 }
 
+type useAllResult struct {
+	Used    []string `json:"used"`
+	Skipped []struct {
+		Name   string `json:"name"`
+		Reason string `json:"reason"`
+	} `json:"skipped"`
+}
+
+func useAllItems(t *testing.T, base string, id int64, idemKey string) (playerResp, useAllResult, int) {
+	t.Helper()
+	body, _ := json.Marshal(map[string]string{"idempotency_key": idemKey})
+	resp, err := http.Post(base+"/api/v1/players/"+strconv.FormatInt(id, 10)+"/use/all",
+		"application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("use all post: %v", err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		playerResp
+		Result useAllResult `json:"use_all_result"`
+	}
+	if resp.StatusCode == http.StatusOK {
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			t.Fatalf("use all decode: %v", err)
+		}
+	}
+	return out.playerResp, out.Result, resp.StatusCode
+}
+
+// 一括使用。満腹度が回復する品は使わず、クールタイム中の品は黙って飛ばし、
+// パワー不足の品だけ理由を添えて返す。
+func TestUseAllItems(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	alice := register(t, srv.URL, "misskey.example", "alice")
+
+	seedID := func(name string) int64 {
+		t.Helper()
+		var id int64
+		if err := pool.QueryRow(ctx, `SELECT id FROM content_items WHERE name = $1`, name).Scan(&id); err != nil {
+			t.Fatalf("seed lookup %s: %v", name, err)
+		}
+		return id
+	}
+	drink := seedID("栄養ドリンク") // ドリンク・使用間隔30分・energy+3
+	book := seedID("参考書")     // 書籍・使用間隔60分・nou_energy+3
+	bread := seedID("頭脳パン")   // 食料品(満腹度が回復するので対象外)
+
+	// 身体パワーを5消費する品。一括使用ではパワー不足で飛ばされることを見る。
+	var swim int64
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO content_items (name, category, price, stock_master, durability, effect, enabled)
+		 VALUES ('検証用スイミング', '娯楽', 100, NULL, 1,
+		         '[{"op":"add_param","param":"energy","amount":-5},
+		           {"op":"add_param","param":"tairyoku","amount":3}]'::jsonb, true)
+		 RETURNING id`).Scan(&swim); err != nil {
+		t.Fatal(err)
+	}
+	for i, id := range []int64{drink, book, bread, swim} {
+		if _, c := itemAction(t, srv.URL, "/buy", alice.ID, id, "ua-buy-"+strconv.Itoa(i)); c != http.StatusOK {
+			t.Fatalf("buy %d: status %d", id, c)
+		}
+	}
+	// 身体パワーを1にする。ドリンクで+3されて4になるが、スイミングの消費5には
+	// 届かない(品ごとに状態を取り直していないと、この判定がずれる)。
+	if _, err := pool.Exec(ctx,
+		`UPDATE player_status SET energy = 1 WHERE player_id = $1`, alice.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	p, res, code := useAllItems(t, srv.URL, alice.ID, "ua-1")
+	if code != http.StatusOK {
+		t.Fatalf("use all status = %d, want 200", code)
+	}
+	if got := strings.Join(res.Used, ","); got != "栄養ドリンク,参考書" {
+		t.Errorf("used = %q, want \"栄養ドリンク,参考書\"", got)
+	}
+	if len(res.Skipped) != 1 || res.Skipped[0].Name != "検証用スイミング" {
+		t.Fatalf("skipped = %+v, want 検証用スイミングのみ", res.Skipped)
+	}
+	if !strings.Contains(res.Skipped[0].Reason, "身体パワー") {
+		t.Errorf("skipped reason = %q, want 身体パワー不足の旨", res.Skipped[0].Reason)
+	}
+	if p.itemQty(bread) != 1 {
+		t.Errorf("食料品が使われている: 頭脳パン qty = %d, want 1", p.itemQty(bread))
+	}
+	if p.itemQty(swim) != 1 {
+		t.Errorf("パワー不足の品が消費されている: qty = %d, want 1", p.itemQty(swim))
+	}
+	if p.itemQty(drink) != 0 {
+		t.Errorf("使い切った品が残っている: 栄養ドリンク qty = %d, want 0", p.itemQty(drink))
+	}
+	if p.Status.Energy != 4 {
+		t.Errorf("energy = %d, want 4 (1 + ドリンク3)", p.Status.Energy)
+	}
+
+	// もう一度。参考書はクールタイム中なので理由には出さず黙って飛ばす。残るのは
+	// パワー不足のスイミングだけ。
+	_, res2, code2 := useAllItems(t, srv.URL, alice.ID, "ua-2")
+	if code2 != http.StatusOK {
+		t.Fatalf("2回目 status = %d, want 200", code2)
+	}
+	if len(res2.Used) != 0 {
+		t.Errorf("2回目に使えた品がある: %v", res2.Used)
+	}
+	if len(res2.Skipped) != 1 || res2.Skipped[0].Name != "検証用スイミング" {
+		t.Errorf("クールタイム中の品が理由に出ている: %+v", res2.Skipped)
+	}
+
+	// パワーが足りれば使える。
+	if _, err := pool.Exec(ctx,
+		`UPDATE player_status SET energy = 5 WHERE player_id = $1`, alice.ID); err != nil {
+		t.Fatal(err)
+	}
+	p3, res3, _ := useAllItems(t, srv.URL, alice.ID, "ua-3")
+	if len(res3.Used) != 1 || res3.Used[0] != "検証用スイミング" {
+		t.Errorf("used = %v, want [検証用スイミング]", res3.Used)
+	}
+	if p3.Status.Energy != 0 {
+		t.Errorf("energy = %d, want 0", p3.Status.Energy)
+	}
+
+	// 使えるものが何も無ければ422で知らせる(持ち物は食料品だけになっている)。
+	if _, _, c := useAllItems(t, srv.URL, alice.ID, "ua-4"); c != http.StatusUnprocessableEntity {
+		t.Errorf("使える品が無いときの status = %d, want 422", c)
+	}
+}
+
 // 退会は自分のデータを消すが、台帳の「世界のお金の合計」は動かさない
 // (行だけ消すと合計が合わなくなるため、残高は街へ返してから消す)。
 func TestRetire(t *testing.T) {
@@ -5738,5 +6765,126 @@ func TestStreetFight(t *testing.T) {
 	}
 	if after := readMoney(); after != before+500 {
 		t.Errorf("所持金 = %d, want %d", after, before+500)
+	}
+}
+
+// TestFeedback covers 目安箱: 投稿・賛同(1人1票)・コメント・状態変更と、
+// 誰が何を消せるか。
+func TestFeedback(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	admin := register(t, srv.URL, "misskey.example", "admin0") // 1人目=admin
+	alice := register(t, srv.URL, "misskey.example", "alice")
+	bob := register(t, srv.URL, "misskey.example", "bob")
+
+	post := func(actingID int64, path string, body any) (int, []byte) {
+		t.Helper()
+		return adminPost(t, srv.URL, path, actingID, body)
+	}
+
+	// aliceが不具合を投げる。
+	code, body := post(alice.ID, "/api/v1/players/"+strconv.FormatInt(alice.ID, 10)+"/feedback",
+		map[string]any{"kind": "bug", "title": "給料の表がはみ出す", "body": "職業安定所で右端が切れます"})
+	if code != http.StatusOK {
+		t.Fatalf("create: status=%d body=%s", code, body)
+	}
+	var created struct {
+		Post struct {
+			ID     int64  `json:"id"`
+			Kind   string `json:"kind"`
+			Status string `json:"status"`
+			Votes  int    `json:"votes"`
+		} `json:"post"`
+	}
+	if err := json.Unmarshal(body, &created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	pid := created.Post.ID
+	if created.Post.Status != "open" {
+		t.Errorf("初期状態 = %q, want open", created.Post.Status)
+	}
+
+	// 連投は弾く(同じ人が続けて投げると一覧が埋まる)。
+	code, _ = post(alice.ID, "/api/v1/players/"+strconv.FormatInt(alice.ID, 10)+"/feedback",
+		map[string]any{"kind": "request", "title": "もうひとつ", "body": "すぐ次を投げる"})
+	if code != http.StatusUnprocessableEntity {
+		t.Errorf("連投の応答 = %d, want 422", code)
+	}
+
+	// bobが賛同 → 1票。もう一度押すと取り消しで0票に戻る。
+	votePath := "/api/v1/players/" + strconv.FormatInt(bob.ID, 10) + "/feedback/" +
+		strconv.FormatInt(pid, 10) + "/vote"
+	if code, body = post(bob.ID, votePath, nil); code != http.StatusOK {
+		t.Fatalf("vote: status=%d body=%s", code, body)
+	}
+	var voted struct {
+		Post struct {
+			Votes int  `json:"votes"`
+			Voted bool `json:"voted"`
+		} `json:"post"`
+	}
+	_ = json.Unmarshal(body, &voted)
+	if voted.Post.Votes != 1 || !voted.Post.Voted {
+		t.Errorf("賛同後 = %d票 voted=%v, want 1票 voted=true", voted.Post.Votes, voted.Post.Voted)
+	}
+	if code, body = post(bob.ID, votePath, nil); code != http.StatusOK {
+		t.Fatalf("unvote: status=%d", code)
+	}
+	_ = json.Unmarshal(body, &voted)
+	if voted.Post.Votes != 0 || voted.Post.Voted {
+		t.Errorf("取り消し後 = %d票 voted=%v, want 0票 voted=false", voted.Post.Votes, voted.Post.Voted)
+	}
+
+	// 管理者の返信は運営印が付き、投稿者にはメールが届く。
+	code, body = post(admin.ID, "/api/v1/players/"+strconv.FormatInt(admin.ID, 10)+"/feedback/"+
+		strconv.FormatInt(pid, 10)+"/comments", map[string]any{"body": "直しました"})
+	if code != http.StatusOK {
+		t.Fatalf("comment: status=%d body=%s", code, body)
+	}
+	var withComment struct {
+		Comments []struct {
+			ID      int64  `json:"id"`
+			IsStaff bool   `json:"is_staff"`
+			Body    string `json:"body"`
+		} `json:"comments"`
+	}
+	_ = json.Unmarshal(body, &withComment)
+	if len(withComment.Comments) != 1 || !withComment.Comments[0].IsStaff {
+		t.Fatalf("コメント = %+v, want 運営印つき1件", withComment.Comments)
+	}
+	var mails int
+	if err := pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM messages WHERE owner_id = $1 AND direction = 'received'`, alice.ID).Scan(&mails); err != nil {
+		t.Fatalf("count mail: %v", err)
+	}
+	if mails != 1 {
+		t.Errorf("投稿者へのメール = %d通, want 1通", mails)
+	}
+
+	// 状態を動かせるのは管理者だけ。
+	statusPath := "/api/v1/admin/feedback/" + strconv.FormatInt(pid, 10) + "/status"
+	if code, _ = adminPut(t, srv.URL, statusPath, alice.ID, map[string]any{"status": "done"}); code != http.StatusForbidden {
+		t.Errorf("住民の状態変更 = %d, want 403", code)
+	}
+	if code, body = adminPut(t, srv.URL, statusPath, admin.ID, map[string]any{"status": "done"}); code != http.StatusOK {
+		t.Fatalf("状態変更: status=%d body=%s", code, body)
+	}
+
+	// 他人の投稿は消せない。本人なら消せる。
+	delPath := func(actor int64) string {
+		return "/api/v1/players/" + strconv.FormatInt(actor, 10) + "/feedback/" + strconv.FormatInt(pid, 10)
+	}
+	if code, _ = adminDelete(t, srv.URL, delPath(bob.ID), bob.ID); code != http.StatusForbidden {
+		t.Errorf("他人の投稿の削除 = %d, want 403", code)
+	}
+	if code, _ = adminDelete(t, srv.URL, delPath(alice.ID), alice.ID); code != http.StatusOK {
+		t.Errorf("本人の削除 = %d, want 200", code)
+	}
+	var left int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM feedback_posts`).Scan(&left); err != nil {
+		t.Fatalf("count posts: %v", err)
+	}
+	if left != 0 {
+		t.Errorf("残った投稿 = %d, want 0", left)
 	}
 }

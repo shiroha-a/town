@@ -16,8 +16,18 @@ export interface ItemStack {
   special: string; // 特殊効果の説明(体重/身長/病気。無ければ空)
   enables_credit: boolean; // 所持しているとクレジット払いができる(カード類)
   usable: boolean; // 「使う」ができるか(建築許可証・乗り物などは持つだけの品)
+  fills_satiety: boolean; // 使うと満腹度が回復する(一括使用の対象外)
   // クールタイム中の再使用可能時刻(ISO8601)。使用可能ならnull。
   next_available_at: string | null;
+}
+
+/** 一括使用の結果。使えた品と、使えず飛ばした品の理由。 */
+export interface UseAllResult {
+  used: string[];
+  skipped: { name: string; reason: string }[];
+}
+export interface UseAllResp extends Player {
+  use_all_result: UseAllResult;
 }
 
 export interface Params {
@@ -496,6 +506,66 @@ export interface AdminItem {
   build_span: number; // 建築許可証(0=通常 / 2=2マスの家)
 }
 
+/** 管理画面で見る、あるユーザーの持ち物1種。 */
+export interface AdminHeldItem {
+  item_id: number;
+  name: string;
+  category: string;
+  quantity: number;
+  remaining_uses: number; // 実体。quantityはこれから導かれる
+  sets: number;
+  durability: number; // 1セットあたりの耐久
+  durability_unit: string; // 'use'(回) or 'day'(日)
+  use_interval_min: number;
+  usable: boolean;
+  next_available_at: string | null;
+}
+
+/** 何がどれだけ世に出回っているか(全ユーザーの合計)。 */
+export interface AdminItemTotal {
+  item_id: number;
+  name: string;
+  category: string;
+  holders: number;
+  sets: number;
+  remaining_uses: number;
+}
+
+/** お金の動き1件(台帳のentry1行)。 */
+export interface MoneyMovement {
+  tx_id: number;
+  player_id: number;
+  kind: string; // cash / savings / super_savings / system
+  delta: number;
+  reason: string;
+  created_at: string;
+  reversed: boolean; // この取引は取り消し済み
+  is_reversal: boolean; // この行自体が取り消しの記帳
+}
+
+/** 理由ごとの集計。inは入った額、outは出た額(正の数)。 */
+export interface MoneyReason {
+  reason: string;
+  count: number;
+  in: number;
+  out: number;
+  net: number;
+}
+
+/** お金の確認。player_id=0なら全ユーザーぶん。 */
+export interface MoneyAudit {
+  player_id: number;
+  cash: number;
+  savings: number;
+  super_savings: number;
+  loan_remain: number;
+  total: number; // 現金+貯金+定期-ローン
+  zero_sum: number; // 台帳の全entry合計。複式なので常に0
+  reasons: MoneyReason[];
+  system: { account: string; balance: number }[];
+  history: MoneyMovement[];
+}
+
 /** アイテムの作成・更新で送る項目(content_itemsの編集できる列)。 */
 export type AdminItemInput = Omit<AdminItem, 'id'>;
 export interface AdminJob {
@@ -547,6 +617,98 @@ export interface AdminPlayerSummary {
   acct: string;
   instance_host: string;
   remote_user_id: string;
+  is_guest: boolean;
+  /** 凍結(ログイン不可)。suspended_untilは無期限のときnull。 */
+  suspended: boolean;
+  suspend_forever: boolean;
+  suspended_until: string | null;
+  suspend_reason: string;
+}
+
+/** 住民の書き込み1件(出どころを問わない共通の形)。 */
+export interface ModPost {
+  source: string; // greeting / house_bbs / company_bbs / feedback / feedback_c
+  id: number;
+  player_id: number | null; // 退会で消えるとnull
+  author: string;
+  title: string; // 無い板では空
+  body: string;
+  where: string; // 「家#12」のような置き場所
+  created_at: string;
+}
+
+/** ダッシュボード(システム・DB・ワーカー・住民)。 */
+export interface Dashboard {
+  host: {
+    load1: number;
+    load5: number;
+    load15: number;
+    cpus: number;
+    mem_total_kb: number;
+    mem_free_kb: number;
+    swap_total_kb: number;
+    swap_free_kb: number;
+    disk_total_b: number;
+    disk_free_b: number;
+    /** このプロセス自身の使用量。 */
+    proc: {
+      rss_bytes: number;
+      vms_bytes: number;
+      cpu_seconds: number;
+      cpu_percent: number; // 1コアを使い切って100%
+      threads: number;
+      open_fds: number;
+      goroutines: number;
+      heap_alloc_b: number;
+      sys_b: number;
+      uptime_sec: number;
+      go_version: string;
+    };
+  };
+  db: {
+    size_b: number;
+    connections: number;
+    max_conns: number;
+    tables: { table: string; rows: number; bytes: number }[];
+  };
+  worker: {
+    today: string;
+    day_seen: boolean;
+    recent: { job_type: string; job_date: string; ran_at: string }[];
+  };
+  players: { total: number; guests: number; suspended: number; active_24h: number };
+  server_now: string;
+}
+
+/** 住民の行動ログ1件。 */
+export interface ActionLogEntry {
+  id: number;
+  type: string;
+  detail: unknown;
+  created_at: string;
+}
+
+/** ステータスが動いた履歴1件。 */
+export interface StatusHistoryEntry {
+  id: number;
+  field: string;
+  old_value: string | null;
+  new_value: string | null;
+  reason: string | null;
+  created_at: string;
+}
+
+export interface PlayerLog {
+  actions: ActionLogEntry[];
+  status: StatusHistoryEntry[];
+}
+
+/** 凍結の状態。 */
+export interface Suspension {
+  active: boolean;
+  forever: boolean;
+  until: string | null;
+  reason: string;
 }
 // プレイヤーの管理者編集ペイロード。
 export interface AdminPlayerPayload {
@@ -932,6 +1094,52 @@ export interface FightResp {
 }
 /** モンスターの作成/更新ペイロード(管理画面)。 */
 export type MonsterInput = Omit<Monster, 'id' | 'reward_name'>;
+
+// 目安箱(要望・不具合の投稿所)。
+export interface FeedbackPost {
+  id: number;
+  author_id: number | null;
+  author_name: string;
+  /** bug=不具合 / request=要望 / question=質問 */
+  kind: string;
+  kind_label: string;
+  /** open=受付 / triage=検討中 / doing=対応中 / done=対応済み / wontfix=見送り */
+  status: string;
+  status_label: string;
+  title: string;
+  body: string;
+  votes: number;
+  /** 自分が賛同済みか。 */
+  voted: boolean;
+  comments: number;
+  created_at: string;
+  updated_at: string;
+}
+export interface FeedbackComment {
+  id: number;
+  author_id: number | null;
+  author_name: string;
+  /** 運営(管理者)の返信。 */
+  is_staff: boolean;
+  body: string;
+  created_at: string;
+}
+export interface FeedbackDetail {
+  post: FeedbackPost;
+  comments: FeedbackComment[];
+}
+export const FEEDBACK_KINDS = [
+  { value: 'bug', label: '不具合' },
+  { value: 'request', label: '要望' },
+  { value: 'question', label: '質問' },
+];
+export const FEEDBACK_STATUSES = [
+  { value: 'open', label: '受付' },
+  { value: 'triage', label: '検討中' },
+  { value: 'doing', label: '対応中' },
+  { value: 'done', label: '対応済み' },
+  { value: 'wontfix', label: '見送り' },
+];
 
 // 建設会社(建築系)
 export interface BuildingTown {
@@ -1379,6 +1587,26 @@ export const api = {
   adminDeleteSerial: (sid: number) =>
     request<{ deleted: boolean }>('DELETE', `/admin/serials/${sid}`),
   adminSerialUses: (sid: number) => request<SerialUse[]>('GET', `/admin/serials/${sid}/uses`),
+  feedbackList: (kind = '', status = '', sort = 'new') => {
+    const q = new URLSearchParams();
+    if (kind) q.set('kind', kind);
+    if (status) q.set('status', status);
+    if (sort) q.set('sort', sort);
+    return request<FeedbackPost[]>('GET', `/feedback?${q.toString()}`);
+  },
+  feedbackGet: (pid: number) => request<FeedbackDetail>('GET', `/feedback/${pid}`),
+  feedbackCreate: (id: number, kind: string, title: string, body: string) =>
+    request<FeedbackDetail>('POST', `/players/${id}/feedback`, { kind, title, body }),
+  feedbackComment: (id: number, pid: number, body: string) =>
+    request<FeedbackDetail>('POST', `/players/${id}/feedback/${pid}/comments`, { body }),
+  feedbackVote: (id: number, pid: number) =>
+    request<FeedbackDetail>('POST', `/players/${id}/feedback/${pid}/vote`),
+  feedbackDelete: (id: number, pid: number) =>
+    request<{ deleted: boolean }>('DELETE', `/players/${id}/feedback/${pid}`),
+  feedbackDeleteComment: (id: number, cid: number) =>
+    request<{ deleted: boolean }>('DELETE', `/players/${id}/feedback/comments/${cid}`),
+  adminFeedbackStatus: (pid: number, status: string) =>
+    request<FeedbackDetail>('PUT', `/admin/feedback/${pid}/status`, { status }),
   adminMonsters: () => request<Monster[]>('GET', '/admin/monsters'),
   adminCreateMonster: (m: MonsterInput) => request<Monster>('POST', '/admin/monsters', m),
   adminUpdateMonster: (id: number, m: MonsterInput) =>
@@ -1527,6 +1755,10 @@ export const api = {
   use: (id: number, itemId: number) =>
     request<Player>('POST', `/players/${id}/use`, {
       item_id: itemId,
+      idempotency_key: newIdempotencyKey(),
+    }),
+  useAll: (id: number) =>
+    request<UseAllResp>('POST', `/players/${id}/use/all`, {
       idempotency_key: newIdempotencyKey(),
     }),
   deposit: (id: number, amount: number) =>
@@ -1873,6 +2105,43 @@ export const api = {
       params: Record<string, { value: number; max: number }>;
     },
   ) => request<SimResult>('POST', '/admin/simulate', { effect, state }),
+  adminPlayerItems: (id: number) => request<AdminHeldItem[]>('GET', `/admin/players/${id}/items`),
+  // 残量を設定する。0以下なら持ち物から消える。応答は更新後の一覧。
+  adminSetPlayerItem: (id: number, itemId: number, remainingUses: number, clearCooldown = false) =>
+    request<AdminHeldItem[]>('PUT', `/admin/players/${id}/items/${itemId}`, {
+      remaining_uses: remainingUses,
+      clear_cooldown: clearCooldown,
+    }),
+  adminDeletePlayerItem: (id: number, itemId: number) =>
+    request<AdminHeldItem[]>('DELETE', `/admin/players/${id}/items/${itemId}`),
+  adminItemTotals: () => request<AdminItemTotal[]>('GET', '/admin/items/totals'),
+  // 一斉メール。宛先は退会していない非ゲスト全員(自分を除く)。
+  adminBroadcastMail: (body: string) =>
+    request<{ sent: number }>('POST', '/admin/mail/broadcast', { body }),
+  // 凍結。days<=0で無期限。凍結するとその人のセッションも消える。
+  adminSuspendPlayer: (id: number, days: number, reason: string) =>
+    request<Suspension>('POST', `/admin/players/${id}/suspend`, { days, reason }),
+  adminUnsuspendPlayer: (id: number) =>
+    request<Suspension>('DELETE', `/admin/players/${id}/suspend`),
+  // 書き込みの管理。sourceが空なら全部、playerIdが0なら全員ぶん。
+  adminPosts: (source = '', playerId = 0, limit = 100) =>
+    request<ModPost[]>(
+      'GET',
+      `/admin/posts?source=${encodeURIComponent(source)}&player_id=${playerId}&limit=${limit}`,
+    ),
+  adminDeletePost: (source: string, id: number) =>
+    request<{ deleted: boolean }>('DELETE', `/admin/posts/${source}/${id}`),
+  adminPlayerLog: (id: number, limit = 100) =>
+    request<PlayerLog>('GET', `/admin/players/${id}/log?limit=${limit}`),
+  adminDashboard: () => request<Dashboard>('GET', '/admin/dashboard'),
+  // 取り消しは逆仕訳を1本足す(台帳は追記専用なので行は消さない)。
+  adminReverseTx: (txId: number) =>
+    request<{ reversed: boolean; tx_id: number }>('POST', '/admin/money/reverse', {
+      tx_id: txId,
+    }),
+  // player_id=0 で全ユーザーぶん。
+  adminMoney: (playerId = 0, limit = 100) =>
+    request<MoneyAudit>('GET', `/admin/money?player_id=${playerId}&limit=${limit}`),
   adminListPlayers: () => request<AdminPlayerSummary[]>('GET', '/admin/players'),
   adminUpdatePlayer: (id: number, payload: AdminPlayerPayload) =>
     request<Player>('PUT', `/admin/players/${id}`, payload),

@@ -35,11 +35,18 @@ func spaHandler(dir string, api http.Handler) http.Handler {
 			case strings.HasPrefix(clean, "/assets/"):
 				// 名前にハッシュが入るので中身は不変。
 				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-			case clean == "/sw.js" || clean == "/offline.html":
+			case clean == "/sw.js" || clean == "/offline.html",
+				clean == "/reset.html" || clean == "/reset.js":
 				// Service Worker本体は絶対にキャッシュさせない。ここが古いまま
 				// 残ると、更新(通知の受け口を足す等)が端末に何時間も届かない。
-				// 指定が無いとCDN側が既定でキャッシュしてしまうため明示する。
-				w.Header().Set("Cache-Control", "no-cache, max-age=0, must-revalidate")
+				// /reset.html はキャッシュがおかしくなったときの逃げ道なので、
+				// これ自体が古くなっては話にならない。
+				//
+				// no-cache ではなく no-store にしているのは、CloudflareのBrowser
+				// Cache TTL(4時間)が no-cache を上書きしてしまうため(実測で
+				// max-age=14400 に書き換えられていた)。上書きの対象は
+				// 「キャッシュ可能な応答」なので、no-store なら手を出されない。
+				w.Header().Set("Cache-Control", "no-store")
 			}
 			files.ServeHTTP(w, r)
 			return

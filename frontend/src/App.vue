@@ -31,9 +31,11 @@ import GiftShopView from './components/GiftShopView.vue';
 import TokutenView from './components/TokutenView.vue';
 import BingoView from './components/BingoView.vue';
 import StreetFightView from './components/StreetFightView.vue';
+import MeyasuView from './components/MeyasuView.vue';
 import AdminView from './components/AdminView.vue';
 import PlaceholderView from './components/PlaceholderView.vue';
 import { currentRoute, pushRoute, replaceRoute, type NavParam } from './router';
+import { watchForUpdate, stopUpdateWatch } from './update';
 
 const player = ref<Player | null>(null);
 // 表示中の画面はURLと対応させる。リロードしても同じ画面に戻り、ブラウザの
@@ -50,9 +52,22 @@ function onPopState() {
   applyRoute(r.view, r.param);
 }
 
+// 新しい版が出たら帯で知らせる。勝手に読み込み直すと入力途中のフォームが消えるので、
+// 押してもらう形にする(ホーム画面のアプリには再読み込みの手段が無いため、これが
+// 唯一の更新の受け取り口になる)。
+const updateReady = ref(false);
+function applyUpdate() {
+  location.reload();
+}
+
 onMounted(async () => {
   void loadSite();
   window.addEventListener('popstate', onPopState);
+  watchForUpdate(() => {
+    updateReady.value = true;
+    // 帯は固定なので、その分だけ下を空けないとページ末尾(フッター)が隠れる。
+    document.body.classList.add('has-update-bar');
+  });
   try {
     player.value = await api.authMe();
   } catch {
@@ -174,6 +189,7 @@ onMounted(() => {
 onUnmounted(() => {
   if (pollTimer !== undefined) window.clearTimeout(pollTimer);
   if (guestTimer !== undefined) window.clearInterval(guestTimer);
+  stopUpdateWatch();
 });
 
 // 施設タイトル(準備中ビュー用)
@@ -188,6 +204,7 @@ const facilityTitles: Record<string, string> = {
   mail: 'メール',
   doukyo: 'キャラ作成',
   streetfight: 'ストリートファイト',
+  meyasu: '目安箱',
   tsuri: '釣りゲーム',
   gifutoya: 'ギフト屋',
   tokuten: '特典交換所',
@@ -196,6 +213,10 @@ const facilityTitles: Record<string, string> = {
 </script>
 
 <template>
+  <div v-if="updateReady" class="update-bar">
+    <span>新しい版が公開されています。</span>
+    <button class="update-btn" @click="applyUpdate">読み込み直す</button>
+  </div>
   <template v-if="booting">
     <h1 class="town-title">{{ siteTitle }}</h1>
     <div class="booting">読み込み中…</div>
@@ -298,6 +319,7 @@ const facilityTitles: Record<string, string> = {
       @back="back"
       @retired="onRetired"
     />
+    <MeyasuView v-else-if="view === 'meyasu'" :player="player" @back="back" />
     <StreetFightView
       v-else-if="view === 'streetfight'"
       :player="player"
@@ -319,6 +341,38 @@ const facilityTitles: Record<string, string> = {
 </template>
 
 <style scoped>
+/* 更新の知らせ。どの画面でも目に入るよう下端に固定する。ホーム画面のアプリには
+   引き下げての再読み込みが無いので、ここを見落とすと更新が届かない。 */
+.update-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: #e8f4ff;
+  border-top: 1px solid #8fb8d8;
+  color: #14456e;
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 8px 10px;
+  /* iOSのホームバーに隠れないよう下に逃がす。 */
+  padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  box-shadow: 0 -1px 4px rgba(0, 0, 0, 0.15);
+}
+.update-btn {
+  font-family: inherit;
+  font-size: 12px;
+  padding: 3px 10px;
+  border: 1px solid #8fb8d8;
+  background: #fff;
+  color: #14456e;
+  cursor: pointer;
+}
 .guest-bar {
   background: #fff3d4;
   border: 1px solid #e0c98a;

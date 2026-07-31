@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue';
 import { api, type Player, type UserSettings, type PushPrefs } from '../api';
 import { pushSupported, permission, subscribe, unsubscribe, deviceSubscribed } from '../notify';
+import { unregisterServiceWorker } from '../pwa';
 import ToggleSwitch from './ToggleSwitch.vue';
 import Toast from './Toast.vue';
 import { useToast } from '../toast';
@@ -133,6 +134,20 @@ function useMisskeyName() {
   if (form.value?.misskey_name) form.value.display_name = form.value.misskey_name;
 }
 
+// 手元に溜めた画像・プログラムを捨てて読み込み直す。古いものを掴んだまま直せない
+// のが一番困るので、逃げ道として置く(画面まで来られないときは /reset.html)。
+async function clearCaches() {
+  if (busy.value) return;
+  busy.value = true;
+  error.value = '';
+  try {
+    await unregisterServiceWorker();
+  } catch {
+    // 消せなかったぶんは諦めて読み込み直す。掴んでいるものが減れば直ることがある。
+  }
+  location.reload();
+}
+
 async function refreshMisskey() {
   if (busy.value) return;
   busy.value = true;
@@ -262,6 +277,17 @@ async function retire() {
         <button class="btn" :disabled="busy" @click="refreshMisskey">いま取り直す</button>
         <div class="us-hint">
           プロフィールは6時間ごとに取り直します。Misskey側で変えた直後に反映したいときに使ってください。
+        </div>
+      </section>
+
+      <section class="us-sec">
+        <div class="us-head">表示の不具合</div>
+        <button class="btn" :disabled="busy" @click="clearCaches">
+          キャッシュを破棄して読み込み直す
+        </button>
+        <div class="us-hint">
+          更新したはずの画面や画像が古いまま出るときに使ってください。手元に溜めた画像や
+          プログラムを捨てて取り直します。ログインは外れません。
         </div>
       </section>
 

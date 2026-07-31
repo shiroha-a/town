@@ -24,6 +24,14 @@ import {
   type FacilityPreset,
   type PlotCell,
   type Town,
+  type AdminHeldItem,
+  type AdminItemTotal,
+  type MoneyAudit,
+  type MoneyMovement,
+  type Suspension,
+  type ModPost,
+  type PlayerLog,
+  type Dashboard,
 } from '../api';
 import { PARAM_FULL } from '../params';
 
@@ -45,6 +53,10 @@ const open = reactive({
   monsters: false,
   bingo: false,
   instances: false,
+  money: false,
+  broadcast: false,
+  posts: false,
+  dash: false,
 });
 
 // 効果/条件で対象にできるパラメータ。
@@ -196,6 +208,8 @@ const KEY_PRESETS: { key: string; label: string }[] = [
   { key: 'prof', label: 'プロフィール' },
   { key: 'mail', label: 'メール' },
   { key: 'doukyo', label: 'Cリーグ会場' },
+  { key: 'streetfight', label: 'ストリートファイト' },
+  { key: 'meyasu', label: '目安箱' },
   { key: 'aisatu', label: 'あいさつ(準備中)' },
   { key: 'walk', label: '街移動(徒歩)' },
   { key: 'bus', label: '街移動(バス・500円)' },
@@ -222,6 +236,7 @@ const IMG_PRESETS = [
   'tokuten',
   'bingo',
   'cleague',
+  'meyasu',
   'prof',
   'mail',
   'mati_link',
@@ -324,6 +339,7 @@ const STD_FAC_BASE: FacilityPreset[] = [
   { key: 'tokuten', img: 'tokuten', alt: '特典交換所', dest: 0 },
   { key: 'bingo', img: 'bingo', alt: 'ビンゴ会場', dest: 0 },
   { key: 'doukyo', img: 'cleague', alt: 'Cリーグ会場', dest: 0 },
+  { key: 'meyasu', img: 'meyasu', alt: '目安箱', dest: 0 },
   { key: 'prof', img: 'prof', alt: 'プロフィール', dest: 0 },
   { key: 'akichi', img: 'akiti', alt: '空き地', dest: 0 },
 ];
@@ -1281,6 +1297,20 @@ async function openEditPlayer(id: number) {
   message.value = '';
   try {
     const p = await api.getPlayer(id);
+    await loadHeldItems(id);
+    const row = players.value.find((u) => u.id === id);
+    suspension.value = row
+      ? {
+          active: row.suspended,
+          forever: row.suspend_forever,
+          until: row.suspended_until,
+          reason: row.suspend_reason,
+        }
+      : null;
+    suspendDays.value = 0;
+    suspendReason.value = row?.suspend_reason ?? '';
+    playerLog.value = null;
+    logOpen.value = false;
     editingPlayer.value = {
       id: p.id,
       display_name: p.display_name,
@@ -1303,6 +1333,74 @@ async function openEditPlayer(id: number) {
 }
 function closeEditPlayer() {
   editingPlayer.value = null;
+  heldItems.value = [];
+}
+
+// --- 編集中ユーザーの所持アイテム ---
+//
+// 数え方はサーバーに任せる。quantityはremaining_usesから導く決まりで、画面から
+// 送るとずれる(持っているのに「0個」と出る、没収が効かない等の元になる)。
+const heldItems = ref<AdminHeldItem[]>([]);
+// item_id -> 入力中の残量。一覧を取り直すたびに作り直す。
+const heldEdit = ref<Record<number, number>>({});
+const addItemID = ref<number | null>(null);
+const addSets = ref(1);
+
+function syncHeldEdit() {
+  const m: Record<number, number> = {};
+  for (const it of heldItems.value) m[it.item_id] = it.remaining_uses;
+  heldEdit.value = m;
+}
+async function loadHeldItems(id: number) {
+  heldItems.value = await api.adminPlayerItems(id);
+  syncHeldEdit();
+}
+async function runHeld(fn: () => Promise<AdminHeldItem[]>, done: string) {
+  busy.value = true;
+  message.value = '';
+  try {
+    heldItems.value = await fn();
+    syncHeldEdit();
+    message.value = done;
+    kind.value = 'ok';
+  } catch (e) {
+    fail(e);
+  } finally {
+    busy.value = false;
+  }
+}
+function applyHeld(itemId: number, clearCooldown = false) {
+  const p = editingPlayer.value;
+  if (!p) return;
+  return runHeld(
+    () => api.adminSetPlayerItem(p.id, itemId, heldEdit.value[itemId] ?? 0, clearCooldown),
+    clearCooldown ? 'クールタイムを解除しました。' : '残量を更新しました。',
+  );
+}
+function deleteHeld(itemId: number) {
+  const p = editingPlayer.value;
+  if (!p) return;
+  return runHeld(() => api.adminDeletePlayerItem(p.id, itemId), '持ち物から外しました。');
+}
+function addHeld() {
+  const p = editingPlayer.value;
+  const master = items.value.find((i) => i.id === addItemID.value);
+  if (!p || !master) return;
+  // 既に持っていれば足す。セット数×耐久ぶんが残量になる。
+  const cur = heldItems.value.find((i) => i.item_id === master.id)?.remaining_uses ?? 0;
+  const add = Math.max(1, addSets.value) * Math.max(1, master.durability);
+  return runHeld(
+    () => api.adminSetPlayerItem(p.id, master.id, cur + add, false),
+    `${master.name}を${Math.max(1, addSets.value)}セット持たせました。`,
+  );
+}
+/** クールタイムの残り表示。 */
+function cooldownLabel(iso: string | null): string {
+  if (!iso) return '－';
+  const remain = new Date(iso).getTime() - Date.now();
+  if (!(remain > 0)) return '－';
+  const m = Math.ceil(remain / 60000);
+  return `あと${m}分`;
 }
 async function savePlayer() {
   if (!editingPlayer.value) return;
@@ -1488,6 +1586,293 @@ async function deleteEdit() {
     busy.value = false;
   }
 }
+
+// --- ダッシュボード ---
+//
+// 開いた瞬間に「動いているか」が分かることを狙う。特に日次処理(利息・ローン・
+// 病気・ロト抽選)が止まっていても気づけないのが一番困るので、そこを目立たせる。
+const dash = ref<Dashboard | null>(null);
+async function loadDash() {
+  busy.value = true;
+  message.value = '';
+  try {
+    dash.value = await api.adminDashboard();
+  } catch (e) {
+    fail(e);
+  } finally {
+    busy.value = false;
+  }
+}
+function toggleDash() {
+  open.dash = !open.dash;
+  if (open.dash && !dash.value) void loadDash();
+}
+/** 大きさに合わせて単位を選ぶ。GB固定だとDBサイズが「0.0GB」に潰れる。 */
+function size(bytes: number): string {
+  if (!bytes) return '-';
+  if (bytes >= 1024 ** 3) return (bytes / 1024 ** 3).toFixed(1) + 'GB';
+  if (bytes >= 1024 ** 2) return (bytes / 1024 ** 2).toFixed(1) + 'MB';
+  return (bytes / 1024).toFixed(0) + 'KB';
+}
+/** 使用率(%)。全体が0なら空。 */
+function usedPct(total: number, free: number): string {
+  if (!total) return '';
+  return Math.round(((total - free) / total) * 100) + '%';
+}
+function uptime(sec: number): string {
+  if (sec < 60) return `${sec}秒`;
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  return (d ? `${d}日` : '') + (d || h ? `${h}時間` : '') + `${m}分`;
+}
+
+// --- 行動ログ ---
+//
+// 「この人がいつ何をしたか」を追う手段がpsqlしかなかった。ユーザーを見ている
+// ときに知りたいものなので、編集モーダルの中に置く。件数が多いので既定は畳む。
+const playerLog = ref<PlayerLog | null>(null);
+const logOpen = ref(false);
+async function toggleLog() {
+  logOpen.value = !logOpen.value;
+  if (!logOpen.value || playerLog.value || !editingPlayer.value) return;
+  busy.value = true;
+  try {
+    playerLog.value = await api.adminPlayerLog(editingPlayer.value.id, 100);
+  } catch (e) {
+    fail(e);
+  } finally {
+    busy.value = false;
+  }
+}
+/** detailは行動ごとに形が違うので、そのまま1行にして出す。 */
+function detailText(d: unknown): string {
+  if (d === null || d === undefined) return '';
+  const t = JSON.stringify(d);
+  return t === '{}' ? '' : t;
+}
+
+// --- 書き込みの管理 ---
+//
+// 種類ごとに欄を作ると、書き込める場所が増えるたびに管理画面も増える。荒らしへの
+// 対応は「その人の書き込みを全部見て消す」なので、出どころを横断した1本の時系列に
+// して、投稿者で絞れることを要点にした。
+const POST_SOURCES: { key: string; label: string }[] = [
+  { key: '', label: 'すべて' },
+  { key: 'greeting', label: 'あいさつ' },
+  { key: 'house_bbs', label: '家の掲示板' },
+  { key: 'company_bbs', label: '会社の掲示板' },
+  { key: 'feedback', label: '目安箱' },
+  { key: 'feedback_c', label: '目安箱(返信)' },
+];
+const POST_LABEL: Record<string, string> = Object.fromEntries(
+  POST_SOURCES.filter((s) => s.key).map((s) => [s.key, s.label]),
+);
+const posts = ref<ModPost[]>([]);
+const postSource = ref('');
+const postPlayer = ref(0);
+const postLimit = ref(100);
+
+async function loadPosts() {
+  busy.value = true;
+  message.value = '';
+  try {
+    posts.value = await api.adminPosts(postSource.value, postPlayer.value, postLimit.value);
+  } catch (e) {
+    fail(e);
+  } finally {
+    busy.value = false;
+  }
+}
+function togglePosts() {
+  open.posts = !open.posts;
+  if (open.posts && posts.value.length === 0) void loadPosts();
+}
+async function deletePost(p: ModPost) {
+  if (
+    !window.confirm(
+      `この書き込みを消しますか?\n\n` +
+        `[${POST_LABEL[p.source] ?? p.source}] ${p.author}\n` +
+        `${p.body.slice(0, 150)}${p.body.length > 150 ? '…' : ''}\n\n` +
+        `※取り消せません。`,
+    )
+  ) {
+    return;
+  }
+  busy.value = true;
+  message.value = '';
+  try {
+    await api.adminDeletePost(p.source, p.id);
+    message.value = '書き込みを消しました。';
+    kind.value = 'ok';
+    await loadPosts();
+  } catch (e) {
+    fail(e);
+  } finally {
+    busy.value = false;
+  }
+}
+
+// --- 凍結(ログイン不可) ---
+//
+// 荒らしへの対応が論理削除しか無かった。凍結は解除できる別物で、理由は本人にも
+// 見せる。凍結すると同時にその人のセッションが消えるので、開いたままの画面も
+// 次の操作で止まる。
+const suspension = ref<Suspension | null>(null);
+const suspendDays = ref(0); // 0=無期限
+const suspendReason = ref('');
+
+function suspendLabel(s: Suspension | null): string {
+  if (!s || !s.active) return '凍結していません';
+  const when = s.forever ? '無期限' : new Date(s.until!).toLocaleString('ja-JP');
+  return `凍結中（${when}）` + (s.reason ? ` 理由: ${s.reason}` : '');
+}
+async function runSuspend(fn: () => Promise<Suspension>, done: string) {
+  busy.value = true;
+  message.value = '';
+  try {
+    suspension.value = await fn();
+    message.value = done;
+    kind.value = 'ok';
+    await refresh(); // 一覧の目印を更新する
+  } catch (e) {
+    fail(e);
+  } finally {
+    busy.value = false;
+  }
+}
+function doSuspend() {
+  const p = editingPlayer.value;
+  if (!p) return;
+  const when = suspendDays.value > 0 ? `${suspendDays.value}日間` : '無期限で';
+  if (
+    !window.confirm(
+      `「${p.display_name}」を${when}凍結しますか?\n\n` +
+        `理由: ${suspendReason.value || '(未入力)'}\n\n` +
+        `※ログインできなくなり、いま開いている画面も次の操作で止まります。\n` +
+        `※データは消えません。いつでも解除できます。`,
+    )
+  ) {
+    return;
+  }
+  return runSuspend(
+    () => api.adminSuspendPlayer(p.id, suspendDays.value, suspendReason.value),
+    '凍結しました。',
+  );
+}
+function doUnsuspend() {
+  const p = editingPlayer.value;
+  if (!p) return;
+  return runSuspend(() => api.adminUnsuspendPlayer(p.id), '凍結を解除しました。');
+}
+
+// --- 一斉メール ---
+//
+// お知らせ専用の仕組みは作らず、既にあるゲーム内メールに乗せる。受信箱・端末への
+// 通知・保存の扱いがそのまま使えるため。宛先は退会していない非ゲスト全員。
+const bcBody = ref('');
+const bcTargets = computed(
+  () => players.value.filter((u) => !u.is_guest && u.id !== props.player.id).length,
+);
+async function sendBroadcast() {
+  const body = bcBody.value.trim();
+  if (!body) return;
+  if (
+    !window.confirm(
+      `${bcTargets.value}人の受信箱に送ります。よろしいですか?\n\n` +
+        `${body.slice(0, 120)}${body.length > 120 ? '…' : ''}\n\n` +
+        `※通知をオンにしている人の端末にも「メールが届きました」と出ます。`,
+    )
+  ) {
+    return;
+  }
+  busy.value = true;
+  message.value = '';
+  try {
+    const res = await api.adminBroadcastMail(body);
+    message.value = `${res.sent}人に送りました。`;
+    kind.value = 'ok';
+    bcBody.value = '';
+  } catch (e) {
+    fail(e);
+  } finally {
+    busy.value = false;
+  }
+}
+
+// --- お金の動き ---
+//
+// お金は複式の台帳(ledger_tx / ledger_entry)に全部残っているので、集計も履歴も
+// そこから引くだけでよい。理由(reason)はコード側の記帳名をそのまま出す。訳語を
+// 当てると実際の記帳とずれたときに気づけなくなるため。
+const money = ref<MoneyAudit | null>(null);
+const moneyPlayer = ref(0); // 0=全ユーザー
+const moneyLimit = ref(100);
+const itemTotals = ref<AdminItemTotal[]>([]);
+
+async function loadMoney() {
+  busy.value = true;
+  message.value = '';
+  try {
+    money.value = await api.adminMoney(moneyPlayer.value, moneyLimit.value);
+    itemTotals.value = await api.adminItemTotals();
+  } catch (e) {
+    fail(e);
+  } finally {
+    busy.value = false;
+  }
+}
+function toggleMoney() {
+  open.money = !open.money;
+  if (open.money && !money.value) void loadMoney();
+}
+
+const KIND_LABEL: Record<string, string> = {
+  cash: '現金',
+  savings: '普通口座',
+  super_savings: 'スーパー定期',
+  system: '街',
+};
+function yen(n: number): string {
+  return n.toLocaleString('ja-JP');
+}
+function playerLabel(id: number): string {
+  if (id === 0) return '街';
+  return players.value.find((p) => p.id === id)?.display_name ?? `ID${id}`;
+}
+// 取り消し。台帳は追記専用なので、符号を反転した取引を1本足して残高を戻す
+// (行は消さない。消すと世界のお金の合計を後から検算できなくなる)。
+// 戻るのはお金だけで、買った品物や得た経験値はそのまま残る。
+async function reverseTx(m: MoneyMovement) {
+  const sign = m.delta >= 0 ? '+' : '';
+  if (
+    !window.confirm(
+      `この取引を取り消しますか?\n\n` +
+        `${playerLabel(m.player_id)} ${sign}${yen(m.delta)}円（${m.reason}）\n\n` +
+        `※戻るのはお金だけです。買った品物や得た経験値はそのまま残ります。\n` +
+        `※台帳には取り消しの記帳が1件追加されます（元の記録は消えません）。`,
+    )
+  ) {
+    return;
+  }
+  busy.value = true;
+  message.value = '';
+  try {
+    await api.adminReverseTx(m.tx_id);
+    message.value = `取引#${m.tx_id}を取り消しました。`;
+    kind.value = 'ok';
+    await loadMoney();
+  } catch (e) {
+    fail(e);
+  } finally {
+    busy.value = false;
+  }
+}
+function fmtTime(iso: string): string {
+  const d = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 </script>
 
 <template>
@@ -1544,7 +1929,468 @@ async function deleteEdit() {
                       <td>{{ u.job }}</td>
                       <td>{{ u.job_level }}</td>
                       <td class="r">{{ u.money.toLocaleString('ja-JP') }}円</td>
-                      <td>{{ u.roles.includes('admin') ? '管理者' : '' }}</td>
+                      <td>
+                        {{ u.roles.includes('admin') ? '管理者' : '' }}
+                        <span v-if="u.suspended" class="susp-tag" :title="u.suspend_reason"
+                          >凍結</span
+                        >
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <!-- ダッシュボード -->
+        <section class="fold">
+          <button class="fold-head" @click="toggleDash">
+            <span class="caret">{{ open.dash ? '▼' : '▶' }}</span> ダッシュボード
+          </button>
+          <div v-if="open.dash" class="fold-body">
+            <template v-if="dash">
+              <section class="panel">
+                <h3>
+                  日次処理<span class="hint">
+                    ※利息・ローン・病気・ロト抽選。止まっていても普段は気づけません</span
+                  >
+                </h3>
+                <div class="dash-worker" :class="dash.worker.day_seen ? 'ok' : 'ng'">
+                  {{
+                    dash.worker.day_seen ? '今日ぶんは実行済み' : '今日ぶんはまだ実行されていません'
+                  }}
+                  <span class="hint">（街の今日: {{ dash.worker.today }}）</span>
+                </div>
+                <div class="table-scroll dash-scroll">
+                  <table class="list-table">
+                    <thead>
+                      <tr>
+                        <th>対象日</th>
+                        <th class="l">処理</th>
+                        <th>実行</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-if="dash.worker.recent.length === 0">
+                        <td colspan="3" class="muted">一度も走っていません。</td>
+                      </tr>
+                      <tr v-for="j in dash.worker.recent" :key="j.job_date + j.job_type">
+                        <td class="nowrap">{{ j.job_date }}</td>
+                        <td class="l">{{ j.job_type }}</td>
+                        <td class="nowrap">{{ fmtTime(j.ran_at) }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section class="panel">
+                <h3>システム<span class="hint"> ※負荷とメモリはホスト全体の値です</span></h3>
+                <table class="kv">
+                  <tr>
+                    <th>ロード</th>
+                    <td>
+                      {{ dash.host.load1.toFixed(2) }} / {{ dash.host.load5.toFixed(2) }} /
+                      {{ dash.host.load15.toFixed(2) }}
+                      <span class="hint">（CPU {{ dash.host.cpus }}コア）</span>
+                    </td>
+                  </tr>
+                  <tr>
+                    <th>メモリ</th>
+                    <td>
+                      使用 {{ usedPct(dash.host.mem_total_kb, dash.host.mem_free_kb) }} / 空き
+                      {{ size(dash.host.mem_free_kb * 1024) }} of
+                      {{ size(dash.host.mem_total_kb * 1024) }}
+                    </td>
+                  </tr>
+                  <tr v-if="dash.host.swap_total_kb">
+                    <th>スワップ</th>
+                    <td>
+                      使用 {{ usedPct(dash.host.swap_total_kb, dash.host.swap_free_kb) }} of
+                      {{ size(dash.host.swap_total_kb * 1024) }}
+                    </td>
+                  </tr>
+                  <tr>
+                    <th>ディスク</th>
+                    <td>
+                      使用 {{ usedPct(dash.host.disk_total_b, dash.host.disk_free_b) }} / 空き
+                      {{ size(dash.host.disk_free_b) }} of {{ size(dash.host.disk_total_b) }}
+                    </td>
+                  </tr>
+                </table>
+              </section>
+
+              <section class="panel">
+                <h3>
+                  このプロセス<span class="hint">
+                    ※増え続けていないか(漏れていないか)を見る場所です</span
+                  >
+                </h3>
+                <table class="kv">
+                  <tr>
+                    <th>CPU</th>
+                    <td>
+                      {{ dash.host.proc.cpu_percent.toFixed(1) }}%
+                      <span class="hint"
+                        >（1コア=100% ／ 累計 {{ dash.host.proc.cpu_seconds.toFixed(1) }}秒）</span
+                      >
+                    </td>
+                  </tr>
+                  <tr>
+                    <th>メモリ</th>
+                    <td>
+                      実メモリ {{ size(dash.host.proc.rss_bytes) }}
+                      <span class="hint">（仮想 {{ size(dash.host.proc.vms_bytes) }}）</span>
+                    </td>
+                  </tr>
+                  <tr>
+                    <th>Goのヒープ</th>
+                    <td>
+                      {{ size(dash.host.proc.heap_alloc_b) }}
+                      <span class="hint">（確保済み {{ size(dash.host.proc.sys_b) }}）</span>
+                    </td>
+                  </tr>
+                  <tr>
+                    <th>スレッド</th>
+                    <td>
+                      {{ dash.host.proc.threads }} ／ goroutine {{ dash.host.proc.goroutines }} ／
+                      開いているFD
+                      {{ dash.host.proc.open_fds }}
+                    </td>
+                  </tr>
+                  <tr>
+                    <th>稼働</th>
+                    <td>
+                      {{ uptime(dash.host.proc.uptime_sec) }}
+                      <span class="hint">（{{ dash.host.proc.go_version }}）</span>
+                    </td>
+                  </tr>
+                </table>
+              </section>
+
+              <section class="panel">
+                <h3>データベース</h3>
+                <table class="kv">
+                  <tr>
+                    <th>サイズ</th>
+                    <td>{{ size(dash.db.size_b) }}</td>
+                  </tr>
+                  <tr>
+                    <th>接続</th>
+                    <td>{{ dash.db.connections }} / {{ dash.db.max_conns }}</td>
+                  </tr>
+                </table>
+                <div class="table-scroll dash-scroll">
+                  <table class="list-table">
+                    <thead>
+                      <tr>
+                        <th class="l">表</th>
+                        <th>行数(概算)</th>
+                        <th>サイズ</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="t in dash.db.tables" :key="t.table">
+                        <td class="l">{{ t.table }}</td>
+                        <td class="r">{{ t.rows.toLocaleString('ja-JP') }}</td>
+                        <td class="r">{{ size(t.bytes) }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section class="panel">
+                <h3>住民</h3>
+                <table class="kv">
+                  <tr>
+                    <th>住民</th>
+                    <td>{{ dash.players.total }}人</td>
+                  </tr>
+                  <tr>
+                    <th>24時間以内</th>
+                    <td>{{ dash.players.active_24h }}人</td>
+                  </tr>
+                  <tr>
+                    <th>お試し</th>
+                    <td>{{ dash.players.guests }}人</td>
+                  </tr>
+                  <tr>
+                    <th>凍結中</th>
+                    <td>{{ dash.players.suspended }}人</td>
+                  </tr>
+                </table>
+                <button class="btn mini" :disabled="busy" @click="loadDash">取り直す</button>
+              </section>
+            </template>
+            <p v-else class="muted">読み込み中…</p>
+          </div>
+        </section>
+
+        <!-- 書き込みの管理 -->
+        <section class="fold">
+          <button class="fold-head" @click="togglePosts">
+            <span class="caret">{{ open.posts ? '▼' : '▶' }}</span> 書き込みの管理
+          </button>
+          <div v-if="open.posts" class="fold-body">
+            <section class="panel">
+              <h3>
+                住民の書き込み<span class="hint">
+                  ※あいさつ・掲示板・目安箱をまとめて新しい順に出します</span
+                >
+              </h3>
+              <div class="money-bar">
+                <select v-model="postSource" @change="loadPosts">
+                  <option v-for="s in POST_SOURCES" :key="s.key" :value="s.key">
+                    {{ s.label }}
+                  </option>
+                </select>
+                <select v-model.number="postPlayer" @change="loadPosts">
+                  <option :value="0">投稿者すべて</option>
+                  <option v-for="u in players" :key="u.id" :value="u.id">
+                    {{ u.display_name }}（ID{{ u.id }}）
+                  </option>
+                </select>
+                <label>件数<input type="number" v-model.number="postLimit" /></label>
+                <button class="btn mini" :disabled="busy" @click="loadPosts">取り直す</button>
+              </div>
+              <div class="table-scroll money-scroll">
+                <table class="list-table">
+                  <thead>
+                    <tr>
+                      <th>日時</th>
+                      <th>出どころ</th>
+                      <th class="l">投稿者</th>
+                      <th class="l">中身</th>
+                      <th>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-if="posts.length === 0">
+                      <td colspan="5" class="muted">書き込みがありません。</td>
+                    </tr>
+                    <tr v-for="p in posts" :key="p.source + '-' + p.id">
+                      <td class="nowrap">{{ fmtTime(p.created_at) }}</td>
+                      <td class="nowrap">
+                        {{ POST_LABEL[p.source] ?? p.source }}
+                        <span v-if="p.where" class="hint">{{ p.where }}</span>
+                      </td>
+                      <td class="l nowrap">{{ p.author }}</td>
+                      <td class="l post-body">
+                        <b v-if="p.title">{{ p.title }}</b>
+                        <span>{{ p.body }}</span>
+                      </td>
+                      <td>
+                        <button class="btn mini danger" :disabled="busy" @click="deletePost(p)">
+                          消す
+                        </button>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <!-- 一斉メール -->
+        <section class="fold">
+          <button class="fold-head" @click="open.broadcast = !open.broadcast">
+            <span class="caret">{{ open.broadcast ? '▼' : '▶' }}</span> 一斉メール
+          </button>
+          <div v-if="open.broadcast" class="fold-body">
+            <section class="panel">
+              <h3>
+                住民全員へお知らせを送る<span class="hint">
+                  ※ゲーム内メールで届きます。通知をオンにしている人の端末にも出ます</span
+                >
+              </h3>
+              <textarea
+                v-model="bcBody"
+                class="bc-body"
+                rows="6"
+                maxlength="2000"
+                placeholder="お知らせの本文（2000文字まで）"
+              ></textarea>
+              <div class="bc-bar">
+                <span class="hint">宛先 {{ bcTargets }}人（お試しプレイ中の人と自分は除く）</span>
+                <span class="hint">{{ bcBody.length }} / 2000</span>
+                <button
+                  class="btn primary"
+                  :disabled="busy || !bcBody.trim()"
+                  data-test="broadcast-send"
+                  @click="sendBroadcast"
+                >
+                  送信
+                </button>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <!-- お金・持ち物の集計 -->
+        <section class="fold">
+          <button class="fold-head" @click="toggleMoney">
+            <span class="caret">{{ open.money ? '▼' : '▶' }}</span> お金・持ち物の集計
+          </button>
+          <div v-if="open.money" class="fold-body">
+            <section class="panel">
+              <h3>
+                対象<span class="hint">
+                  ※お金は複式の台帳から引いています。増減はすべてここに残ります</span
+                >
+              </h3>
+              <div class="money-bar">
+                <select v-model.number="moneyPlayer" @change="loadMoney">
+                  <option :value="0">全ユーザー</option>
+                  <option v-for="u in players" :key="u.id" :value="u.id">
+                    {{ u.display_name }}（ID{{ u.id }}）
+                  </option>
+                </select>
+                <label>履歴の件数<input type="number" v-model.number="moneyLimit" /></label>
+                <button class="btn mini" :disabled="busy" @click="loadMoney">取り直す</button>
+              </div>
+              <div v-if="money" class="money-totals">
+                現金 <b>{{ yen(money.cash) }}</b
+                >円 ／ 普通口座 <b>{{ yen(money.savings) }}</b
+                >円 ／ スーパー定期 <b>{{ yen(money.super_savings) }}</b
+                >円 ／ ローン残 <b>{{ yen(money.loan_remain) }}</b
+                >円<br />
+                総資産 <b class="big">{{ yen(money.total) }}</b
+                >円
+                <span v-if="money.player_id === 0" class="hint">
+                  ／ 台帳の全entry合計 {{ money.zero_sum }}（複式なので0が正常）</span
+                >
+              </div>
+            </section>
+
+            <section v-if="money" class="panel">
+              <h3>理由ごとの出入り<span class="hint"> ※記帳名はコードのまま</span></h3>
+              <div class="table-scroll money-scroll">
+                <table class="list-table">
+                  <thead>
+                    <tr>
+                      <th class="l">理由</th>
+                      <th>件数</th>
+                      <th>入</th>
+                      <th>出</th>
+                      <th>差引</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="r in money.reasons" :key="r.reason">
+                      <td class="l">{{ r.reason }}</td>
+                      <td>{{ r.count }}</td>
+                      <td class="r plus">{{ r.in ? '+' + yen(r.in) : '' }}</td>
+                      <td class="r minus">{{ r.out ? '-' + yen(r.out) : '' }}</td>
+                      <td class="r" :class="r.net >= 0 ? 'plus' : 'minus'">{{ yen(r.net) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section v-if="money && money.system.length" class="panel">
+              <h3>
+                街の勘定<span class="hint">
+                  ※負=そこから出た（蛇口）／正=そこへ吸われた（シンク）</span
+                >
+              </h3>
+              <div class="table-scroll money-scroll">
+                <table class="list-table">
+                  <thead>
+                    <tr>
+                      <th class="l">勘定</th>
+                      <th>残高</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="a in money.system" :key="a.account">
+                      <td class="l">{{ a.account.replace('system:', '') }}</td>
+                      <td class="r" :class="a.balance >= 0 ? 'plus' : 'minus'">
+                        {{ yen(a.balance) }}円
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section v-if="money" class="panel">
+              <h3>直近の動き（{{ money.history.length }}件）</h3>
+              <div class="table-scroll money-scroll">
+                <table class="list-table">
+                  <thead>
+                    <tr>
+                      <th>日時</th>
+                      <th class="l">相手</th>
+                      <th>置き場</th>
+                      <th>増減</th>
+                      <th class="l">理由</th>
+                      <th>取消</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-if="money.history.length === 0">
+                      <td colspan="6" class="muted">記録がありません。</td>
+                    </tr>
+                    <tr
+                      v-for="(m, i) in money.history"
+                      :key="m.tx_id + '-' + i"
+                      :class="{ reversed: m.reversed }"
+                    >
+                      <td>{{ fmtTime(m.created_at) }}</td>
+                      <td class="l">{{ playerLabel(m.player_id) }}</td>
+                      <td>{{ KIND_LABEL[m.kind] ?? m.kind }}</td>
+                      <td class="r" :class="m.delta >= 0 ? 'plus' : 'minus'">
+                        {{ m.delta >= 0 ? '+' : '' }}{{ yen(m.delta) }}
+                      </td>
+                      <td class="l">{{ m.reason }}</td>
+                      <td>
+                        <span v-if="m.reversed" class="hint">取消済</span>
+                        <button
+                          v-else
+                          class="btn mini danger"
+                          :disabled="busy"
+                          @click="reverseTx(m)"
+                        >
+                          取消
+                        </button>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="panel">
+              <h3>
+                持ち物の合計（全ユーザー・{{ itemTotals.length }}種）<span class="hint">
+                  ※ここだけは対象の選択によらず全員ぶんです</span
+                >
+              </h3>
+              <div class="table-scroll money-scroll">
+                <table class="list-table">
+                  <thead>
+                    <tr>
+                      <th class="l">品名</th>
+                      <th class="l">カテゴリ</th>
+                      <th>人数</th>
+                      <th>個数</th>
+                      <th>残量</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-if="itemTotals.length === 0">
+                      <td colspan="5" class="muted">誰も何も持っていません。</td>
+                    </tr>
+                    <tr v-for="t in itemTotals" :key="t.item_id">
+                      <td class="l">{{ t.name }}</td>
+                      <td class="l">{{ t.category }}</td>
+                      <td>{{ t.holders }}</td>
+                      <td>{{ t.sets }}</td>
+                      <td>{{ t.remaining_uses }}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -2969,6 +3815,169 @@ async function deleteEdit() {
             </label>
           </div>
         </div>
+        <div class="ops">
+          <div class="ops-head">
+            凍結（ログイン不可）<span class="hint">
+              ※退会とは別物です。データは消えず、いつでも解除できます</span
+            >
+          </div>
+          <div class="susp-state" :class="{ on: suspension?.active }">
+            {{ suspendLabel(suspension) }}
+          </div>
+          <div class="susp-form">
+            <label
+              >日数
+              <input
+                class="susp-days"
+                type="number"
+                min="0"
+                v-model.number="suspendDays"
+                title="0で無期限"
+              />
+            </label>
+            <span class="hint">0で無期限</span>
+            <input
+              class="susp-reason"
+              v-model="suspendReason"
+              maxlength="200"
+              placeholder="理由（本人にも見せます）"
+            />
+            <button class="btn danger-btn" :disabled="busy" data-test="suspend" @click="doSuspend">
+              凍結する
+            </button>
+            <button
+              v-if="suspension?.active"
+              class="btn"
+              :disabled="busy"
+              data-test="unsuspend"
+              @click="doUnsuspend"
+            >
+              解除
+            </button>
+          </div>
+        </div>
+        <div class="ops">
+          <div class="ops-head">
+            所持アイテム（{{ heldItems.length }}種）
+            <span class="hint">
+              ※残量が実体です。個数は残量÷1セットの耐久で数え直されます。0にすると外れます
+            </span>
+          </div>
+          <div class="table-scroll held-scroll">
+            <table class="list-table held-table">
+              <thead>
+                <tr>
+                  <th class="l">品名</th>
+                  <th>残量</th>
+                  <th>単位</th>
+                  <th>個数</th>
+                  <th>CT</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-if="heldItems.length === 0">
+                  <td colspan="6" class="muted">持ち物はありません。</td>
+                </tr>
+                <tr v-for="it in heldItems" :key="it.item_id">
+                  <td class="l">
+                    {{ it.name }}<span class="hint"> {{ it.category }}</span>
+                  </td>
+                  <td>
+                    <input class="held-num" type="number" v-model.number="heldEdit[it.item_id]" />
+                  </td>
+                  <td>{{ it.durability_unit === 'day' ? '日' : '回' }}</td>
+                  <td>{{ it.sets }}</td>
+                  <td>{{ cooldownLabel(it.next_available_at) }}</td>
+                  <td class="held-ops">
+                    <button class="btn mini" :disabled="busy" @click="applyHeld(it.item_id)">
+                      反映
+                    </button>
+                    <button
+                      class="btn mini"
+                      :disabled="busy || !it.next_available_at"
+                      @click="applyHeld(it.item_id, true)"
+                    >
+                      CT解除
+                    </button>
+                    <button
+                      class="btn mini danger"
+                      :disabled="busy"
+                      @click="deleteHeld(it.item_id)"
+                    >
+                      外す
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="held-add">
+            <select v-model.number="addItemID">
+              <option :value="null">アイテムを選ぶ</option>
+              <option v-for="i in items" :key="i.id" :value="i.id">
+                {{ i.name }}（耐久{{ i.durability }}）
+              </option>
+            </select>
+            <input class="held-num" type="number" min="1" v-model.number="addSets" />
+            <span class="hint">セット</span>
+            <button class="btn mini" :disabled="busy || !addItemID" @click="addHeld">追加</button>
+          </div>
+        </div>
+        <div class="ops">
+          <button class="log-head" @click="toggleLog">
+            <span class="caret">{{ logOpen ? '▼' : '▶' }}</span> 行動ログ
+            <span class="hint">※直近100件</span>
+          </button>
+          <div v-if="logOpen && playerLog" class="log-body">
+            <div class="ops-head">操作（{{ playerLog.actions.length }}）</div>
+            <div class="table-scroll log-scroll">
+              <table class="list-table">
+                <thead>
+                  <tr>
+                    <th>日時</th>
+                    <th class="l">操作</th>
+                    <th class="l">中身</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-if="playerLog.actions.length === 0">
+                    <td colspan="3" class="muted">記録がありません。</td>
+                  </tr>
+                  <tr v-for="a in playerLog.actions" :key="a.id">
+                    <td class="nowrap">{{ fmtTime(a.created_at) }}</td>
+                    <td class="l">{{ a.type }}</td>
+                    <td class="l detail">{{ detailText(a.detail) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="ops-head">ステータスの変化（{{ playerLog.status.length }}）</div>
+            <div class="table-scroll log-scroll">
+              <table class="list-table">
+                <thead>
+                  <tr>
+                    <th>日時</th>
+                    <th class="l">項目</th>
+                    <th class="l">変化</th>
+                    <th class="l">理由</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-if="playerLog.status.length === 0">
+                    <td colspan="4" class="muted">記録がありません。</td>
+                  </tr>
+                  <tr v-for="h in playerLog.status" :key="h.id">
+                    <td class="nowrap">{{ fmtTime(h.created_at) }}</td>
+                    <td class="l">{{ h.field }}</td>
+                    <td class="l nowrap">{{ h.old_value ?? '-' }} → {{ h.new_value ?? '-' }}</td>
+                    <td class="l">{{ h.reason ?? '' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
         <div class="actions">
           <button class="btn primary" :disabled="busy" @click="savePlayer">保存</button>
           <button class="btn danger" :disabled="busy" @click="deletePlayer">論理削除</button>
@@ -2998,6 +4007,205 @@ async function deleteEdit() {
   margin-left: 8px;
   font-size: 10px;
   color: #889;
+}
+/* 所持アイテムの編集(ユーザー編集モーダル内) */
+.held-scroll {
+  max-height: 240px;
+  overflow-y: auto;
+}
+.held-table .held-num {
+  width: 68px;
+}
+/* 品名が3行に折り返すと表が読めなくなるので、名前の列に幅を確保する
+   (足りなければ表ごと横スクロールする)。 */
+.held-table td.l,
+.held-table th.l {
+  min-width: 170px;
+}
+.held-ops {
+  white-space: nowrap;
+}
+.held-add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+.held-add select {
+  max-width: 260px;
+}
+.held-num {
+  width: 68px;
+}
+
+/* ダッシュボード */
+.dash-worker {
+  font-size: 13px;
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  border: 1px solid #c9d4e0;
+  background: #f4f7fb;
+}
+.dash-worker.ok {
+  color: #14456e;
+}
+.dash-worker.ng {
+  color: #c23a1b;
+  font-weight: bold;
+  background: #fdeeea;
+  border-color: #e0a99a;
+}
+.dash-scroll {
+  max-height: 220px;
+  overflow-y: auto;
+}
+.kv {
+  font-size: 12px;
+  line-height: 1.9;
+  margin-bottom: 6px;
+}
+.kv th {
+  text-align: left;
+  padding-right: 12px;
+  color: #556;
+  font-weight: normal;
+  white-space: nowrap;
+  vertical-align: top;
+}
+
+/* 行動ログ */
+.log-head {
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: bold;
+  color: #334;
+  cursor: pointer;
+}
+.log-scroll {
+  max-height: 200px;
+  overflow-y: auto;
+  margin-bottom: 6px;
+}
+.log-body .detail {
+  font-size: 10px;
+  color: #667;
+  word-break: break-all;
+  max-width: 300px;
+}
+
+/* 書き込みの管理 */
+.post-body {
+  max-width: 520px;
+  word-break: break-word;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+.post-body b {
+  display: block;
+}
+.nowrap {
+  white-space: nowrap;
+}
+
+/* 凍結 */
+.susp-tag {
+  display: inline-block;
+  background: #c23a1b;
+  color: #fff;
+  font-size: 10px;
+  padding: 0 4px;
+  border-radius: 2px;
+  margin-left: 4px;
+}
+.susp-state {
+  font-size: 12px;
+  color: #556;
+  margin-bottom: 6px;
+}
+.susp-state.on {
+  color: #c23a1b;
+  font-weight: bold;
+}
+.susp-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.susp-days {
+  width: 60px;
+}
+.susp-reason {
+  flex: 1 1 200px;
+  min-width: 160px;
+}
+
+/* 一斉メール */
+.bc-body {
+  width: 100%;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 6px;
+}
+.bc-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+.bc-bar .btn {
+  margin-left: auto;
+}
+
+/* お金・持ち物の集計 */
+.money-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.money-bar input {
+  width: 70px;
+  margin-left: 4px;
+}
+.money-totals {
+  font-size: 12px;
+  line-height: 1.8;
+  background: #f4f7fb;
+  border: 1px solid #c9d4e0;
+  padding: 6px 8px;
+}
+.money-totals .big {
+  font-size: 15px;
+  color: #14456e;
+}
+.money-scroll {
+  max-height: 320px;
+  overflow-y: auto;
+}
+/* 取り消し済みの取引。残高には効いていないので薄くする。 */
+tr.reversed td {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+tr.reversed .hint {
+  text-decoration: none;
+}
+/* 入金は青、出金は赤。金額の符号を色でも分かるようにする。 */
+.plus {
+  color: #1b6ec2;
+}
+.minus {
+  color: #c23a1b;
 }
 .admin-page {
   background-color: #dfe6ee;

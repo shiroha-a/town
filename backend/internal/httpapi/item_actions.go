@@ -65,6 +65,35 @@ func (s *Server) buy(w http.ResponseWriter, r *http.Request) {
 	writeItemActionResult(w, p, err)
 }
 
+// useAllResp is the player state plus a summary of what the bulk use did.
+type useAllResp struct {
+	playerResp
+	UseAllResult action.UseAllResult `json:"use_all_result"`
+}
+
+// useAll uses every held item once (満腹度が回復する品を除く).
+func (s *Server) useAll(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	// item_id は要らないので decodeItemAction は使えない(あちらは必須にしている)。
+	var req struct {
+		IdempotencyKey string `json:"idempotency_key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	p, res, err := s.actions.DoUseAll(r.Context(), id, req.IdempotencyKey)
+	if err != nil {
+		writeItemActionResult(w, nil, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, useAllResp{playerResp: toResp(p), UseAllResult: *res})
+}
+
 func (s *Server) use(w http.ResponseWriter, r *http.Request) {
 	id, req, ok := decodeItemAction(w, r)
 	if !ok {

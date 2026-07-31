@@ -83,6 +83,47 @@ const cooldowns = computed<Record<number, Cooldown>>(() => {
   return map;
 });
 
+// 一括使用の対象。使える品(持つだけの品でない・クールタイムが明けている)のうち、
+// 満腹度が回復する品は外す。判定はサーバー側と同じ条件だが、こちらは点数を出すため
+// だけのもので、実際に何が使えたかは応答で分かる。
+const bulkTargets = computed(() =>
+  props.player.items.filter(
+    (it) => it.usable && !it.fills_satiety && !cooldowns.value[it.item_id]?.active,
+  ),
+);
+// まとめて耐久を減らす操作なので、誤爆しないよう確認を1段挟む。
+const confirmBulk = ref(false);
+
+async function useAll() {
+  confirmBulk.value = false;
+  busy.value = true;
+  const before = props.player;
+  try {
+    const after = await api.useAll(props.player.id);
+    emit('update', after);
+    const r = after.use_all_result;
+    const lines = buildEffectLines(before, after);
+    // 使えなかったのはパワー不足の品だけ(クールタイム中の品はそもそも対象外なので
+    // ここには出てこない)。どれがなぜ使えなかったかを1行ずつ出す。
+    for (const s of r.skipped) lines.push(`${s.name}：${s.reason}`);
+    showToast({
+      variant: 'item',
+      title: r.used.length > 0 ? `${r.used.length}点をまとめて使った` : '使えたものはありません',
+      lines,
+      icon: 'item',
+    });
+  } catch (e) {
+    showToast({
+      variant: 'error',
+      title: '使えませんでした',
+      lines: [e instanceof Error ? e.message : String(e)],
+      icon: 'item',
+    });
+  } finally {
+    busy.value = false;
+  }
+}
+
 async function use(it: ItemStack) {
   // クールタイム中はボタンをグレーアウトしているが、二重の安全策として弾く。
   if (cooldowns.value[it.item_id]?.active) return;
@@ -130,6 +171,28 @@ async function use(it: ItemStack) {
     </div>
 
     <div class="panel-white">
+      <div v-if="player.items.length > 0" class="bulk">
+        <template v-if="!confirmBulk">
+          <button
+            class="btn"
+            :disabled="busy || bulkTargets.length === 0"
+            data-test="use-all"
+            @click="confirmBulk = true"
+          >
+            まとめて使う（{{ bulkTargets.length }}点）
+          </button>
+          <span class="bulk-hint">
+            いま使える持ち物を1回ずつ使います。食べ物（満腹度が回復する品）は使いません。
+          </span>
+        </template>
+        <template v-else>
+          <span class="bulk-ask">{{ bulkTargets.length }}点を1回ずつ使います。</span>
+          <button class="btn primary" :disabled="busy" data-test="use-all-go" @click="useAll()">
+            使う
+          </button>
+          <button class="btn" :disabled="busy" @click="confirmBulk = false">やめる</button>
+        </template>
+      </div>
       <p v-if="player.items.length === 0" class="muted">持ち物はありません。</p>
       <div v-else class="table-scroll sticky-table">
         <table class="item-table">
@@ -223,6 +286,23 @@ async function use(it: ItemStack) {
 </template>
 
 <style scoped>
+/* 一括使用の行。表の上に置く。 */
+.bulk {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-bottom: 8px;
+}
+.bulk-hint {
+  font-size: 11px;
+  color: #666;
+  line-height: 1.5;
+}
+.bulk-ask {
+  font-size: 12px;
+  color: #a0308c;
+}
 .item-page {
   background-color: #ffcc66;
   /* 旧command_bak.gifのCSS再現: 6px周期の1pxライン */

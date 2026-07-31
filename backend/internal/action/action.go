@@ -279,11 +279,22 @@ func (s *Service) DoWork(ctx context.Context, playerID int64, idempotencyKey str
 		if ok, failed := econ.conds.Check(state); !ok {
 			return &ConditionError{Message: conditionMessage(failed)}
 		}
-		if state.Params["energy"].Value < econ.bodyCost {
-			return &ConditionError{Message: "身体パワーが足りません。"}
+		// パワー消費 = 基準 + 基準×ランク係数(隠しランクで重みが変わる。青天井の
+		// パラメータ値には依存しない。基準以下にはならない)。
+		//
+		// 判定をこの消費量で行うのは、給料に乗る労働ボーナスが「消費したパワー」に
+		// 比例するため。基準ぶんだけで働けると、消費は残量で頭打ちになるのに
+		// ボーナスは満額付き、実際には払っていないパワーぶんまで貰えていた。
+		// 職安の一覧が出しているのもこの消費量なので、表示とも揃う。
+		energySpend := jobrule.PowerSpend(econ.bodyCost, econ.rank)
+		nouSpend := jobrule.PowerSpend(econ.nouCost, econ.rank)
+		if state.Params["energy"].Value < energySpend {
+			return &ConditionError{Message: fmt.Sprintf(
+				"身体パワーが足りません。この仕事には%dの身体パワーが必要です。", energySpend)}
 		}
-		if state.Params["nou_energy"].Value < econ.nouCost {
-			return &ConditionError{Message: "頭脳パワーが足りません。"}
+		if state.Params["nou_energy"].Value < nouSpend {
+			return &ConditionError{Message: fmt.Sprintf(
+				"頭脳パワーが足りません。この仕事には%dの頭脳パワーが必要です。", nouSpend)}
 		}
 		// 2b. 体格(BMI)条件。身長は求職時に判定するためここでは体型のみ。
 		var heightCm, weightG, diseaseIndex int
@@ -324,12 +335,8 @@ func (s *Service) DoWork(ctx context.Context, playerID int64, idempotencyKey str
 		}
 		newLevel := newExp / 100
 		leveledUp := newLevel > oldLevel
-		// パワー消費 = 基準 + 基準×ランク係数(隠しランクで重みが変わる。青天井の
-		// パラメータ値には依存しない。基準以下にはならない)。
-		energySpend := jobrule.PowerSpend(econ.bodyCost, econ.rank)
-		nouSpend := jobrule.PowerSpend(econ.nouCost, econ.rank)
 		// 6. 今回の給料(基本給 × レベル × raise_rate% を上乗せ)+ 消費した合計パワーに
-		// 見合う労働ボーナス。
+		// 見合う労働ボーナス。消費量は2で確定済み(足りなければここまで来ない)。
 		workBonus := int64(energySpend+nouSpend) * jobrule.PayPerPower
 		thisSalary := econ.salary + econ.salary*int64(newLevel)*int64(econ.raiseRate)/100 + workBonus
 		// 7. 勤務回数を進め、支払間隔ごとにまとめて支給。
@@ -2093,51 +2100,162 @@ func (s *Service) DoUse(ctx context.Context, playerID, itemID int64, idempotency
 				}
 			}
 		}
-		// 'use'単位は使用ごとに残回数-1。'day'単位は日数経過で減るため使用では減らさない。
-		var affected int64
-		if durUnit == "day" {
-			tag, err := tx.Exec(ctx,
-				`UPDATE player_items SET last_used_at = now(), updated_at = now()
-				 WHERE player_id = $1 AND item_id = $2 AND remaining_uses > 0`, playerID, itemID)
-			if err != nil {
-				return fmt.Errorf("use item: %w", err)
-			}
-			affected = tag.RowsAffected()
-		} else {
-			tag, err := tx.Exec(ctx,
-				`UPDATE player_items pi
-				 SET remaining_uses = pi.remaining_uses - 1,
-				     quantity = CEIL((pi.remaining_uses - 1)::numeric / ci.durability),
-				     last_used_at = now(), updated_at = now()
-				 FROM content_items ci
-				 WHERE pi.player_id = $1 AND pi.item_id = $2 AND pi.item_id = ci.id AND pi.remaining_uses > 0`,
-				playerID, itemID)
-			if err != nil {
-				return fmt.Errorf("consume item: %w", err)
-			}
-			affected = tag.RowsAffected()
+		held, err := consumeOneUse(ctx, tx, playerID, itemID, durUnit)
+		if err != nil {
+			return err
 		}
-		if affected == 0 {
+		if !held {
 			return &ConditionError{Message: "そのアイテムを持っていません。"}
 		}
-		if err := s.applyEffect(ctx, tx, playerID, "use", eff, state); err != nil {
+		if err := s.applyItemUse(ctx, tx, playerID, itemID, eff, state); err != nil {
 			return err
-		}
-		// アイテムにカロリーがあれば(高級弁当など)体重が増える。
-		if err := addWeightFromItem(ctx, tx, playerID, itemID); err != nil {
-			return err
-		}
-		// 残量が尽きたら持ち物から削除する。
-		if _, err := tx.Exec(ctx,
-			`DELETE FROM player_items WHERE player_id = $1 AND item_id = $2 AND remaining_uses <= 0`,
-			playerID, itemID); err != nil {
-			return fmt.Errorf("drop empty item: %w", err)
 		}
 		if fillsSatiety {
 			return fillSatiety(ctx, tx, playerID)
 		}
 		return nil
 	})
+}
+
+// consumeOneUse spends one use of a held item and stamps last_used_at. It
+// reports whether the player actually held it.
+//
+// 'use'単位は使用ごとに残回数-1。'day'単位は日数経過で減るため使用では減らさない。
+func consumeOneUse(ctx context.Context, tx pgx.Tx, playerID, itemID int64, durUnit string) (bool, error) {
+	if durUnit == "day" {
+		tag, err := tx.Exec(ctx,
+			`UPDATE player_items SET last_used_at = now(), updated_at = now()
+			 WHERE player_id = $1 AND item_id = $2 AND remaining_uses > 0`, playerID, itemID)
+		if err != nil {
+			return false, fmt.Errorf("use item: %w", err)
+		}
+		return tag.RowsAffected() > 0, nil
+	}
+	tag, err := tx.Exec(ctx,
+		`UPDATE player_items pi
+		 SET remaining_uses = pi.remaining_uses - 1,
+		     quantity = CEIL((pi.remaining_uses - 1)::numeric / ci.durability),
+		     last_used_at = now(), updated_at = now()
+		 FROM content_items ci
+		 WHERE pi.player_id = $1 AND pi.item_id = $2 AND pi.item_id = ci.id AND pi.remaining_uses > 0`,
+		playerID, itemID)
+	if err != nil {
+		return false, fmt.Errorf("consume item: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// applyItemUse applies one use of an item: its effect, the weight its calories
+// add, and the removal of the stack once it is used up.
+func (s *Service) applyItemUse(ctx context.Context, tx pgx.Tx, playerID, itemID int64, eff effects.Effect, state effects.State) error {
+	if err := s.applyEffect(ctx, tx, playerID, "use", eff, state); err != nil {
+		return err
+	}
+	// アイテムにカロリーがあれば(高級弁当など)体重が増える。
+	if err := addWeightFromItem(ctx, tx, playerID, itemID); err != nil {
+		return err
+	}
+	// 残量が尽きたら持ち物から削除する。
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM player_items WHERE player_id = $1 AND item_id = $2 AND remaining_uses <= 0`,
+		playerID, itemID); err != nil {
+		return fmt.Errorf("drop empty item: %w", err)
+	}
+	return nil
+}
+
+// UseAllResult summarizes a bulk use for the result toast.
+type UseAllResult struct {
+	Used    []string      `json:"used"`    // 使えた品名
+	Skipped []SkippedItem `json:"skipped"` // 使えず飛ばした品と理由
+}
+
+// SkippedItem is one item a bulk use could not apply.
+type SkippedItem struct {
+	Name   string `json:"name"`
+	Reason string `json:"reason"`
+}
+
+// DoUseAll uses every held item once, skipping the ones that cannot be used
+// right now. Items that fill 満腹度 are left alone: they are worth eating
+// deliberately, and using them while full just fails.
+//
+// 途中で失敗しても止めない。パワー不足の品が1つあるだけで何も使えないのは不便な
+// ので、使えたものは使い、飛ばした品は理由を添えて返す。
+func (s *Service) DoUseAll(ctx context.Context, playerID int64, idempotencyKey string) (*player.Player, *UseAllResult, error) {
+	result := UseAllResult{Used: []string{}, Skipped: []SkippedItem{}}
+	p, err := s.runAction(ctx, playerID, "use_all", idempotencyKey, func(ctx context.Context, tx pgx.Tx, _ effects.State) error {
+		type candidate struct {
+			id      int64
+			name    string
+			effJSON []byte
+			durUnit string
+		}
+		// 満腹判定の式は loadItemUse と同じ(フラグの設定漏れをカテゴリで補う)。
+		// クールタイム中の品はここで落とす。順序はitem_id昇順で固定する:
+		// パワーを消費する品が混ざると先に使ったぶんで後の品が使えなくなるため、
+		// 実行のたびに結果が変わらないようにする。
+		rows, err := tx.Query(ctx, `
+			SELECT pi.item_id, ci.name, ci.effect, ci.durability_unit
+			FROM player_items pi JOIN content_items ci ON ci.id = pi.item_id
+			WHERE pi.player_id = $1
+			  AND pi.remaining_uses > 0
+			  AND ci.usable
+			  AND NOT (ci.fills_satiety OR ci.category IN ('食料品', 'ファーストフード'))
+			  AND ($2 OR ci.use_interval_min <= 0 OR pi.last_used_at IS NULL
+			       OR pi.last_used_at + make_interval(mins => ci.use_interval_min) <= now())
+			ORDER BY pi.item_id`, playerID, s.settings.Get().DebugNoCooldown)
+		if err != nil {
+			return fmt.Errorf("list usable items: %w", err)
+		}
+		var cands []candidate
+		for rows.Next() {
+			var c candidate
+			if err := rows.Scan(&c.id, &c.name, &c.effJSON, &c.durUnit); err != nil {
+				rows.Close()
+				return fmt.Errorf("scan usable item: %w", err)
+			}
+			cands = append(cands, c)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("list usable items: %w", err)
+		}
+		if len(cands) == 0 {
+			return &ConditionError{Message: "いま使える持ち物がありません。"}
+		}
+		for _, c := range cands {
+			eff, err := effects.ParseEffect(c.effJSON)
+			if err != nil {
+				return fmt.Errorf("item %d effect: %w", c.id, err)
+			}
+			// 前の品の効果でパワーが変わるため、品ごとに状態を取り直す。
+			state, err := s.readState(ctx, tx, playerID)
+			if err != nil {
+				return err
+			}
+			if param, short := eff.InsufficientParam(state); short {
+				result.Skipped = append(result.Skipped, SkippedItem{Name: c.name, Reason: paramShortMessage(param)})
+				continue
+			}
+			held, err := consumeOneUse(ctx, tx, playerID, c.id, c.durUnit)
+			if err != nil {
+				return err
+			}
+			if !held {
+				continue // 直前の処理で無くなった(通常は起きない)
+			}
+			if err := s.applyItemUse(ctx, tx, playerID, c.id, eff, state); err != nil {
+				return err
+			}
+			result.Used = append(result.Used, c.name)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return p, &result, nil
 }
 
 // DoEat eats a food from the 食堂 menu: it charges the price and applies the

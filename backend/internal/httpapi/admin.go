@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/shiroha-a/town/internal/building"
 	"github.com/shiroha-a/town/internal/condition"
@@ -531,6 +532,11 @@ type adminPlayerSummaryResp struct {
 	InstanceHost string `json:"instance_host"`
 	RemoteUserID string `json:"remote_user_id"`
 	IsGuest      bool   `json:"is_guest"`
+	// 凍結(ログイン不可)。一覧で目印を出すために持つ。
+	Suspended      bool       `json:"suspended"`
+	SuspendForever bool       `json:"suspend_forever"`
+	SuspendedUntil *time.Time `json:"suspended_until"`
+	SuspendReason  string     `json:"suspend_reason"`
 }
 
 func (s *Server) adminListPlayers(w http.ResponseWriter, r *http.Request) {
@@ -551,7 +557,9 @@ func (s *Server) adminListPlayers(w http.ResponseWriter, r *http.Request) {
 		out = append(out, adminPlayerSummaryResp{
 			ID: p.ID, DisplayName: p.DisplayName, Roles: roles, Money: p.Money, Job: p.Job, JobLevel: p.JobLevel,
 			Acct: p.Acct(), InstanceHost: p.InstanceHost, RemoteUserID: p.RemoteUserID,
-			IsGuest: p.IsGuest,
+			IsGuest:   p.IsGuest,
+			Suspended: p.Suspension.Active(), SuspendForever: p.Suspension.Forever,
+			SuspendedUntil: p.Suspension.Until, SuspendReason: p.Suspension.Reason,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
