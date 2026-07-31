@@ -637,6 +637,49 @@ export interface ModPost {
   created_at: string;
 }
 
+/** ダッシュボード(システム・DB・ワーカー・住民)。 */
+export interface Dashboard {
+  host: {
+    load1: number;
+    load5: number;
+    load15: number;
+    cpus: number;
+    mem_total_kb: number;
+    mem_free_kb: number;
+    swap_total_kb: number;
+    swap_free_kb: number;
+    disk_total_b: number;
+    disk_free_b: number;
+    /** このプロセス自身の使用量。 */
+    proc: {
+      rss_bytes: number;
+      vms_bytes: number;
+      cpu_seconds: number;
+      cpu_percent: number; // 1コアを使い切って100%
+      threads: number;
+      open_fds: number;
+      goroutines: number;
+      heap_alloc_b: number;
+      sys_b: number;
+      uptime_sec: number;
+      go_version: string;
+    };
+  };
+  db: {
+    size_b: number;
+    connections: number;
+    max_conns: number;
+    tables: { table: string; rows: number; bytes: number }[];
+  };
+  worker: {
+    today: string;
+    day_seen: boolean;
+    recent: { job_type: string; job_date: string; ran_at: string }[];
+  };
+  players: { total: number; guests: number; suspended: number; active_24h: number };
+  server_now: string;
+}
+
 /** 住民の行動ログ1件。 */
 export interface ActionLogEntry {
   id: number;
@@ -2090,6 +2133,7 @@ export const api = {
     request<{ deleted: boolean }>('DELETE', `/admin/posts/${source}/${id}`),
   adminPlayerLog: (id: number, limit = 100) =>
     request<PlayerLog>('GET', `/admin/players/${id}/log?limit=${limit}`),
+  adminDashboard: () => request<Dashboard>('GET', '/admin/dashboard'),
   // 取り消しは逆仕訳を1本足す(台帳は追記専用なので行は消さない)。
   adminReverseTx: (txId: number) =>
     request<{ reversed: boolean; tx_id: number }>('POST', '/admin/money/reverse', {

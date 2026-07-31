@@ -31,6 +31,7 @@ import {
   type Suspension,
   type ModPost,
   type PlayerLog,
+  type Dashboard,
 } from '../api';
 import { PARAM_FULL } from '../params';
 
@@ -55,6 +56,7 @@ const open = reactive({
   money: false,
   broadcast: false,
   posts: false,
+  dash: false,
 });
 
 // 効果/条件で対象にできるパラメータ。
@@ -1585,6 +1587,46 @@ async function deleteEdit() {
   }
 }
 
+// --- ダッシュボード ---
+//
+// 開いた瞬間に「動いているか」が分かることを狙う。特に日次処理(利息・ローン・
+// 病気・ロト抽選)が止まっていても気づけないのが一番困るので、そこを目立たせる。
+const dash = ref<Dashboard | null>(null);
+async function loadDash() {
+  busy.value = true;
+  message.value = '';
+  try {
+    dash.value = await api.adminDashboard();
+  } catch (e) {
+    fail(e);
+  } finally {
+    busy.value = false;
+  }
+}
+function toggleDash() {
+  open.dash = !open.dash;
+  if (open.dash && !dash.value) void loadDash();
+}
+/** 大きさに合わせて単位を選ぶ。GB固定だとDBサイズが「0.0GB」に潰れる。 */
+function size(bytes: number): string {
+  if (!bytes) return '-';
+  if (bytes >= 1024 ** 3) return (bytes / 1024 ** 3).toFixed(1) + 'GB';
+  if (bytes >= 1024 ** 2) return (bytes / 1024 ** 2).toFixed(1) + 'MB';
+  return (bytes / 1024).toFixed(0) + 'KB';
+}
+/** 使用率(%)。全体が0なら空。 */
+function usedPct(total: number, free: number): string {
+  if (!total) return '';
+  return Math.round(((total - free) / total) * 100) + '%';
+}
+function uptime(sec: number): string {
+  if (sec < 60) return `${sec}秒`;
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  return (d ? `${d}日` : '') + (d || h ? `${h}時間` : '') + `${m}分`;
+}
+
 // --- 行動ログ ---
 //
 // 「この人がいつ何をしたか」を追う手段がpsqlしかなかった。ユーザーを見ている
@@ -1898,6 +1940,191 @@ function fmtTime(iso: string): string {
                 </table>
               </div>
             </section>
+          </div>
+        </section>
+
+        <!-- ダッシュボード -->
+        <section class="fold">
+          <button class="fold-head" @click="toggleDash">
+            <span class="caret">{{ open.dash ? '▼' : '▶' }}</span> ダッシュボード
+          </button>
+          <div v-if="open.dash" class="fold-body">
+            <template v-if="dash">
+              <section class="panel">
+                <h3>
+                  日次処理<span class="hint">
+                    ※利息・ローン・病気・ロト抽選。止まっていても普段は気づけません</span
+                  >
+                </h3>
+                <div class="dash-worker" :class="dash.worker.day_seen ? 'ok' : 'ng'">
+                  {{
+                    dash.worker.day_seen ? '今日ぶんは実行済み' : '今日ぶんはまだ実行されていません'
+                  }}
+                  <span class="hint">（街の今日: {{ dash.worker.today }}）</span>
+                </div>
+                <div class="table-scroll dash-scroll">
+                  <table class="list-table">
+                    <thead>
+                      <tr>
+                        <th>対象日</th>
+                        <th class="l">処理</th>
+                        <th>実行</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-if="dash.worker.recent.length === 0">
+                        <td colspan="3" class="muted">一度も走っていません。</td>
+                      </tr>
+                      <tr v-for="j in dash.worker.recent" :key="j.job_date + j.job_type">
+                        <td class="nowrap">{{ j.job_date }}</td>
+                        <td class="l">{{ j.job_type }}</td>
+                        <td class="nowrap">{{ fmtTime(j.ran_at) }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section class="panel">
+                <h3>システム<span class="hint"> ※負荷とメモリはホスト全体の値です</span></h3>
+                <table class="kv">
+                  <tr>
+                    <th>ロード</th>
+                    <td>
+                      {{ dash.host.load1.toFixed(2) }} / {{ dash.host.load5.toFixed(2) }} /
+                      {{ dash.host.load15.toFixed(2) }}
+                      <span class="hint">（CPU {{ dash.host.cpus }}コア）</span>
+                    </td>
+                  </tr>
+                  <tr>
+                    <th>メモリ</th>
+                    <td>
+                      使用 {{ usedPct(dash.host.mem_total_kb, dash.host.mem_free_kb) }} / 空き
+                      {{ size(dash.host.mem_free_kb * 1024) }} of
+                      {{ size(dash.host.mem_total_kb * 1024) }}
+                    </td>
+                  </tr>
+                  <tr v-if="dash.host.swap_total_kb">
+                    <th>スワップ</th>
+                    <td>
+                      使用 {{ usedPct(dash.host.swap_total_kb, dash.host.swap_free_kb) }} of
+                      {{ size(dash.host.swap_total_kb * 1024) }}
+                    </td>
+                  </tr>
+                  <tr>
+                    <th>ディスク</th>
+                    <td>
+                      使用 {{ usedPct(dash.host.disk_total_b, dash.host.disk_free_b) }} / 空き
+                      {{ size(dash.host.disk_free_b) }} of {{ size(dash.host.disk_total_b) }}
+                    </td>
+                  </tr>
+                </table>
+              </section>
+
+              <section class="panel">
+                <h3>
+                  このプロセス<span class="hint">
+                    ※増え続けていないか(漏れていないか)を見る場所です</span
+                  >
+                </h3>
+                <table class="kv">
+                  <tr>
+                    <th>CPU</th>
+                    <td>
+                      {{ dash.host.proc.cpu_percent.toFixed(1) }}%
+                      <span class="hint"
+                        >（1コア=100% ／ 累計 {{ dash.host.proc.cpu_seconds.toFixed(1) }}秒）</span
+                      >
+                    </td>
+                  </tr>
+                  <tr>
+                    <th>メモリ</th>
+                    <td>
+                      実メモリ {{ size(dash.host.proc.rss_bytes) }}
+                      <span class="hint">（仮想 {{ size(dash.host.proc.vms_bytes) }}）</span>
+                    </td>
+                  </tr>
+                  <tr>
+                    <th>Goのヒープ</th>
+                    <td>
+                      {{ size(dash.host.proc.heap_alloc_b) }}
+                      <span class="hint">（確保済み {{ size(dash.host.proc.sys_b) }}）</span>
+                    </td>
+                  </tr>
+                  <tr>
+                    <th>スレッド</th>
+                    <td>
+                      {{ dash.host.proc.threads }} ／ goroutine {{ dash.host.proc.goroutines }} ／
+                      開いているFD
+                      {{ dash.host.proc.open_fds }}
+                    </td>
+                  </tr>
+                  <tr>
+                    <th>稼働</th>
+                    <td>
+                      {{ uptime(dash.host.proc.uptime_sec) }}
+                      <span class="hint">（{{ dash.host.proc.go_version }}）</span>
+                    </td>
+                  </tr>
+                </table>
+              </section>
+
+              <section class="panel">
+                <h3>データベース</h3>
+                <table class="kv">
+                  <tr>
+                    <th>サイズ</th>
+                    <td>{{ size(dash.db.size_b) }}</td>
+                  </tr>
+                  <tr>
+                    <th>接続</th>
+                    <td>{{ dash.db.connections }} / {{ dash.db.max_conns }}</td>
+                  </tr>
+                </table>
+                <div class="table-scroll dash-scroll">
+                  <table class="list-table">
+                    <thead>
+                      <tr>
+                        <th class="l">表</th>
+                        <th>行数(概算)</th>
+                        <th>サイズ</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="t in dash.db.tables" :key="t.table">
+                        <td class="l">{{ t.table }}</td>
+                        <td class="r">{{ t.rows.toLocaleString('ja-JP') }}</td>
+                        <td class="r">{{ size(t.bytes) }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section class="panel">
+                <h3>住民</h3>
+                <table class="kv">
+                  <tr>
+                    <th>住民</th>
+                    <td>{{ dash.players.total }}人</td>
+                  </tr>
+                  <tr>
+                    <th>24時間以内</th>
+                    <td>{{ dash.players.active_24h }}人</td>
+                  </tr>
+                  <tr>
+                    <th>お試し</th>
+                    <td>{{ dash.players.guests }}人</td>
+                  </tr>
+                  <tr>
+                    <th>凍結中</th>
+                    <td>{{ dash.players.suspended }}人</td>
+                  </tr>
+                </table>
+                <button class="btn mini" :disabled="busy" @click="loadDash">取り直す</button>
+              </section>
+            </template>
+            <p v-else class="muted">読み込み中…</p>
           </div>
         </section>
 
@@ -3810,6 +4037,41 @@ function fmtTime(iso: string): string {
 }
 .held-num {
   width: 68px;
+}
+
+/* ダッシュボード */
+.dash-worker {
+  font-size: 13px;
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  border: 1px solid #c9d4e0;
+  background: #f4f7fb;
+}
+.dash-worker.ok {
+  color: #14456e;
+}
+.dash-worker.ng {
+  color: #c23a1b;
+  font-weight: bold;
+  background: #fdeeea;
+  border-color: #e0a99a;
+}
+.dash-scroll {
+  max-height: 220px;
+  overflow-y: auto;
+}
+.kv {
+  font-size: 12px;
+  line-height: 1.9;
+  margin-bottom: 6px;
+}
+.kv th {
+  text-align: left;
+  padding-right: 12px;
+  color: #556;
+  font-weight: normal;
+  white-space: nowrap;
+  vertical-align: top;
 }
 
 /* 行動ログ */

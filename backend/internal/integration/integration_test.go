@@ -2394,6 +2394,132 @@ func TestAdminPlayerLog(t *testing.T) {
 	}
 }
 
+// ダッシュボード。「動いているか」が1画面で分かること。
+func TestAdminDashboard(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	admin := register(t, srv.URL, "misskey.example", "root")
+	alice := register(t, srv.URL, "misskey.example", "alice")
+
+	if code, _ := adminGet(t, srv.URL, "/api/v1/admin/dashboard", alice.ID); code != http.StatusForbidden {
+		t.Errorf("一般ユーザー = %d, want 403", code)
+	}
+
+	type dash struct {
+		Host struct {
+			CPUs       int   `json:"cpus"`
+			MemTotalKB int64 `json:"mem_total_kb"`
+			DiskTotalB int64 `json:"disk_total_b"`
+			Proc       struct {
+				RSSBytes   int64   `json:"rss_bytes"`
+				VMSBytes   int64   `json:"vms_bytes"`
+				CPUSeconds float64 `json:"cpu_seconds"`
+				CPUPercent float64 `json:"cpu_percent"`
+				Threads    int     `json:"threads"`
+				OpenFDs    int     `json:"open_fds"`
+				Goroutines int     `json:"goroutines"`
+				HeapAllocB int64   `json:"heap_alloc_b"`
+				GoVersion  string  `json:"go_version"`
+			} `json:"proc"`
+		} `json:"host"`
+		DB struct {
+			SizeB       int64 `json:"size_b"`
+			Connections int   `json:"connections"`
+			MaxConns    int   `json:"max_conns"`
+			Tables      []struct {
+				Table string `json:"table"`
+				Bytes int64  `json:"bytes"`
+			} `json:"tables"`
+		} `json:"db"`
+		Worker struct {
+			Today   string `json:"today"`
+			DaySeen bool   `json:"day_seen"`
+			Recent  []struct {
+				JobType string `json:"job_type"`
+				JobDate string `json:"job_date"`
+			} `json:"recent"`
+		} `json:"worker"`
+		Players struct {
+			Total     int `json:"total"`
+			Guests    int `json:"guests"`
+			Suspended int `json:"suspended"`
+		} `json:"players"`
+	}
+
+	get := func() dash {
+		t.Helper()
+		code, raw := adminGet(t, srv.URL, "/api/v1/admin/dashboard", admin.ID)
+		if code != http.StatusOK {
+			t.Fatalf("ダッシュボード = %d: %s", code, raw)
+		}
+		var d dash
+		if err := json.Unmarshal(raw, &d); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return d
+	}
+
+	d := get()
+	// ホスト。/proc から読めるものは0にならない。
+	if d.Host.CPUs < 1 || d.Host.MemTotalKB <= 0 || d.Host.DiskTotalB <= 0 {
+		t.Errorf("ホストの値が取れていない: %+v", d.Host)
+	}
+	// プロセス自身。RSSは必ず正で、仮想メモリはそれ以上。スレッドとFDも1以上。
+	p := d.Host.Proc
+	if p.RSSBytes <= 0 || p.VMSBytes < p.RSSBytes {
+		t.Errorf("プロセスのメモリ = RSS %d / VMS %d", p.RSSBytes, p.VMSBytes)
+	}
+	if p.Threads < 1 || p.OpenFDs < 1 || p.Goroutines < 1 || p.HeapAllocB <= 0 {
+		t.Errorf("プロセスの値が取れていない: %+v", p)
+	}
+	// CPUは累計が0以上、使用率は0〜(コア数×100)%の範囲に収まる。
+	if p.CPUSeconds <= 0 {
+		t.Errorf("累計CPU時間 = %v, want 正の値", p.CPUSeconds)
+	}
+	if p.CPUPercent < 0 || p.CPUPercent > float64(d.Host.CPUs)*100 {
+		t.Errorf("CPU使用率 = %v%%, コア数=%d", p.CPUPercent, d.Host.CPUs)
+	}
+	if p.GoVersion == "" {
+		t.Error("Goのバージョンが空")
+	}
+	// DB。
+	if d.DB.SizeB <= 0 || d.DB.Connections < 1 || d.DB.MaxConns < 1 {
+		t.Errorf("DBの値が取れていない: %+v", d.DB)
+	}
+	if len(d.DB.Tables) == 0 {
+		t.Error("表の一覧が空")
+	}
+	// 住民の内訳。
+	if d.Players.Total != 2 || d.Players.Guests != 0 || d.Players.Suspended != 0 {
+		t.Errorf("住民の内訳 = %+v, want 住民2/ゲスト0/凍結0", d.Players)
+	}
+	// 日次処理は一度も走っていない。
+	if d.Worker.DaySeen || len(d.Worker.Recent) != 0 {
+		t.Errorf("走っていないのに実行済みに見えている: %+v", d.Worker)
+	}
+	if d.Worker.Today == "" {
+		t.Error("街の今日が空")
+	}
+
+	// 今日ぶんを記録すると「実行済み」に変わる。
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO worker_jobs (job_date, job_type) VALUES ($1::date, 'daily')`,
+		d.Worker.Today); err != nil {
+		t.Fatal(err)
+	}
+	// 凍結を1件作ると内訳に出る。
+	if err := testPlayerSvc.AdminSuspend(ctx, alice.ID, 0, "検証"); err != nil {
+		t.Fatal(err)
+	}
+	d = get()
+	if !d.Worker.DaySeen {
+		t.Error("今日ぶんを記録しても実行済みにならない")
+	}
+	if d.Players.Suspended != 1 {
+		t.Errorf("凍結中 = %d人, want 1", d.Players.Suspended)
+	}
+}
+
 // TestTownMap covers the town map API: GET is public, PUT is admin-only, updates
 // persist and are validated (grid bounds / one-facility-per-cell).
 func TestTownMap(t *testing.T) {

@@ -7,9 +7,11 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/shiroha-a/town/internal/gametime"
 	"github.com/shiroha-a/town/internal/mail"
 	"github.com/shiroha-a/town/internal/moderation"
 	"github.com/shiroha-a/town/internal/player"
+	"github.com/shiroha-a/town/internal/sysinfo"
 )
 
 // 運営まわりの管理操作。すべて管理者のみ(authGuard が /api/v1/admin/ を見て弾く)。
@@ -228,6 +230,140 @@ func (s *Server) adminPlayerLog(w http.ResponseWriter, r *http.Request) {
 		out.Status = append(out.Status, h)
 	}
 	if err := hrows.Err(); err != nil {
+		writeInternal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+type dbTableResp struct {
+	Table string `json:"table"`
+	Rows  int64  `json:"rows"`
+	Bytes int64  `json:"bytes"`
+}
+
+type workerJobResp struct {
+	JobType string    `json:"job_type"`
+	JobDate string    `json:"job_date"`
+	RanAt   time.Time `json:"ran_at"`
+}
+
+type dashboardResp struct {
+	Host sysinfo.Host `json:"host"`
+	DB   struct {
+		SizeB       int64         `json:"size_b"`
+		Connections int           `json:"connections"`
+		MaxConns    int           `json:"max_conns"`
+		Tables      []dbTableResp `json:"tables"`
+	} `json:"db"`
+	Worker struct {
+		// Today は街の今日の日付(設定の日付境界に合わせたもの)。
+		Today   string          `json:"today"`
+		DaySeen bool            `json:"day_seen"` // 今日ぶんの日次処理が済んでいるか
+		Recent  []workerJobResp `json:"recent"`
+	} `json:"worker"`
+	Players struct {
+		Total     int `json:"total"`
+		Guests    int `json:"guests"`
+		Suspended int `json:"suspended"`
+		Active24h int `json:"active_24h"`
+	} `json:"players"`
+	ServerNow time.Time `json:"server_now"`
+}
+
+// adminDashboard is the one screen that answers "動いているか".
+func (s *Server) adminDashboard(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	ctx := r.Context()
+	var out dashboardResp
+	out.ServerNow = time.Now()
+	// ディスクはデータの置き場を見る。web からは書き込み先が見えないので、
+	// 少なくとも同じファイルシステムに載っている作業ディレクトリで代用する。
+	// CPU使用率は累計の差分でしか出せないので、200ms空けて2回測る。手で開く
+	// 画面なのでこの待ちは問題にならない。
+	out.Host = sysinfo.Read(".", 200*time.Millisecond)
+
+	if err := s.pool.QueryRow(ctx,
+		`SELECT pg_database_size(current_database()),
+		        (SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()),
+		        current_setting('max_connections')::int`).
+		Scan(&out.DB.SizeB, &out.DB.Connections, &out.DB.MaxConns); err != nil {
+		writeInternal(w, r, err)
+		return
+	}
+	// 行数は pg_class の推定値。正確に数えると表ごとに全走査になるので使わない。
+	rows, err := s.pool.Query(ctx, `
+		SELECT c.relname, GREATEST(c.reltuples, 0)::bigint,
+		       pg_total_relation_size(c.oid)
+		FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE n.nspname = 'public' AND c.relkind = 'r'
+		ORDER BY pg_total_relation_size(c.oid) DESC LIMIT 12`)
+	if err != nil {
+		writeInternal(w, r, err)
+		return
+	}
+	out.DB.Tables = []dbTableResp{}
+	for rows.Next() {
+		var t dbTableResp
+		if err := rows.Scan(&t.Table, &t.Rows, &t.Bytes); err != nil {
+			rows.Close()
+			writeInternal(w, r, err)
+			return
+		}
+		out.DB.Tables = append(out.DB.Tables, t)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		writeInternal(w, r, err)
+		return
+	}
+
+	g := s.settings.Get()
+	// 街の「今日」は設定のタイムゾーンと日付境界で決まる。実時刻の日付とは
+	// ずれるので、日次処理が済んだかの判定はこちらで行う。
+	loc, err := time.LoadLocation(g.Timezone)
+	if err != nil {
+		loc = time.Local
+	}
+	today := gametime.Date(time.Now(), loc, g.DayBoundaryHour)
+	out.Worker.Today = today.Format("2006-01-02")
+	wrows, err := s.pool.Query(ctx,
+		`SELECT job_type, job_date, ran_at FROM worker_jobs ORDER BY job_date DESC, job_type LIMIT 20`)
+	if err != nil {
+		writeInternal(w, r, err)
+		return
+	}
+	out.Worker.Recent = []workerJobResp{}
+	for wrows.Next() {
+		var j workerJobResp
+		var d time.Time
+		if err := wrows.Scan(&j.JobType, &d, &j.RanAt); err != nil {
+			wrows.Close()
+			writeInternal(w, r, err)
+			return
+		}
+		j.JobDate = d.Format("2006-01-02")
+		if j.JobDate == out.Worker.Today && j.JobType == "daily" {
+			out.Worker.DaySeen = true
+		}
+		out.Worker.Recent = append(out.Worker.Recent, j)
+	}
+	wrows.Close()
+	if err := wrows.Err(); err != nil {
+		writeInternal(w, r, err)
+		return
+	}
+
+	if err := s.pool.QueryRow(ctx, `
+		SELECT count(*) FILTER (WHERE NOT is_guest),
+		       count(*) FILTER (WHERE is_guest),
+		       count(*) FILTER (WHERE suspended_until IS NOT NULL
+		                          AND (suspended_until = 'infinity'::timestamptz OR suspended_until > now())),
+		       count(*) FILTER (WHERE last_seen_at > now() - interval '24 hours')
+		FROM players WHERE deleted_at IS NULL`).
+		Scan(&out.Players.Total, &out.Players.Guests, &out.Players.Suspended, &out.Players.Active24h); err != nil {
 		writeInternal(w, r, err)
 		return
 	}
