@@ -4812,6 +4812,134 @@ func TestUseItemRequiresEnoughPower(t *testing.T) {
 	}
 }
 
+type useAllResult struct {
+	Used    []string `json:"used"`
+	Skipped []struct {
+		Name   string `json:"name"`
+		Reason string `json:"reason"`
+	} `json:"skipped"`
+}
+
+func useAllItems(t *testing.T, base string, id int64, idemKey string) (playerResp, useAllResult, int) {
+	t.Helper()
+	body, _ := json.Marshal(map[string]string{"idempotency_key": idemKey})
+	resp, err := http.Post(base+"/api/v1/players/"+strconv.FormatInt(id, 10)+"/use/all",
+		"application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("use all post: %v", err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		playerResp
+		Result useAllResult `json:"use_all_result"`
+	}
+	if resp.StatusCode == http.StatusOK {
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			t.Fatalf("use all decode: %v", err)
+		}
+	}
+	return out.playerResp, out.Result, resp.StatusCode
+}
+
+// 一括使用。満腹度が回復する品は使わず、クールタイム中の品は黙って飛ばし、
+// パワー不足の品だけ理由を添えて返す。
+func TestUseAllItems(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	alice := register(t, srv.URL, "misskey.example", "alice")
+
+	seedID := func(name string) int64 {
+		t.Helper()
+		var id int64
+		if err := pool.QueryRow(ctx, `SELECT id FROM content_items WHERE name = $1`, name).Scan(&id); err != nil {
+			t.Fatalf("seed lookup %s: %v", name, err)
+		}
+		return id
+	}
+	drink := seedID("栄養ドリンク") // ドリンク・使用間隔30分・energy+3
+	book := seedID("参考書")     // 書籍・使用間隔60分・nou_energy+3
+	bread := seedID("頭脳パン")   // 食料品(満腹度が回復するので対象外)
+
+	// 身体パワーを5消費する品。一括使用ではパワー不足で飛ばされることを見る。
+	var swim int64
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO content_items (name, category, price, stock_master, durability, effect, enabled)
+		 VALUES ('検証用スイミング', '娯楽', 100, NULL, 1,
+		         '[{"op":"add_param","param":"energy","amount":-5},
+		           {"op":"add_param","param":"tairyoku","amount":3}]'::jsonb, true)
+		 RETURNING id`).Scan(&swim); err != nil {
+		t.Fatal(err)
+	}
+	for i, id := range []int64{drink, book, bread, swim} {
+		if _, c := itemAction(t, srv.URL, "/buy", alice.ID, id, "ua-buy-"+strconv.Itoa(i)); c != http.StatusOK {
+			t.Fatalf("buy %d: status %d", id, c)
+		}
+	}
+	// 身体パワーを1にする。ドリンクで+3されて4になるが、スイミングの消費5には
+	// 届かない(品ごとに状態を取り直していないと、この判定がずれる)。
+	if _, err := pool.Exec(ctx,
+		`UPDATE player_status SET energy = 1 WHERE player_id = $1`, alice.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	p, res, code := useAllItems(t, srv.URL, alice.ID, "ua-1")
+	if code != http.StatusOK {
+		t.Fatalf("use all status = %d, want 200", code)
+	}
+	if got := strings.Join(res.Used, ","); got != "栄養ドリンク,参考書" {
+		t.Errorf("used = %q, want \"栄養ドリンク,参考書\"", got)
+	}
+	if len(res.Skipped) != 1 || res.Skipped[0].Name != "検証用スイミング" {
+		t.Fatalf("skipped = %+v, want 検証用スイミングのみ", res.Skipped)
+	}
+	if !strings.Contains(res.Skipped[0].Reason, "身体パワー") {
+		t.Errorf("skipped reason = %q, want 身体パワー不足の旨", res.Skipped[0].Reason)
+	}
+	if p.itemQty(bread) != 1 {
+		t.Errorf("食料品が使われている: 頭脳パン qty = %d, want 1", p.itemQty(bread))
+	}
+	if p.itemQty(swim) != 1 {
+		t.Errorf("パワー不足の品が消費されている: qty = %d, want 1", p.itemQty(swim))
+	}
+	if p.itemQty(drink) != 0 {
+		t.Errorf("使い切った品が残っている: 栄養ドリンク qty = %d, want 0", p.itemQty(drink))
+	}
+	if p.Status.Energy != 4 {
+		t.Errorf("energy = %d, want 4 (1 + ドリンク3)", p.Status.Energy)
+	}
+
+	// もう一度。参考書はクールタイム中なので理由には出さず黙って飛ばす。残るのは
+	// パワー不足のスイミングだけ。
+	_, res2, code2 := useAllItems(t, srv.URL, alice.ID, "ua-2")
+	if code2 != http.StatusOK {
+		t.Fatalf("2回目 status = %d, want 200", code2)
+	}
+	if len(res2.Used) != 0 {
+		t.Errorf("2回目に使えた品がある: %v", res2.Used)
+	}
+	if len(res2.Skipped) != 1 || res2.Skipped[0].Name != "検証用スイミング" {
+		t.Errorf("クールタイム中の品が理由に出ている: %+v", res2.Skipped)
+	}
+
+	// パワーが足りれば使える。
+	if _, err := pool.Exec(ctx,
+		`UPDATE player_status SET energy = 5 WHERE player_id = $1`, alice.ID); err != nil {
+		t.Fatal(err)
+	}
+	p3, res3, _ := useAllItems(t, srv.URL, alice.ID, "ua-3")
+	if len(res3.Used) != 1 || res3.Used[0] != "検証用スイミング" {
+		t.Errorf("used = %v, want [検証用スイミング]", res3.Used)
+	}
+	if p3.Status.Energy != 0 {
+		t.Errorf("energy = %d, want 0", p3.Status.Energy)
+	}
+
+	// 使えるものが何も無ければ422で知らせる(持ち物は食料品だけになっている)。
+	if _, _, c := useAllItems(t, srv.URL, alice.ID, "ua-4"); c != http.StatusUnprocessableEntity {
+		t.Errorf("使える品が無いときの status = %d, want 422", c)
+	}
+}
+
 // 退会は自分のデータを消すが、台帳の「世界のお金の合計」は動かさない
 // (行だけ消すと合計が合わなくなるため、残高は街へ返してから消す)。
 func TestRetire(t *testing.T) {

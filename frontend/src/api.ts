@@ -16,8 +16,18 @@ export interface ItemStack {
   special: string; // 特殊効果の説明(体重/身長/病気。無ければ空)
   enables_credit: boolean; // 所持しているとクレジット払いができる(カード類)
   usable: boolean; // 「使う」ができるか(建築許可証・乗り物などは持つだけの品)
+  fills_satiety: boolean; // 使うと満腹度が回復する(一括使用の対象外)
   // クールタイム中の再使用可能時刻(ISO8601)。使用可能ならnull。
   next_available_at: string | null;
+}
+
+/** 一括使用の結果。使えた品と、使えず飛ばした品の理由。 */
+export interface UseAllResult {
+  used: string[];
+  skipped: { name: string; reason: string }[];
+}
+export interface UseAllResp extends Player {
+  use_all_result: UseAllResult;
 }
 
 export interface Params {
@@ -1593,6 +1603,10 @@ export const api = {
   use: (id: number, itemId: number) =>
     request<Player>('POST', `/players/${id}/use`, {
       item_id: itemId,
+      idempotency_key: newIdempotencyKey(),
+    }),
+  useAll: (id: number) =>
+    request<UseAllResp>('POST', `/players/${id}/use/all`, {
       idempotency_key: newIdempotencyKey(),
     }),
   deposit: (id: number, amount: number) =>

@@ -58,6 +58,7 @@ type itemResp struct {
 	Special         string         `json:"special"`
 	EnablesCredit   bool           `json:"enables_credit"`
 	Usable          bool           `json:"usable"`
+	FillsSatiety    bool           `json:"fills_satiety"`
 	NextAvailableAt *time.Time     `json:"next_available_at"`
 }
 
@@ -131,6 +132,7 @@ func toResp(p *player.Player) playerResp {
 			Special:         it.Special,
 			EnablesCredit:   it.EnablesCredit,
 			Usable:          it.Usable,
+			FillsSatiety:    it.FillsSatiety,
 			NextAvailableAt: it.NextAvailableAt,
 		})
 	}
