@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/shiroha-a/town/internal/mail"
+	"github.com/shiroha-a/town/internal/moderation"
 	"github.com/shiroha-a/town/internal/player"
 )
 
@@ -108,4 +110,44 @@ func (s *Server) writeSuspension(w http.ResponseWriter, r *http.Request, id int6
 	writeJSON(w, http.StatusOK, suspensionResp{
 		Active: sus.Active(), Forever: sus.Forever, Until: sus.Until, Reason: sus.Reason,
 	})
+}
+
+// adminListPosts returns recent writings across every board.
+func (s *Server) adminListPosts(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	q := r.URL.Query()
+	playerID, _ := strconv.ParseInt(q.Get("player_id"), 10, 64)
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	posts, err := moderation.New(s.pool).List(r.Context(), q.Get("source"), playerID, limit)
+	if errors.Is(err, moderation.ErrUnknownSource) {
+		writeError(w, http.StatusBadRequest, "その出どころはありません。")
+		return
+	} else if err != nil {
+		writeInternal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, posts)
+}
+
+// adminDeletePost removes one writing.
+func (s *Server) adminDeletePost(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("postId"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	err = moderation.New(s.pool).Delete(r.Context(), r.PathValue("source"), id)
+	if errors.Is(err, moderation.ErrUnknownSource) {
+		writeError(w, http.StatusBadRequest, "その出どころはありません。")
+		return
+	} else if err != nil {
+		writeInternal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
 }

@@ -29,6 +29,7 @@ import {
   type MoneyAudit,
   type MoneyMovement,
   type Suspension,
+  type ModPost,
 } from '../api';
 import { PARAM_FULL } from '../params';
 
@@ -52,6 +53,7 @@ const open = reactive({
   instances: false,
   money: false,
   broadcast: false,
+  posts: false,
 });
 
 // 効果/条件で対象にできるパラメータ。
@@ -1580,6 +1582,67 @@ async function deleteEdit() {
   }
 }
 
+// --- 書き込みの管理 ---
+//
+// 種類ごとに欄を作ると、書き込める場所が増えるたびに管理画面も増える。荒らしへの
+// 対応は「その人の書き込みを全部見て消す」なので、出どころを横断した1本の時系列に
+// して、投稿者で絞れることを要点にした。
+const POST_SOURCES: { key: string; label: string }[] = [
+  { key: '', label: 'すべて' },
+  { key: 'greeting', label: 'あいさつ' },
+  { key: 'house_bbs', label: '家の掲示板' },
+  { key: 'company_bbs', label: '会社の掲示板' },
+  { key: 'feedback', label: '目安箱' },
+  { key: 'feedback_c', label: '目安箱(返信)' },
+];
+const POST_LABEL: Record<string, string> = Object.fromEntries(
+  POST_SOURCES.filter((s) => s.key).map((s) => [s.key, s.label]),
+);
+const posts = ref<ModPost[]>([]);
+const postSource = ref('');
+const postPlayer = ref(0);
+const postLimit = ref(100);
+
+async function loadPosts() {
+  busy.value = true;
+  message.value = '';
+  try {
+    posts.value = await api.adminPosts(postSource.value, postPlayer.value, postLimit.value);
+  } catch (e) {
+    fail(e);
+  } finally {
+    busy.value = false;
+  }
+}
+function togglePosts() {
+  open.posts = !open.posts;
+  if (open.posts && posts.value.length === 0) void loadPosts();
+}
+async function deletePost(p: ModPost) {
+  if (
+    !window.confirm(
+      `この書き込みを消しますか?\n\n` +
+        `[${POST_LABEL[p.source] ?? p.source}] ${p.author}\n` +
+        `${p.body.slice(0, 150)}${p.body.length > 150 ? '…' : ''}\n\n` +
+        `※取り消せません。`,
+    )
+  ) {
+    return;
+  }
+  busy.value = true;
+  message.value = '';
+  try {
+    await api.adminDeletePost(p.source, p.id);
+    message.value = '書き込みを消しました。';
+    kind.value = 'ok';
+    await loadPosts();
+  } catch (e) {
+    fail(e);
+  } finally {
+    busy.value = false;
+  }
+}
+
 // --- 凍結(ログイン不可) ---
 //
 // 荒らしへの対応が論理削除しか無かった。凍結は解除できる別物で、理由は本人にも
@@ -1801,6 +1864,72 @@ function fmtTime(iso: string): string {
                         <span v-if="u.suspended" class="susp-tag" :title="u.suspend_reason"
                           >凍結</span
                         >
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <!-- 書き込みの管理 -->
+        <section class="fold">
+          <button class="fold-head" @click="togglePosts">
+            <span class="caret">{{ open.posts ? '▼' : '▶' }}</span> 書き込みの管理
+          </button>
+          <div v-if="open.posts" class="fold-body">
+            <section class="panel">
+              <h3>
+                住民の書き込み<span class="hint">
+                  ※あいさつ・掲示板・目安箱をまとめて新しい順に出します</span
+                >
+              </h3>
+              <div class="money-bar">
+                <select v-model="postSource" @change="loadPosts">
+                  <option v-for="s in POST_SOURCES" :key="s.key" :value="s.key">
+                    {{ s.label }}
+                  </option>
+                </select>
+                <select v-model.number="postPlayer" @change="loadPosts">
+                  <option :value="0">投稿者すべて</option>
+                  <option v-for="u in players" :key="u.id" :value="u.id">
+                    {{ u.display_name }}（ID{{ u.id }}）
+                  </option>
+                </select>
+                <label>件数<input type="number" v-model.number="postLimit" /></label>
+                <button class="btn mini" :disabled="busy" @click="loadPosts">取り直す</button>
+              </div>
+              <div class="table-scroll money-scroll">
+                <table class="list-table">
+                  <thead>
+                    <tr>
+                      <th>日時</th>
+                      <th>出どころ</th>
+                      <th class="l">投稿者</th>
+                      <th class="l">中身</th>
+                      <th>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-if="posts.length === 0">
+                      <td colspan="5" class="muted">書き込みがありません。</td>
+                    </tr>
+                    <tr v-for="p in posts" :key="p.source + '-' + p.id">
+                      <td class="nowrap">{{ fmtTime(p.created_at) }}</td>
+                      <td class="nowrap">
+                        {{ POST_LABEL[p.source] ?? p.source }}
+                        <span v-if="p.where" class="hint">{{ p.where }}</span>
+                      </td>
+                      <td class="l nowrap">{{ p.author }}</td>
+                      <td class="l post-body">
+                        <b v-if="p.title">{{ p.title }}</b>
+                        <span>{{ p.body }}</span>
+                      </td>
+                      <td>
+                        <button class="btn mini danger" :disabled="busy" @click="deletePost(p)">
+                          消す
+                        </button>
                       </td>
                     </tr>
                   </tbody>
@@ -3599,6 +3728,20 @@ function fmtTime(iso: string): string {
 }
 .held-num {
   width: 68px;
+}
+
+/* 書き込みの管理 */
+.post-body {
+  max-width: 520px;
+  word-break: break-word;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+.post-body b {
+  display: block;
+}
+.nowrap {
+  white-space: nowrap;
 }
 
 /* 凍結 */

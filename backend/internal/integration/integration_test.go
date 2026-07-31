@@ -2224,6 +2224,119 @@ func TestFeedbackNotifiesAdmins(t *testing.T) {
 	}
 }
 
+// 書き込みの管理。出どころを横断して1本の時系列で読め、そこから消せる。
+func TestAdminPosts(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	admin := register(t, srv.URL, "misskey.example", "root")
+	alice := register(t, srv.URL, "misskey.example", "alice")
+	bob := register(t, srv.URL, "misskey.example", "bob")
+
+	// あいさつ・目安箱・家の掲示板をそれぞれ1件ずつ作る。
+	var greetID int64
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO greetings (user_id, user_name, category, body)
+		 VALUES ($1, 'alice', '雑談', 'あらしのかきこみ') RETURNING id`, alice.ID).Scan(&greetID); err != nil {
+		t.Fatal(err)
+	}
+	var fbID int64
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO feedback_posts (author_id, author_name, kind, title, body)
+		 VALUES ($1, 'bob', 'bug', 'ふぐあい', 'こわれています') RETURNING id`, bob.ID).Scan(&fbID); err != nil {
+		t.Fatal(err)
+	}
+	// 掲示板は家に紐づくので、先に家を1軒建てておく。
+	var houseID, bbsID int64
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO player_houses (owner_id, town, grid_row, grid_col, exterior)
+		 VALUES ($1, 0, 1, 1, 'house1') RETURNING id`, alice.ID).Scan(&houseID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO house_bbs (house_id, kind, author_id, author_name, title, body)
+		 VALUES ($1, 'bbs', $2, 'alice', 'だい', 'ほんぶん') RETURNING id`,
+		houseID, alice.ID).Scan(&bbsID); err != nil {
+		t.Fatal(err)
+	}
+
+	if code, _ := adminGet(t, srv.URL, "/api/v1/admin/posts", alice.ID); code != http.StatusForbidden {
+		t.Errorf("一般ユーザー = %d, want 403", code)
+	}
+	if code, _ := adminGet(t, srv.URL, "/api/v1/admin/posts?source=nope", admin.ID); code != http.StatusBadRequest {
+		t.Errorf("知らない出どころ = %d, want 400", code)
+	}
+
+	list := func(query string) []struct {
+		Source string `json:"source"`
+		ID     int64  `json:"id"`
+		Author string `json:"author"`
+		Title  string `json:"title"`
+		Body   string `json:"body"`
+		Where  string `json:"where"`
+	} {
+		t.Helper()
+		code, raw := adminGet(t, srv.URL, "/api/v1/admin/posts"+query, admin.ID)
+		if code != http.StatusOK {
+			t.Fatalf("一覧%s = %d: %s", query, code, raw)
+		}
+		var out []struct {
+			Source string `json:"source"`
+			ID     int64  `json:"id"`
+			Author string `json:"author"`
+			Title  string `json:"title"`
+			Body   string `json:"body"`
+			Where  string `json:"where"`
+		}
+		json.Unmarshal(raw, &out)
+		return out
+	}
+
+	// 全部: 3件が出どころ込みで返る。
+	all := list("")
+	if len(all) != 3 {
+		t.Fatalf("全件 = %d件, want 3: %+v", len(all), all)
+	}
+	seen := map[string]bool{}
+	for _, p := range all {
+		seen[p.Source] = true
+	}
+	if !seen["greeting"] || !seen["feedback"] || !seen["house_bbs"] {
+		t.Errorf("出どころが揃っていない: %v", seen)
+	}
+
+	// 出どころで絞る。
+	if g := list("?source=greeting"); len(g) != 1 || g[0].Body != "あらしのかきこみ" {
+		t.Errorf("あいさつだけ = %+v", g)
+	}
+	// 家の掲示板は置き場所が付く。
+	if b := list("?source=house_bbs"); len(b) != 1 ||
+		b[0].Where != "家#"+strconv.FormatInt(houseID, 10) || b[0].Title != "だい" {
+		t.Errorf("家の掲示板 = %+v", b)
+	}
+	// 投稿者で絞る(荒らし対応の要点)。
+	if a := list("?player_id=" + strconv.FormatInt(alice.ID, 10)); len(a) != 2 {
+		t.Errorf("aliceの書き込み = %d件, want 2", len(a))
+	}
+
+	// 消す。
+	if code, raw := adminDelete(t, srv.URL,
+		"/api/v1/admin/posts/greeting/"+strconv.FormatInt(greetID, 10), admin.ID); code != http.StatusOK {
+		t.Fatalf("削除 = %d: %s", code, raw)
+	}
+	if len(list("")) != 2 {
+		t.Error("削除が効いていない")
+	}
+	// 二度押しても落ちない。
+	if code, _ := adminDelete(t, srv.URL,
+		"/api/v1/admin/posts/greeting/"+strconv.FormatInt(greetID, 10), admin.ID); code != http.StatusOK {
+		t.Errorf("二度目の削除 = %d, want 200", code)
+	}
+	// 知らない出どころは消せない。
+	if code, _ := adminDelete(t, srv.URL, "/api/v1/admin/posts/nope/1", admin.ID); code != http.StatusBadRequest {
+		t.Errorf("知らない出どころの削除 = %d, want 400", code)
+	}
+}
+
 // TestTownMap covers the town map API: GET is public, PUT is admin-only, updates
 // persist and are validated (grid bounds / one-facility-per-cell).
 func TestTownMap(t *testing.T) {

@@ -625,6 +625,18 @@ export interface AdminPlayerSummary {
   suspend_reason: string;
 }
 
+/** 住民の書き込み1件(出どころを問わない共通の形)。 */
+export interface ModPost {
+  source: string; // greeting / house_bbs / company_bbs / feedback / feedback_c
+  id: number;
+  player_id: number | null; // 退会で消えるとnull
+  author: string;
+  title: string; // 無い板では空
+  body: string;
+  where: string; // 「家#12」のような置き場所
+  created_at: string;
+}
+
 /** 凍結の状態。 */
 export interface Suspension {
   active: boolean;
@@ -2045,6 +2057,14 @@ export const api = {
     request<Suspension>('POST', `/admin/players/${id}/suspend`, { days, reason }),
   adminUnsuspendPlayer: (id: number) =>
     request<Suspension>('DELETE', `/admin/players/${id}/suspend`),
+  // 書き込みの管理。sourceが空なら全部、playerIdが0なら全員ぶん。
+  adminPosts: (source = '', playerId = 0, limit = 100) =>
+    request<ModPost[]>(
+      'GET',
+      `/admin/posts?source=${encodeURIComponent(source)}&player_id=${playerId}&limit=${limit}`,
+    ),
+  adminDeletePost: (source: string, id: number) =>
+    request<{ deleted: boolean }>('DELETE', `/admin/posts/${source}/${id}`),
   // 取り消しは逆仕訳を1本足す(台帳は追記専用なので行は消さない)。
   adminReverseTx: (txId: number) =>
     request<{ reversed: boolean; tx_id: number }>('POST', '/admin/money/reverse', {
