@@ -2134,6 +2134,96 @@ func TestAdminSuspendPlayer(t *testing.T) {
 	}
 }
 
+// 目安箱の新着は運営に知らせる。返信を投稿者に知らせているのと同じ仕組みで、
+// 向きが逆になるだけ。運営どうしのやり取りでは飛ばさない。
+func TestFeedbackNotifiesAdmins(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	admin := register(t, srv.URL, "misskey.example", "root")
+	alice := register(t, srv.URL, "misskey.example", "alice")
+
+	inbox := func(id int64) []string {
+		t.Helper()
+		rows, err := pool.Query(ctx,
+			`SELECT body FROM messages WHERE owner_id = $1 AND direction = 'received' ORDER BY id`, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var out []string
+		for rows.Next() {
+			var b string
+			rows.Scan(&b)
+			out = append(out, b)
+		}
+		return out
+	}
+	post := func(actingID int64, kind, title, body string) int64 {
+		t.Helper()
+		code, raw := adminPost(t, srv.URL,
+			"/api/v1/players/"+strconv.FormatInt(actingID, 10)+"/feedback", actingID,
+			map[string]any{"kind": kind, "title": title, "body": body})
+		if code != http.StatusOK {
+			t.Fatalf("投稿 = %d: %s", code, raw)
+		}
+		var d struct {
+			Post struct {
+				ID int64 `json:"id"`
+			} `json:"post"`
+		}
+		json.Unmarshal(raw, &d)
+		return d.Post.ID
+	}
+
+	// 住民の投稿 → 管理者の受信箱へ。
+	postID := post(alice.ID, "bug", "画面が崩れる", "スマホで見ると表が溢れます")
+	got := inbox(admin.ID)
+	if len(got) != 1 || !strings.Contains(got[0], "画面が崩れる") {
+		t.Fatalf("管理者の受信箱 = %v, want 新着の知らせ1通", got)
+	}
+	if !strings.Contains(got[0], "不具合") {
+		t.Errorf("種別が入っていない: %q", got[0])
+	}
+	// 送った本人(住民)の送信済みは増えない(知らせは本人が書いたものではない)。
+	var sent int
+	pool.QueryRow(ctx,
+		`SELECT count(*) FROM messages WHERE owner_id = $1 AND direction = 'sent'`, alice.ID).Scan(&sent)
+	if sent != 0 {
+		t.Errorf("投稿者の送信済み = %d通, want 0", sent)
+	}
+
+	// 住民の返信 → 管理者へ。
+	cpath := "/api/v1/players/" + strconv.FormatInt(alice.ID, 10) + "/feedback/" +
+		strconv.FormatInt(postID, 10) + "/comments"
+	if code, raw := adminPost(t, srv.URL, cpath, alice.ID,
+		map[string]any{"body": "追記です"}); code != http.StatusOK {
+		t.Fatalf("返信 = %d: %s", code, raw)
+	}
+	if got := inbox(admin.ID); len(got) != 2 {
+		t.Fatalf("返信後の管理者の受信箱 = %d通, want 2", len(got))
+	}
+
+	// 管理者の返信では管理者に飛ばさない(投稿者には従来どおり届く)。
+	apath := "/api/v1/players/" + strconv.FormatInt(admin.ID, 10) + "/feedback/" +
+		strconv.FormatInt(postID, 10) + "/comments"
+	if code, raw := adminPost(t, srv.URL, apath, admin.ID,
+		map[string]any{"body": "確認します"}); code != http.StatusOK {
+		t.Fatalf("運営の返信 = %d: %s", code, raw)
+	}
+	if got := inbox(admin.ID); len(got) != 2 {
+		t.Errorf("運営の返信で管理者に飛んだ: %d通, want 2のまま", len(got))
+	}
+	if got := inbox(alice.ID); len(got) != 1 || !strings.Contains(got[0], "返信がつきました") {
+		t.Errorf("投稿者への返信通知 = %v", got)
+	}
+
+	// 管理者自身の投稿では自分に送らない。
+	post(admin.ID, "request", "運営メモ", "あとでやる")
+	if got := inbox(admin.ID); len(got) != 2 {
+		t.Errorf("自分の投稿で自分に届いた: %d通, want 2のまま", len(got))
+	}
+}
+
 // TestTownMap covers the town map API: GET is public, PUT is admin-only, updates
 // persist and are validated (grid bounds / one-facility-per-cell).
 func TestTownMap(t *testing.T) {

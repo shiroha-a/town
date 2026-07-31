@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -91,6 +92,11 @@ func (s *Server) feedbackCreate(w http.ResponseWriter, r *http.Request) {
 		writeFeedbackErr(w, r, err)
 		return
 	}
+	// 新しい投稿は運営に知らせる。返信を投稿者に知らせているのと同じ仕組みで、
+	// 向きが逆になるだけ。書いた本人が管理者なら、その人には送らない。
+	s.notifyAdmins(r.Context(), id, fmt.Sprintf(
+		"目安箱に新しい投稿がありました。\n\n【%s】%s\n\n%s",
+		feedback.KindLabels[req.Kind], req.Title, req.Body))
 	d, err := s.feedback.Get(r.Context(), postID, id)
 	if err != nil {
 		writeFeedbackErr(w, r, err)
@@ -128,6 +134,12 @@ func (s *Server) feedbackComment(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeFeedbackErr(w, r, err)
 		return
+	}
+	// 住民からの返信は運営に知らせる。運営どうしのやり取りで通知が飛ぶと
+	// うるさいので、管理者の返信では送らない。
+	if !isAdmin {
+		s.notifyAdmins(r.Context(), id, fmt.Sprintf(
+			"目安箱の「%s」に返信がつきました。\n\n%s", res.PostTitle, req.Body))
 	}
 	// 返信は待たれているので、投稿者にはゲーム内メールで知らせる(メール通知が
 	// オンなら端末にも届く)。送れなくても返信自体は成立させる。
@@ -239,4 +251,22 @@ func (s *Server) adminFeedbackStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, d)
+}
+
+// notifyAdmins mails every admin except the sender. 目安箱の新着を運営に伝える。
+// 送れなくても投稿自体は成立させる(知らせは付随物なので、失敗で操作を壊さない)。
+func (s *Server) notifyAdmins(ctx context.Context, fromID int64, body string) {
+	ids, err := s.players.AdminIDs(ctx)
+	if err != nil {
+		slog.Warn("feedback: 管理者の宛先を引けなかった", "err", err)
+		return
+	}
+	for _, aid := range ids {
+		if aid == fromID {
+			continue
+		}
+		if err := s.mail.SendNotice(ctx, fromID, aid, body); err != nil {
+			slog.Warn("feedback: 運営への知らせに失敗", "admin", aid, "err", err)
+		}
+	}
 }

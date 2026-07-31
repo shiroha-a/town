@@ -84,3 +84,30 @@ func (s *Service) Broadcast(ctx context.Context, senderID int64, body string) (i
 	}
 	return sent, nil
 }
+
+// SendNotice delivers a system notice without touching the sender's daily quota
+// and without leaving a copy in their sent box.
+//
+// 目安箱の知らせのように、本人が書いたつもりのないメールに使う。住民の投稿が
+// 管理者への通知になるので、それで本人の1日30通を削るのはおかしい。
+func (s *Service) SendNotice(ctx context.Context, senderID, recipientID int64, body string) error {
+	body = strings.TrimSpace(body)
+	if body == "" || senderID == recipientID {
+		return nil
+	}
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var senderName string
+		if err := tx.QueryRow(ctx,
+			`SELECT display_name FROM players WHERE id = $1 AND deleted_at IS NULL`,
+			senderID).Scan(&senderName); err != nil {
+			return fmt.Errorf("sender: %w", err)
+		}
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO messages (owner_id, direction, counterpart_id, counterpart_name, body)
+			 VALUES ($1, 'received', $2, $3, $4)`,
+			recipientID, senderID, senderName, body); err != nil {
+			return fmt.Errorf("insert notice: %w", err)
+		}
+		return trim(ctx, tx, recipientID)
+	})
+}

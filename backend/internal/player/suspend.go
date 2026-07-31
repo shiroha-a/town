@@ -129,3 +129,25 @@ func (s *Service) AdminUnsuspend(ctx context.Context, id int64) error {
 type ErrValidation struct{ Message string }
 
 func (e *ErrValidation) Error() string { return e.Message }
+
+// AdminIDs lists the players holding the admin role. 目安箱の新着など、運営に
+// 知らせたいときの宛先。
+func (s *Service) AdminIDs(ctx context.Context) ([]int64, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT r.player_id FROM player_roles r
+		 JOIN players p ON p.id = r.player_id AND p.deleted_at IS NULL
+		 WHERE r.role = 'admin' ORDER BY r.player_id`)
+	if err != nil {
+		return nil, fmt.Errorf("admin ids: %w", err)
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan admin id: %w", err)
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
