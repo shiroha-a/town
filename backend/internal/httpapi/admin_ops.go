@@ -1,10 +1,13 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/shiroha-a/town/internal/gametime"
@@ -12,6 +15,7 @@ import (
 	"github.com/shiroha-a/town/internal/moderation"
 	"github.com/shiroha-a/town/internal/player"
 	"github.com/shiroha-a/town/internal/sysinfo"
+	"github.com/shiroha-a/town/internal/webhook"
 )
 
 // 運営まわりの管理操作。すべて管理者のみ(authGuard が /api/v1/admin/ を見て弾く)。
@@ -73,6 +77,25 @@ func (s *Server) adminSuspendPlayer(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		writeInternal(w, r, err)
 	default:
+		term := "無期限"
+		if req.Days > 0 {
+			term = fmt.Sprintf("%d日間", req.Days)
+		}
+		reason := req.Reason
+		if strings.TrimSpace(reason) == "" {
+			reason = "(記載なし)"
+		}
+		s.webhooks.PostQuiet(r.Context(), webhook.Notice{
+			Event:    webhook.EventSuspended,
+			Severity: webhook.SeverityWarn,
+			Title:    "住民を凍結しました",
+			Body:     s.playerLabel(r.Context(), id),
+			Fields: []webhook.Field{
+				{Name: "期間", Value: term},
+				{Name: "理由", Value: reason},
+				{Name: "操作した人", Value: s.playerLabel(r.Context(), PlayerIDFrom(r.Context()))},
+			},
+		})
 		s.writeSuspension(w, r, id)
 	}
 }
@@ -93,7 +116,29 @@ func (s *Server) adminUnsuspendPlayer(w http.ResponseWriter, r *http.Request) {
 		writeInternal(w, r, err)
 		return
 	}
+	s.webhooks.PostQuiet(r.Context(), webhook.Notice{
+		Event:    webhook.EventUnsuspended,
+		Severity: webhook.SeverityInfo,
+		Title:    "凍結を解除しました",
+		Body:     s.playerLabel(r.Context(), id),
+		Fields: []webhook.Field{
+			{Name: "操作した人", Value: s.playerLabel(r.Context(), PlayerIDFrom(r.Context()))},
+		},
+	})
 	s.writeSuspension(w, r, id)
+}
+
+// playerLabel renders "名前(#id)" for a notice. 名前が引けなくても通知は
+// 出したいので、失敗したら番号だけにする。
+func (s *Server) playerLabel(ctx context.Context, id int64) string {
+	if id == 0 {
+		return "(不明)"
+	}
+	p, err := s.players.Get(ctx, id)
+	if err != nil {
+		return fmt.Sprintf("#%d", id)
+	}
+	return fmt.Sprintf("%s(#%d)", p.DisplayName, id)
 }
 
 type suspensionResp struct {

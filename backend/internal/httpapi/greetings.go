@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/shiroha-a/town/internal/action"
+	"github.com/shiroha-a/town/internal/webhook"
 )
 
 // greetings returns the recent town-chat posts. Public.
@@ -69,6 +70,24 @@ func (s *Server) postGreeting(w http.ResponseWriter, r *http.Request) {
 	}
 	// SSE購読者(街トップのチャット窓)へ新着を配信する。
 	s.greetHub.notify()
+	// NGワードが伏せ字になった書き込みは運営に知らせる。荒らしの兆候が
+	// 「掲示板を見に行かないと分からない」状態を無くすため。
+	//
+	// 街に出るのは伏せ字だが、通知には書かれたままの本文を載せる。宛先は
+	// 運営だけが見る場所で、対応を決めるには何が書かれたかが要るため
+	// (「NG」だけ届いても、様子見か凍結かの判断ができない)。
+	if result != nil && result.Fine {
+		s.webhooks.PostQuiet(r.Context(), webhook.Notice{
+			Event:    webhook.EventNGWord,
+			Severity: webhook.SeverityWarn,
+			Title:    "NGワードの書き込み",
+			Body:     req.Body,
+			Fields: []webhook.Field{
+				{Name: "書いた人", Value: s.playerLabel(r.Context(), id)},
+				{Name: "区分", Value: req.Category},
+			},
+		})
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"player": toResp(p), "result": result})
 }
 

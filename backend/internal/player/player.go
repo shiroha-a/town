@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/shiroha-a/town/internal/news"
 	"github.com/shiroha-a/town/internal/rng"
 	"github.com/shiroha-a/town/internal/settings"
+	"github.com/shiroha-a/town/internal/webhook"
 )
 
 // Player is the aggregate returned to callers.
@@ -134,6 +136,8 @@ type Service struct {
 	// tokenCipher seals Misskey access tokens at rest. nil when no operational
 	// key is configured (the token is then not stored at all).
 	tokenCipher *miauth.TokenCipher
+	// hooks は管理者向けの外部通知。未設定(nil)でも呼べる。
+	hooks *webhook.Service
 }
 
 func New(pool *pgxpool.Pool, l *ledger.Repo, r *rng.Rand, st *settings.Store) *Service {
@@ -143,6 +147,12 @@ func New(pool *pgxpool.Pool, l *ledger.Repo, r *rng.Rand, st *settings.Store) *S
 // WithTokenCipher attaches the cipher used to store Misskey access tokens.
 func (s *Service) WithTokenCipher(c *miauth.TokenCipher) *Service {
 	s.tokenCipher = c
+	return s
+}
+
+// WithWebhooks attaches the admin notice queue. 入居の知らせをここから出す。
+func (s *Service) WithWebhooks(h *webhook.Service) *Service {
+	s.hooks = h
 	return s
 }
 
@@ -337,7 +347,9 @@ func (s *Service) IsGuest(ctx context.Context, id int64) (bool, error) {
 	return guest, nil
 }
 
-func (s *Service) Register(ctx context.Context, instanceHost, remoteUserID, displayName string) (*Player, error) {
+// created は今回この呼び出しで住民が生まれたかどうか(既存のログインなら false)。
+// 入居の通知を出す側が「初めての人か」を判別するのに要る。
+func (s *Service) Register(ctx context.Context, instanceHost, remoteUserID, displayName string) (*Player, bool, error) {
 	var (
 		id      int64
 		created bool
@@ -393,21 +405,34 @@ func (s *Service) Register(ctx context.Context, instanceHost, remoteUserID, disp
 			fmt.Sprintf("%sさんが新しい住民になりました。", displayName), nil, true)
 	})
 	if err != nil {
-		return nil, fmt.Errorf("register: %w", err)
+		return nil, false, fmt.Errorf("register: %w", err)
 	}
 
 	if created {
+		// 入居の知らせ。ログインの経路(MiAuthのコールバック・登録API)が
+		// 複数あるので、呼び出し側ではなく「住民が生まれた」ここから出す。
+		s.hooks.PostQuiet(ctx, webhook.Notice{
+			Event:    webhook.EventRegistered,
+			Severity: webhook.SeverityInfo,
+			Title:    "新しい住民",
+			Body:     fmt.Sprintf("%s さんが入居しました。", displayName),
+			Fields: []webhook.Field{
+				{Name: "インスタンス", Value: instanceHost},
+				{Name: "住民番号", Value: strconv.FormatInt(id, 10)},
+			},
+		})
 		ref := fmt.Sprintf("initial_grant:%d", id)
 		initialMoney := s.settings.Get().InitialMoney
 		if err := s.ledger.Post(ctx, "initial_grant", ref, []ledger.Entry{
 			{Account: ledger.SystemAccount("initial_grant"), Delta: -initialMoney},
 			{Account: ledger.PlayerAccount(id), Delta: initialMoney},
 		}); err != nil {
-			return nil, fmt.Errorf("initial grant: %w", err)
+			return nil, false, fmt.Errorf("initial grant: %w", err)
 		}
 	}
 
-	return s.Get(ctx, id)
+	p, err := s.Get(ctx, id)
+	return p, created, err
 }
 
 // SetMisskeyToken stores the player's Misskey access token, encrypted at rest.

@@ -10,6 +10,7 @@ import (
 
 	"github.com/shiroha-a/town/internal/ledger"
 	"github.com/shiroha-a/town/internal/player"
+	"github.com/shiroha-a/town/internal/webhook"
 )
 
 // 管理画面から、住民の持ち物を直に触り、お金の動きを追うための口。
@@ -192,6 +193,15 @@ func (s *Server) adminReverseTx(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		writeInternal(w, r, err)
 	default:
+		s.webhooks.PostQuiet(r.Context(), webhook.Notice{
+			Event:    webhook.EventTxReversed,
+			Severity: webhook.SeverityWarn,
+			Title:    "お金の動きを取り消しました",
+			Body:     fmt.Sprintf("取引 #%d を逆仕訳で打ち消しました。", req.TxID),
+			Fields: []webhook.Field{
+				{Name: "操作した人", Value: s.playerLabel(r.Context(), PlayerIDFrom(r.Context()))},
+			},
+		})
 		writeJSON(w, http.StatusOK, map[string]any{"reversed": true, "tx_id": req.TxID})
 	}
 }

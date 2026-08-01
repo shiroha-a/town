@@ -6,6 +6,7 @@ package worker
 import (
 	"context"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -20,6 +21,7 @@ import (
 	"github.com/shiroha-a/town/internal/rng"
 	"github.com/shiroha-a/town/internal/settings"
 	"github.com/shiroha-a/town/internal/stock"
+	"github.com/shiroha-a/town/internal/webhook"
 )
 
 const leaderKey = "town:worker:leader"
@@ -44,10 +46,15 @@ type Worker struct {
 	rng      *rng.Rand
 	// push は通知の送信口。設定していない環境では nil で、その場合は何も送らない。
 	push *push.Service
+	// hooks は管理者向けの外部通知。積まれたものを送るのはこのworker。
+	hooks *webhook.Service
 }
 
 // SetPush wires the notification sender. app 側で作ったものを渡す。
 func (w *Worker) SetPush(p *push.Service) { w.push = p }
+
+// SetWebhooks wires the outbound notice queue.
+func (w *Worker) SetWebhooks(h *webhook.Service) { w.hooks = h }
 
 func New(rdb *redis.Client, pool *pgxpool.Pool, led *ledger.Repo, cfg *config.Config, st *settings.Store, logger *slog.Logger) *Worker {
 	// タイムゾーンと日付の切り替わり時刻はDBの設定(管理画面で編集)から取る。
@@ -130,6 +137,12 @@ func (w *Worker) tick(ctx context.Context) {
 	// 通知(メール着信・パワー満タン・仕事の解禁)。毎tickで全表を見る必要は
 	// ないので、この中で1分に1回へ間引く。
 	maybeNotify(ctx, w.pool, w.push, time.Now())
+	// 積まれた外部通知を送る。宛先が無ければ空振り1クエリで終わる。
+	if n, err := w.hooks.Deliver(ctx); err != nil {
+		w.logger.Error("deliver webhooks", "err", err)
+	} else if n > 0 {
+		w.logger.Info("webhooks delivered", "count", n)
+	}
 	w.runDailyIfNeeded(ctx, time.Now())
 }
 
@@ -195,11 +208,43 @@ func (w *Worker) runDailyIfNeeded(ctx context.Context, now time.Time) {
 	})
 	if err != nil {
 		w.logger.Error("daily job", "err", err)
+		w.hooks.PostQuiet(ctx, webhook.Notice{
+			Event:    webhook.EventDailyFailed,
+			Severity: webhook.SeverityError,
+			Title:    "日次処理が失敗しました",
+			Body:     err.Error(),
+			Fields: []webhook.Field{
+				{Name: "対象日", Value: date.Format("2006-01-02")},
+			},
+		})
 		return
 	}
-	if ran {
-		w.logger.Info("daily job ran",
-			"game_date", date.Format("2006-01-02"),
-			"interest_accounts", interestAccounts)
+	if !ran {
+		return
+	}
+	w.logger.Info("daily job ran",
+		"game_date", date.Format("2006-01-02"),
+		"interest_accounts", interestAccounts)
+
+	// 台帳の不変条件(世界のお金の合計は動かない)を1日1回だけ確かめる。
+	// 崩れているのは必ずどこかの実装の誤りなので、気付ける形にしておく。
+	// 全行のSUMなので毎tickでは重い。
+	if sum, err := w.ledger.AuditZeroSum(ctx); err != nil {
+		w.logger.Error("audit zero-sum", "err", err)
+	} else if sum != 0 {
+		w.logger.Error("ledger zero-sum broken", "sum", sum)
+		w.hooks.PostQuiet(ctx, webhook.Notice{
+			Event:    webhook.EventLedgerImbalance,
+			Severity: webhook.SeverityError,
+			Title:    "台帳の合計が0になっていません",
+			Body:     "どこかの処理が複式の片脚を落としています。お金が増減している可能性があります。",
+			Fields: []webhook.Field{
+				{Name: "ずれ", Value: strconv.FormatInt(sum, 10) + "円"},
+			},
+		})
+	}
+	// 送信済みの控えを片付ける。
+	if err := w.hooks.Purge(ctx); err != nil {
+		w.logger.Error("purge webhook outbox", "err", err)
 	}
 }

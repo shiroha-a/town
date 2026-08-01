@@ -38,6 +38,7 @@ import (
 	"github.com/shiroha-a/town/internal/stock"
 	"github.com/shiroha-a/town/internal/streetfight"
 	"github.com/shiroha-a/town/internal/townmap"
+	"github.com/shiroha-a/town/internal/webhook"
 	"github.com/shiroha-a/town/internal/worker"
 )
 
@@ -87,12 +88,15 @@ func Run(ctx context.Context, mode string, cfg *config.Config) error {
 		return fmt.Errorf("load town map: %w", err)
 	}
 
+	// 管理者向けの外部通知(Discord互換)。積むのは各所、送るのはworker。
+	hooks := webhook.New(pool)
+
 	led := ledger.New(pool)
 	// 乱数のシード。0(既定)は時刻ベース。決定的な再現が要るときだけ
 	// TOWN_RNG_SEED で固定する(開発・テスト用)。
 	seed, _ := strconv.ParseInt(os.Getenv("TOWN_RNG_SEED"), 10, 64)
 	rnd := rng.New(seed)
-	players := player.New(pool, led, rnd, st)
+	players := player.New(pool, led, rnd, st).WithWebhooks(hooks)
 	actions := action.New(pool, led, players, rnd, loc, game.DayBoundaryHour, st)
 	contentSvc := content.New(pool, loc, game.DayBoundaryHour, st)
 	stockSvc := stock.New(pool)
@@ -142,6 +146,7 @@ func Run(ctx context.Context, mode string, cfg *config.Config) error {
 		Profiles:       profiles,
 		Emojis:         emojis,
 		Push:           pushSvc,
+		Webhooks:       hooks,
 		AppName:        cfg.Server.AppName,
 		WebDir:         cfg.Server.WebDir,
 		AllowedOrigins: cfg.Server.AllowedOrigins(),
@@ -149,10 +154,13 @@ func Run(ctx context.Context, mode string, cfg *config.Config) error {
 
 	switch mode {
 	case "web":
+		notifyStartup(ctx, hooks, mode)
 		return runWeb(ctx, cfg, logger, players, actions, contentSvc, st, tmap, stockSvc, keibaSvc, mailSvc, greetingSvc, attendanceSvc, cleagueSvc, monsterSvc, feedbackSvc, newsSvc, rankingSvc, serialSvc, authDeps)
 	case "worker":
 		wk := worker.New(rdb, pool, led, cfg, st, logger)
 		wk.SetPush(pushSvc)
+		wk.SetWebhooks(hooks)
+		notifyStartup(ctx, hooks, mode)
 		return wk.Run(ctx)
 	default:
 		return fmt.Errorf("unknown mode %q (want web|worker)", mode)
@@ -184,6 +192,20 @@ func runWeb(ctx context.Context, cfg *config.Config, logger *slog.Logger, player
 		return fmt.Errorf("http serve: %w", err)
 	}
 	return nil
+}
+
+// notifyStartup tells the admins a process came up. デプロイが通ったことの
+// 確認になり、落ちて上がり直したときにも気付ける。
+//
+// 送信そのものは worker がやるので、web の起動を知らせる控えも worker が
+// 拾って出す(webから直接は出さない)。
+func notifyStartup(ctx context.Context, hooks *webhook.Service, mode string) {
+	hooks.PostQuiet(ctx, webhook.Notice{
+		Event:    webhook.EventStartup,
+		Severity: webhook.SeverityInfo,
+		Title:    "起動しました",
+		Body:     fmt.Sprintf("%s プロセスが立ち上がりました。", mode),
+	})
 }
 
 // defaultTownConfigs returns the legacy default towns as settings.TownConfig

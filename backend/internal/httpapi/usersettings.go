@@ -3,9 +3,11 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/shiroha-a/town/internal/player"
+	"github.com/shiroha-a/town/internal/webhook"
 )
 
 // userSettings serves GET /players/{id}/settings — 住民が自分で変えられる設定。
@@ -101,6 +103,12 @@ func (s *Server) retire(w http.ResponseWriter, r *http.Request) {
 		writeInternal(w, r, err)
 		return
 	}
+	s.webhooks.PostQuiet(r.Context(), webhook.Notice{
+		Event:    webhook.EventRetired,
+		Severity: webhook.SeverityInfo,
+		Title:    "退会",
+		Body:     fmt.Sprintf("%s さんが街を出ました。", cur.DisplayName),
+	})
 	// 住民が消えたのでセッションも無効にする。
 	_ = s.sessions.RevokeAll(r.Context(), id)
 	s.sessions.ClearCookie(w)

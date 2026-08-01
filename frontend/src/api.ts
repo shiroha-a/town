@@ -638,6 +638,30 @@ export interface ModPost {
 }
 
 /** ダッシュボード(システム・DB・ワーカー・住民)。 */
+/** 外部通知(Discord互換のwebhook)の宛先。 */
+export interface Webhook {
+  id: number;
+  url: string;
+  label: string;
+  enabled: boolean;
+  /** 空配列は「すべてのイベント」の意味。 */
+  events: string[];
+  created_at: string;
+  last_sent_at: string | null;
+  last_status: number | null;
+  last_error: string;
+  /** まだ送れていない控えの数。詰まりに気付くため。 */
+  pending: number;
+}
+
+/** 管理画面が並べる通知イベントの一覧(サーバーが持つ定義)。 */
+export interface WebhookEventInfo {
+  event: string;
+  label: string;
+  group: string;
+  severity: 'info' | 'warn' | 'error';
+}
+
 export interface Dashboard {
   host: {
     load1: number;
@@ -2134,6 +2158,23 @@ export const api = {
   adminPlayerLog: (id: number, limit = 100) =>
     request<PlayerLog>('GET', `/admin/players/${id}/log?limit=${limit}`),
   adminDashboard: () => request<Dashboard>('GET', '/admin/dashboard'),
+  // 外部通知の宛先。イベントの一覧もサーバーから受け取る(画面で持たない)。
+  adminWebhooks: () =>
+    request<{ webhooks: Webhook[]; events: WebhookEventInfo[] }>('GET', '/admin/webhooks'),
+  adminCreateWebhook: (url: string, label: string, events: string[], enabled: boolean) =>
+    request<Webhook>('POST', '/admin/webhooks', { url, label, events, enabled }),
+  adminUpdateWebhook: (
+    id: number,
+    url: string,
+    label: string,
+    events: string[],
+    enabled: boolean,
+  ) => request<Webhook>('PUT', `/admin/webhooks/${id}`, { url, label, events, enabled }),
+  adminDeleteWebhook: (id: number) =>
+    request<{ deleted: boolean }>('DELETE', `/admin/webhooks/${id}`),
+  // 試し送り。実際に出るのはworkerの次のtick(最大10秒ほど)。
+  adminTestWebhook: (id: number) =>
+    request<{ queued: boolean }>('POST', `/admin/webhooks/${id}/test`),
   // 取り消しは逆仕訳を1本足す(台帳は追記専用なので行は消さない)。
   adminReverseTx: (txId: number) =>
     request<{ reversed: boolean; tx_id: number }>('POST', '/admin/money/reverse', {
