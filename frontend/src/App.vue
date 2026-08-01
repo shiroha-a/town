@@ -214,7 +214,7 @@ const facilityTitles: Record<string, string> = {
 
 <template>
   <div v-if="updateReady" class="update-bar">
-    <span>新しい版が公開されています。</span>
+    <span>ゲームが更新されました。</span>
     <button class="update-btn" @click="applyUpdate">読み込み直す</button>
   </div>
   <template v-if="booting">
