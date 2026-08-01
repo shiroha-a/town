@@ -606,6 +606,11 @@ func (s *Server) adminUpdatePlayer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "player not found")
 		return
 	}
+	var invalid *player.ErrValidation
+	if errors.As(err, &invalid) {
+		writeError(w, http.StatusUnprocessableEntity, invalid.Message)
+		return
+	}
 	if err != nil {
 		writeInternal(w, r, err)
 		return

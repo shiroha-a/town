@@ -17,21 +17,32 @@ type greetHub struct {
 	subs map[chan struct{}]struct{}
 }
 
+// maxGreetStreams caps how many SSE connections this process holds at once.
+// この経路はログイン不要で、1本ごとに goroutine とチャネルを抱える。上限が
+// 無いと、繋ぎっぱなしにするだけでプロセスを膨らませられる。街に同時に居る
+// 人数からすれば500でも過剰なくらい。
+const maxGreetStreams = 500
+
 func newGreetHub() *greetHub {
 	return &greetHub{subs: map[chan struct{}]struct{}{}}
 }
 
 // subscribe registers a listener channel and returns an unsubscribe func.
-func (h *greetHub) subscribe() (<-chan struct{}, func()) {
-	ch := make(chan struct{}, 1)
+// 上限に達しているときは ok=false。
+func (h *greetHub) subscribe() (ch <-chan struct{}, unsub func(), ok bool) {
+	c := make(chan struct{}, 1)
 	h.mu.Lock()
-	h.subs[ch] = struct{}{}
-	h.mu.Unlock()
-	return ch, func() {
-		h.mu.Lock()
-		delete(h.subs, ch)
+	if len(h.subs) >= maxGreetStreams {
 		h.mu.Unlock()
+		return nil, nil, false
 	}
+	h.subs[c] = struct{}{}
+	h.mu.Unlock()
+	return c, func() {
+		h.mu.Lock()
+		delete(h.subs, c)
+		h.mu.Unlock()
+	}, true
 }
 
 // notify signals every subscriber without blocking (合流分は1回にまとまる)。
@@ -61,6 +72,19 @@ func (s *Server) greetingsStream(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "streaming unsupported")
 		return
 	}
+	// 先に席を取る。ヘッダを送ってしまうと、埋まっていることを伝えられない。
+	ch, unsub, ok := s.greetHub.subscribe()
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "接続が混み合っています。少し待ってから開き直してください。")
+		return
+	}
+	defer unsub()
+	// サーバ全体の ReadTimeout はこの接続には掛けない。SSEは繋ぎっぱなしが
+	// 前提で、読むものが無いまま期限だけ過ぎて切られてしまうため。
+	if rc := http.NewResponseController(w); rc != nil {
+		_ = rc.SetReadDeadline(time.Time{})
+		_ = rc.SetWriteDeadline(time.Time{})
+	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
@@ -84,8 +108,6 @@ func (s *Server) greetingsStream(w http.ResponseWriter, r *http.Request) {
 	if !send() {
 		return
 	}
-	ch, unsub := s.greetHub.subscribe()
-	defer unsub()
 	heartbeat := time.NewTicker(25 * time.Second)
 	defer heartbeat.Stop()
 	for {

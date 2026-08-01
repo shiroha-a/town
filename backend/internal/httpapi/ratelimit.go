@@ -3,6 +3,8 @@ package httpapi
 import (
 	"net"
 	"net/http"
+	"net/netip"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -96,12 +98,71 @@ func (l *limiter) sweep() {
 	}
 }
 
-// clientIP resolves the caller's address. リバースプロキシ(Cloudflare Tunnel →
-// Vite)の裏に居るため、RemoteAddr はプロキシのアドレスになる。前段が付ける
-// ヘッダを見る。
+// trustedProxies are the source addresses whose forwarding headers we believe.
 //
-// ヘッダは詐称できるので、これだけを頼りにはしない(全体上限を併用する)。
+// 既定はループバックとプライベート範囲。公開は Cloudflare Tunnel 経由だけで、
+// cloudflared は同じホスト(またはDockerのブリッジ)から繋いでくるため、それ
+// 以外から直に来た接続が名乗る CF-Connecting-IP は信じない。信じてしまうと
+// IP単位の制限をヘッダ1つで回避できる。
+// TOWN_TRUSTED_PROXIES にカンマ区切りのCIDRを書けば置き換えられる。
+var trustedProxies = loadTrustedProxies(os.Getenv("TOWN_TRUSTED_PROXIES"))
+
+func loadTrustedProxies(raw string) []netip.Prefix {
+	if strings.TrimSpace(raw) == "" {
+		return []netip.Prefix{
+			netip.MustParsePrefix("127.0.0.0/8"),
+			netip.MustParsePrefix("::1/128"),
+			netip.MustParsePrefix("10.0.0.0/8"),
+			netip.MustParsePrefix("172.16.0.0/12"),
+			netip.MustParsePrefix("192.168.0.0/16"),
+			netip.MustParsePrefix("fc00::/7"),
+		}
+	}
+	out := []netip.Prefix{}
+	for _, part := range strings.Split(raw, ",") {
+		p, err := netip.ParsePrefix(strings.TrimSpace(part))
+		if err != nil {
+			continue // 書き間違いは黙って落とす(信頼範囲は狭い側に倒す)
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+// fromTrustedProxy reports whether the connection itself came from a front end
+// we put there.
+func fromTrustedProxy(remoteAddr string) bool {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		host = remoteAddr
+	}
+	ip, err := netip.ParseAddr(host)
+	if err != nil {
+		return false
+	}
+	ip = ip.Unmap()
+	for _, p := range trustedProxies {
+		if p.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// clientIP resolves the caller's address. リバースプロキシ(Cloudflare Tunnel)の
+// 裏に居るため、RemoteAddr はプロキシのアドレスになる。前段が付けるヘッダを
+// 見るが、それは接続元が信頼できる前段のときだけにする。
+//
+// 信じたうえでもヘッダは前段より外側で詐称され得るので、これだけを頼りには
+// しない(全体上限を併用する)。
 func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	if !fromTrustedProxy(r.RemoteAddr) {
+		return host
+	}
 	if v := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); v != "" {
 		return v
 	}
@@ -113,10 +174,6 @@ func clientIP(r *http.Request) string {
 		if v = strings.TrimSpace(v); v != "" {
 			return v
 		}
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
 	}
 	return host
 }

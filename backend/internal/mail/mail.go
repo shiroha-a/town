@@ -23,6 +23,11 @@ const (
 	SaveLimit = 50
 	// DailySendLimit is the max messages one player may send per game day.
 	DailySendLimit = 30
+	// MaxBody caps one letter between residents. 日数あたりの通数だけ絞っても
+	// 1通の長さが青天井だと、受信箱を重くする手が残る。運営からのお知らせ
+	// (MaxBroadcastBody)より短くしているのは、住民の手紙にそこまでの長さが
+	// 要らないため。
+	MaxBody = 1000
 )
 
 // ErrValidation wraps a user-facing validation failure.
@@ -185,6 +190,9 @@ func (s *Service) Send(ctx context.Context, senderID, recipientID int64, body st
 	body = strings.TrimSpace(body)
 	if body == "" {
 		return &ErrValidation{Message: "メッセージが入力されていません。"}
+	}
+	if len([]rune(body)) > MaxBody {
+		return &ErrValidation{Message: fmt.Sprintf("本文は%d文字までです。", MaxBody)}
 	}
 	if senderID == recipientID {
 		return &ErrValidation{Message: "自分に送っても意味がありません。"}

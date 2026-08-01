@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -134,9 +135,15 @@ func (c *Client) postJSONLimited(ctx context.Context, host, path, token string, 
 			body.Error.Host = host
 			return body.Error
 		}
-		// 解釈できない応答は冒頭を添える。原因(未対応API/CDNの遮断/フォーク差異)の切り分けに要る。
-		return fmt.Errorf("%s がエラーを返しました (HTTP %d) %s",
-			host, resp.StatusCode, strings.TrimSpace(string(snippet)))
+		// 解釈できない応答は原因(未対応API/CDNの遮断/フォーク差異)の切り分けに
+		// 中身が要るが、これは相手のサーバーが返した文章そのもの。呼び出し側は
+		// これを利用者に見せるので、外へは出さずログにだけ残す。ここを応答に
+		// 載せていると、認証の要らない経路から任意の公開ホストへ問い合わせさせ、
+		// その中身を読み出す道具になる。
+		slog.Warn("instance returned an error",
+			"host", host, "path", path, "status", resp.StatusCode,
+			"body", strings.TrimSpace(string(snippet)))
+		return fmt.Errorf("%s がエラーを返しました (HTTP %d)", host, resp.StatusCode)
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, limit))
 	if err != nil {

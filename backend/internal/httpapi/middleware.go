@@ -108,6 +108,11 @@ func (s *Server) authGuard(mux *http.ServeMux) http.Handler {
 		if s.rateLimited(w, r, pattern) {
 			return
 		}
+		// ボディの上限も認可より前に掛ける。認可で弾かれる相手に大きなものを
+		// 読ませる理由が無いため。
+		if limitBody(w, r, pattern) {
+			return
+		}
 
 		token := session.TokenFrom(r)
 		playerID, slid, err := s.sessions.Lookup(r.Context(), token)

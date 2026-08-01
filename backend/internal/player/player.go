@@ -630,6 +630,18 @@ func (s *Service) AdminUpdate(ctx context.Context, id int64, u AdminPlayerUpdate
 				return fmt.Errorf("grant admin: %w", err)
 			}
 		} else {
+			// 最後の管理者は外させない。全員から外すと管理画面に入れなくなり、
+			// DBを直に触るしか戻す手が無くなる(凍結を管理者に掛けられないのと
+			// 同じ理由)。
+			var others int
+			if err := tx.QueryRow(ctx,
+				`SELECT count(*) FROM player_roles r JOIN players p ON p.id = r.player_id
+				 WHERE r.role = 'admin' AND r.player_id <> $1 AND p.deleted_at IS NULL`, id).Scan(&others); err != nil {
+				return fmt.Errorf("count admins: %w", err)
+			}
+			if others == 0 {
+				return &ErrValidation{Message: "最後の管理者から管理者権限を外すことはできません。先に別の住民を管理者にしてください。"}
+			}
 			if _, err := tx.Exec(ctx,
 				`DELETE FROM player_roles WHERE player_id = $1 AND role = 'admin'`, id); err != nil {
 				return fmt.Errorf("revoke admin: %w", err)
