@@ -9,10 +9,12 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/shiroha-a/town/internal/miauth"
 	"github.com/shiroha-a/town/internal/session"
+	"github.com/shiroha-a/town/internal/webhook"
 )
 
 // miauthPermissions are the scopes we ask the instance for.
@@ -163,7 +165,8 @@ func (s *Server) authCallback(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(displayName) == "" {
 		displayName = res.User.Username
 	}
-	p, err := s.players.Register(r.Context(), host, res.User.ID, displayName)
+	// 入居の知らせは player.Register が出す(登録の経路が複数あるため)。
+	p, _, err := s.players.Register(r.Context(), host, res.User.ID, displayName)
 	if err != nil {
 		writeInternal(w, r, err)
 		return
@@ -223,6 +226,20 @@ func (s *Server) authGuest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable,
 			"お試しプレイの人数が上限に達しています。しばらく待ってからお試しください。")
 		return
+	}
+	// 上限の8割で一度だけ知らせる(超えると新規のお試しが弾かれるため)。
+	// ちょうど境目を跨いだ回だけ出すので、繰り返し鳴り続けることはない。
+	if live == maxLiveGuests*8/10 {
+		s.webhooks.PostQuiet(r.Context(), webhook.Notice{
+			Event:    webhook.EventGuestNearFull,
+			Severity: webhook.SeverityWarn,
+			Title:    "お試しプレイが上限に近づいています",
+			Body:     "これ以上増えると、新しいお試しプレイを始められなくなります。",
+			Fields: []webhook.Field{
+				{Name: "同時に遊んでいる数", Value: strconv.Itoa(live)},
+				{Name: "上限", Value: strconv.Itoa(maxLiveGuests)},
+			},
+		})
 	}
 	p, err := s.players.RegisterGuest(r.Context(), guestName())
 	if err != nil {

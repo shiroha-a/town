@@ -16,6 +16,7 @@ import (
 	"github.com/shiroha-a/town/internal/player"
 	"github.com/shiroha-a/town/internal/settings"
 	"github.com/shiroha-a/town/internal/townmap"
+	"github.com/shiroha-a/town/internal/webhook"
 )
 
 // towns returns the configured town list (public: needed to render names/prices).
@@ -595,6 +596,8 @@ func (s *Server) adminUpdatePlayer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
+	// お金が動いたときだけ知らせたいので、書き換える前の額を控えておく。
+	before, beforeErr := s.players.Get(r.Context(), id)
 	err = s.players.AdminUpdate(r.Context(), id, player.AdminPlayerUpdate{
 		DisplayName: req.DisplayName, Money: req.Money, IsAdmin: req.IsAdmin,
 		Params: player.Params(req.Params),
@@ -619,6 +622,19 @@ func (s *Server) adminUpdatePlayer(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeInternal(w, r, err)
 		return
+	}
+	if beforeErr == nil && before.Money != p.Money {
+		s.webhooks.PostQuiet(r.Context(), webhook.Notice{
+			Event:    webhook.EventMoneyAdjusted,
+			Severity: webhook.SeverityWarn,
+			Title:    "住民のお金を書き換えました",
+			Body:     s.playerLabel(r.Context(), id),
+			Fields: []webhook.Field{
+				{Name: "前", Value: strconv.FormatInt(before.Money, 10) + "円"},
+				{Name: "後", Value: strconv.FormatInt(p.Money, 10) + "円"},
+				{Name: "操作した人", Value: s.playerLabel(r.Context(), PlayerIDFrom(r.Context()))},
+			},
+		})
 	}
 	writeJSON(w, http.StatusOK, toResp(p))
 }

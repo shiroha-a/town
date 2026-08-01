@@ -196,7 +196,7 @@ func (s *Server) registerPlayer(w http.ResponseWriter, r *http.Request) {
 	if req.DisplayName == "" {
 		req.DisplayName = req.RemoteUserID
 	}
-	p, err := s.players.Register(r.Context(), req.InstanceHost, req.RemoteUserID, req.DisplayName)
+	p, _, err := s.players.Register(r.Context(), req.InstanceHost, req.RemoteUserID, req.DisplayName)
 	if err != nil {
 		writeInternal(w, r, err)
 		return

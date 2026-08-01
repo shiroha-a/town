@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"runtime/debug"
 	"slices"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -32,6 +33,7 @@ import (
 	"github.com/shiroha-a/town/internal/stock"
 	"github.com/shiroha-a/town/internal/streetfight"
 	"github.com/shiroha-a/town/internal/townmap"
+	"github.com/shiroha-a/town/internal/webhook"
 )
 
 // Server holds the API dependencies.
@@ -53,7 +55,9 @@ type Server struct {
 	ranking    *ranking.Service
 	serial     *serial.Service
 	// push は通知の送信口。用意していない環境では nil(通知の口は503を返す)。
-	push     *push.Service
+	push *push.Service
+	// webhooks は管理者向けの外部通知。積むだけで、送るのは worker。
+	webhooks *webhook.Service
 	greetHub *greetHub // あいさつSSE配信のプロセス内ハブ
 
 	// MiAuth(ログイン)まわり。
@@ -87,6 +91,8 @@ type AuthDeps struct {
 	Emojis        *emoji.Service
 	// Push は通知。nil なら通知機能そのものを出さない。
 	Push *push.Service
+	// Webhooks は管理者向けの外部通知。
+	Webhooks *webhook.Service
 	// WebDir はビルド済みフロントエンドの置き場。空なら配信しない
 	// (開発でViteの開発サーバを使う場合)。
 	WebDir         string
@@ -99,7 +105,8 @@ func NewServer(players *player.Service, actions *action.Service, contentSvc *con
 	s := &Server{players: players, actions: actions, content: contentSvc, settings: st, townmap: tmap, stock: stockSvc, keiba: keibaSvc, mail: mailSvc, greeting: greetingSvc, attendance: attendanceSvc, cleague: cleagueSvc, monsters: monsterSvc, feedback: feedbackSvc, news: newsSvc, ranking: rankingSvc, serial: serialSvc, greetHub: newGreetHub(),
 		pool: auth.Pool, miauth: auth.MiAuth, instanceRules: auth.InstanceRules,
 		sessions: auth.Sessions, profiles: auth.Profiles, emojis: auth.Emojis, push: auth.Push,
-		appName: auth.AppName, allowedOrigins: auth.AllowedOrigins, limiter: newLimiter()}
+		webhooks: auth.Webhooks,
+		appName:  auth.AppName, allowedOrigins: auth.AllowedOrigins, limiter: newLimiter()}
 	// "all" は開発用の全許可。ここを開けたままにすると、任意のオリジンを
 	// MiAuthのコールバック先に指定でき、認証セッションIDを他所へ配送させられる。
 	// 気付けるよう起動のたびに言う。
@@ -319,7 +326,13 @@ func NewServer(players *player.Service, actions *action.Service, contentSvc *con
 	mux.HandleFunc("DELETE /api/v1/admin/posts/{source}/{postId}", s.adminDeletePost)
 	mux.HandleFunc("GET /api/v1/admin/players/{id}/log", s.adminPlayerLog)
 	mux.HandleFunc("GET /api/v1/admin/dashboard", s.adminDashboard)
-	api := recoverer(securityHeaders(s.authGuard(mux)))
+	// 外部通知(Discord互換のwebhook)。
+	mux.HandleFunc("GET /api/v1/admin/webhooks", s.adminListWebhooks)
+	mux.HandleFunc("POST /api/v1/admin/webhooks", s.adminCreateWebhook)
+	mux.HandleFunc("PUT /api/v1/admin/webhooks/{wid}", s.adminUpdateWebhook)
+	mux.HandleFunc("DELETE /api/v1/admin/webhooks/{wid}", s.adminDeleteWebhook)
+	mux.HandleFunc("POST /api/v1/admin/webhooks/{wid}/test", s.adminTestWebhook)
+	api := s.recoverer(securityHeaders(s.authGuard(mux)))
 	if auth.WebDir == "" {
 		return api
 	}
@@ -402,17 +415,45 @@ const hstsValue = "max-age=31536000"
 
 // recoverer converts panics into 500 responses instead of dropping the connection.
 //
-// 握り潰すだけだと、攻撃も不具合も痕跡が残らない。経路とスタックをログに出す。
-func recoverer(next http.Handler) http.Handler {
+// 握り潰すだけだと、攻撃も不具合も痕跡が残らない。経路とスタックをログに出し、
+// 外部通知の宛先があればそちらへも押し出す(ログは見に行かないと気付けない)。
+func (s *Server) recoverer(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
-			if rec := recover(); rec != nil {
-				slog.Error("panic in handler",
-					"path", r.URL.Path, "method", r.Method,
-					"panic", fmt.Sprint(rec), "stack", string(debug.Stack()))
-				writeError(w, http.StatusInternalServerError, "internal error")
+			rec := recover()
+			if rec == nil {
+				return
 			}
+			stack := string(debug.Stack())
+			slog.Error("panic in handler",
+				"path", r.URL.Path, "method", r.Method,
+				"panic", fmt.Sprint(rec), "stack", stack)
+			// 通知そのもので二度目のパニックを起こさない。ここは最後の砦。
+			func() {
+				defer func() { _ = recover() }()
+				s.webhooks.PostQuiet(r.Context(), webhook.Notice{
+					Event:    webhook.EventPanic,
+					Severity: webhook.SeverityError,
+					Title:    "エラーで落ちました",
+					Body:     fmt.Sprint(rec),
+					Fields: []webhook.Field{
+						{Name: "経路", Value: r.Method + " " + r.URL.Path},
+						{Name: "位置", Value: firstFrames(stack, 6)},
+					},
+				})
+			}()
+			writeError(w, http.StatusInternalServerError, "internal error")
 		}()
 		next.ServeHTTP(w, r)
 	})
+}
+
+// firstFrames keeps the top of a stack trace. 全文はログにあるので、通知には
+// 出どころが分かるぶんだけ載せる。
+func firstFrames(stack string, n int) string {
+	lines := strings.Split(stack, "\n")
+	if len(lines) > n {
+		lines = lines[:n]
+	}
+	return strings.Join(lines, "\n")
 }

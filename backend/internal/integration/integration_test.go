@@ -48,6 +48,7 @@ import (
 	"github.com/shiroha-a/town/internal/stock"
 	"github.com/shiroha-a/town/internal/streetfight"
 	"github.com/shiroha-a/town/internal/townmap"
+	"github.com/shiroha-a/town/internal/webhook"
 	"github.com/shiroha-a/town/internal/worker"
 
 	"github.com/jackc/pgx/v5"
@@ -131,7 +132,7 @@ func setup(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 	if _, err := pool.Exec(ctx,
 		`TRUNCATE players, player_roles, player_status, status_history,
 		 ledger_entry, ledger_tx, action_log, worker_jobs, shop_daily_stock,
-		 serial_codes RESTART IDENTITY CASCADE`); err != nil {
+		 serial_codes, webhooks RESTART IDENTITY CASCADE`); err != nil {
 		pool.Close()
 		t.Fatalf("truncate: %v", err)
 	}
@@ -146,7 +147,8 @@ func setup(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 		WorkIntervalMin:   0,
 		DebugNoCooldown:   false,
 	})
-	svc := player.New(pool, led, rng.New(1), st)
+	hooks := webhook.New(pool)
+	svc := player.New(pool, led, rng.New(1), st).WithWebhooks(hooks)
 	actions := action.New(pool, led, svc, rng.New(2), time.UTC, 5, st)
 	contentSvc := content.New(pool, time.UTC, 5, st)
 	tmap, err := townmap.NewStore(ctx, pool, townmap.Default(), townmap.DefaultAssets())
@@ -171,6 +173,7 @@ func setup(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 	srv := httptest.NewServer(httpapi.NewServer(svc, actions, contentSvc, st, tmap, stock.New(pool), keiba.New(pool, rng.New(7)), mail.New(pool, time.UTC, 5), greeting.New(pool), attendance.New(pool, time.UTC, 5), cleague.New(pool), streetfight.New(pool), feedback.New(pool), news.New(pool), ranking.New(pool), serial.New(pool, rng.New(3)),
 		httpapi.AuthDeps{
 			Pool:           pool,
+			Webhooks:       hooks,
 			MiAuth:         miauth.NewClient(),
 			InstanceRules:  miauth.NewRules(pool),
 			Sessions:       sessions,
@@ -250,7 +253,7 @@ func testPathPlayerID(path string) int64 {
 func register(t *testing.T, base, host, uid string) playerResp {
 	t.Helper()
 	ctx := context.Background()
-	p, err := testPlayerSvc.Register(ctx, host, uid, uid)
+	p, _, err := testPlayerSvc.Register(ctx, host, uid, uid)
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -566,7 +569,7 @@ func TestBuyAndUseItem(t *testing.T) {
 	// シードされた「栄養ドリンク」(500円, energy+3)のIDを引く。
 	var drinkID int64
 	if err := pool.QueryRow(ctx,
-		`SELECT id FROM content_items WHERE name = '栄養ドリンク'`).Scan(&drinkID); err != nil {
+		`SELECT id FROM content_items WHERE name = '栄養ドリンク' ORDER BY id LIMIT 1`).Scan(&drinkID); err != nil {
 		t.Fatalf("seed lookup: %v", err)
 	}
 
@@ -826,7 +829,7 @@ func TestItemUseCooldown(t *testing.T) {
 
 	// 栄養ドリンクは使用間隔30分。
 	var drinkID int64
-	if err := pool.QueryRow(ctx, `SELECT id FROM content_items WHERE name = '栄養ドリンク'`).Scan(&drinkID); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT id FROM content_items WHERE name = '栄養ドリンク' ORDER BY id LIMIT 1`).Scan(&drinkID); err != nil {
 		t.Fatal(err)
 	}
 	alice := register(t, srv.URL, "misskey.example", "alice")
@@ -1089,7 +1092,7 @@ func TestPurchaseLimit(t *testing.T) {
 	ctx := context.Background()
 
 	var drinkID int64 // 栄養ドリンク: durability=1, max_sets=5, stock=20
-	if err := pool.QueryRow(ctx, `SELECT id FROM content_items WHERE name = '栄養ドリンク'`).Scan(&drinkID); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT id FROM content_items WHERE name = '栄養ドリンク' ORDER BY id LIMIT 1`).Scan(&drinkID); err != nil {
 		t.Fatalf("seed lookup: %v", err)
 	}
 	alice := register(t, srv.URL, "misskey.example", "alice")
@@ -1119,7 +1122,7 @@ func TestStockSoldOut(t *testing.T) {
 	ctx := context.Background()
 
 	var drinkID int64
-	if err := pool.QueryRow(ctx, `SELECT id FROM content_items WHERE name = '栄養ドリンク'`).Scan(&drinkID); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT id FROM content_items WHERE name = '栄養ドリンク' ORDER BY id LIMIT 1`).Scan(&drinkID); err != nil {
 		t.Fatalf("seed lookup: %v", err)
 	}
 	alice := register(t, srv.URL, "misskey.example", "alice")
@@ -1484,7 +1487,7 @@ func TestDerivedPowerMax(t *testing.T) {
 		t.Fatal(err)
 	}
 	var drinkID int64
-	if err := pool.QueryRow(ctx, `SELECT id FROM content_items WHERE name = '栄養ドリンク'`).Scan(&drinkID); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT id FROM content_items WHERE name = '栄養ドリンク' ORDER BY id LIMIT 1`).Scan(&drinkID); err != nil {
 		t.Fatal(err)
 	}
 	itemAction(t, srv.URL, "/buy", alice.ID, drinkID, "pm-buy")
@@ -1621,7 +1624,7 @@ func TestDailyShop(t *testing.T) {
 		 WHERE enabled AND facility = '' AND id NOT IN (SELECT id FROM daily_shop_ids('', $1, $2))
 		 LIMIT 1`, daykey, daily).Scan(&outID)
 
-	alice, err := psvc.Register(ctx, "misskey.example", "shopper", "shopper")
+	alice, _, err := psvc.Register(ctx, "misskey.example", "shopper", "shopper")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3758,8 +3761,12 @@ func giveItem(t *testing.T, pool *pgxpool.Pool, playerID int64, name string, qty
 	ctx := context.Background()
 	var id int64
 	var durability int
+	// 同名の品が施設ごとに存在する(デパートの「栄養ドリンク」と自動販売機の
+	// 「栄養ドリンク」)。並び順まかせだと呼び出し側が引いたIDと食い違うので、
+	// 常に最初に登録されたものを選ぶ。
 	if err := pool.QueryRow(ctx,
-		`SELECT id, GREATEST(durability, 1) FROM content_items WHERE name = $1`, name).Scan(&id, &durability); err != nil {
+		`SELECT id, GREATEST(durability, 1) FROM content_items WHERE name = $1
+		 ORDER BY id LIMIT 1`, name).Scan(&id, &durability); err != nil {
 		t.Fatalf("find item %s: %v", name, err)
 	}
 	if _, err := pool.Exec(ctx,
@@ -5692,7 +5699,7 @@ func TestUseAllItems(t *testing.T) {
 	seedID := func(name string) int64 {
 		t.Helper()
 		var id int64
-		if err := pool.QueryRow(ctx, `SELECT id FROM content_items WHERE name = $1`, name).Scan(&id); err != nil {
+		if err := pool.QueryRow(ctx, `SELECT id FROM content_items WHERE name = $1 ORDER BY id LIMIT 1`, name).Scan(&id); err != nil {
 			t.Fatalf("seed lookup %s: %v", name, err)
 		}
 		return id
@@ -5793,7 +5800,7 @@ func TestRetire(t *testing.T) {
 	// aliceに貯金と持ち物を作っておく。
 	bankAction(t, srv.URL, "/bank/deposit", alice.ID, 100000, "dep-1")
 	var itemID int64
-	if err := pool.QueryRow(ctx, `SELECT id FROM content_items WHERE name = '栄養ドリンク'`).Scan(&itemID); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT id FROM content_items WHERE name = '栄養ドリンク' ORDER BY id LIMIT 1`).Scan(&itemID); err != nil {
 		t.Fatal(err)
 	}
 	itemAction(t, srv.URL, "/buy", alice.ID, itemID, "buy-1")
@@ -5982,7 +5989,7 @@ func TestShopListedFlag(t *testing.T) {
 
 	var drinkID int64
 	if err := pool.QueryRow(ctx,
-		`SELECT id FROM content_items WHERE name = '栄養ドリンク'`).Scan(&drinkID); err != nil {
+		`SELECT id FROM content_items WHERE name = '栄養ドリンク' ORDER BY id LIMIT 1`).Scan(&drinkID); err != nil {
 		t.Fatalf("seed lookup: %v", err)
 	}
 	// 既定(shop_listed=true)では買える。
@@ -6098,7 +6105,7 @@ func TestItemUsableFlag(t *testing.T) {
 	// 効果のある品はこれまでどおり使える。
 	var drinkID int64
 	if err := pool.QueryRow(ctx,
-		`SELECT id FROM content_items WHERE name = '栄養ドリンク'`).Scan(&drinkID); err != nil {
+		`SELECT id FROM content_items WHERE name = '栄養ドリンク' ORDER BY id LIMIT 1`).Scan(&drinkID); err != nil {
 		t.Fatalf("drink lookup: %v", err)
 	}
 	giveItem(t, pool, alice.ID, "栄養ドリンク", 1)

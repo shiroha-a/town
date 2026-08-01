@@ -10,6 +10,7 @@ import (
 	"strconv"
 
 	"github.com/shiroha-a/town/internal/feedback"
+	"github.com/shiroha-a/town/internal/webhook"
 )
 
 // writeFeedbackErr maps the package's errors onto status codes.
@@ -97,6 +98,17 @@ func (s *Server) feedbackCreate(w http.ResponseWriter, r *http.Request) {
 	s.notifyAdmins(r.Context(), id, fmt.Sprintf(
 		"目安箱に新しい投稿がありました。\n\n【%s】%s\n\n%s",
 		feedback.KindLabels[req.Kind], req.Title, req.Body))
+	s.webhooks.PostQuiet(r.Context(), webhook.Notice{
+		Event:    webhook.EventFeedbackCreated,
+		Severity: webhook.SeverityInfo,
+		Title:    "目安箱に新しい投稿",
+		Body:     req.Body,
+		Fields: []webhook.Field{
+			{Name: "件名", Value: req.Title},
+			{Name: "種別", Value: feedback.KindLabels[req.Kind]},
+			{Name: "書いた人", Value: s.playerLabel(r.Context(), id)},
+		},
+	})
 	d, err := s.feedback.Get(r.Context(), postID, id)
 	if err != nil {
 		writeFeedbackErr(w, r, err)
@@ -140,6 +152,16 @@ func (s *Server) feedbackComment(w http.ResponseWriter, r *http.Request) {
 	if !isAdmin {
 		s.notifyAdmins(r.Context(), id, fmt.Sprintf(
 			"目安箱の「%s」に返信がつきました。\n\n%s", res.PostTitle, req.Body))
+		s.webhooks.PostQuiet(r.Context(), webhook.Notice{
+			Event:    webhook.EventFeedbackCommented,
+			Severity: webhook.SeverityInfo,
+			Title:    "目安箱に返信",
+			Body:     req.Body,
+			Fields: []webhook.Field{
+				{Name: "元の投稿", Value: res.PostTitle},
+				{Name: "書いた人", Value: s.playerLabel(r.Context(), id)},
+			},
+		})
 	}
 	// 返信は待たれているので、投稿者にはゲーム内メールで知らせる(メール通知が
 	// オンなら端末にも届く)。送れなくても返信自体は成立させる。

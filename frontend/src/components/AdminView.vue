@@ -32,6 +32,8 @@ import {
   type ModPost,
   type PlayerLog,
   type Dashboard,
+  type Webhook,
+  type WebhookEventInfo,
 } from '../api';
 import { PARAM_FULL } from '../params';
 
@@ -57,6 +59,7 @@ const open = reactive({
   broadcast: false,
   posts: false,
   dash: false,
+  hooks: false,
 });
 
 // 効果/条件で対象にできるパラメータ。
@@ -1684,6 +1687,100 @@ async function loadPosts() {
     busy.value = false;
   }
 }
+// ── 外部通知(Discord互換のwebhook) ───────────────────────
+const hooks = ref<Webhook[]>([]);
+const hookEvents = ref<WebhookEventInfo[]>([]);
+const hookMsg = ref('');
+// 編集中の宛先。id=0 は新規追加ぶん。
+const hookForm = reactive({ id: 0, url: '', label: '', enabled: true, events: [] as string[] });
+
+/** イベントを見出しごとにまとめる(異常の検知 / 運営対応 / 住民の動き)。 */
+const hookGroups = computed(() => {
+  const out: { name: string; items: WebhookEventInfo[] }[] = [];
+  for (const e of hookEvents.value) {
+    const g = out.find((x) => x.name === e.group);
+    if (g) g.items.push(e);
+    else out.push({ name: e.group, items: [e] });
+  }
+  return out;
+});
+
+function toggleHooks() {
+  open.hooks = !open.hooks;
+  if (open.hooks && hookEvents.value.length === 0) void loadHooks();
+}
+async function loadHooks() {
+  try {
+    const d = await api.adminWebhooks();
+    hooks.value = d.webhooks;
+    hookEvents.value = d.events;
+  } catch (e) {
+    hookMsg.value = String(e);
+  }
+}
+function editHook(h: Webhook) {
+  hookForm.id = h.id;
+  hookForm.url = h.url;
+  hookForm.label = h.label;
+  hookForm.enabled = h.enabled;
+  hookForm.events = [...h.events];
+  hookMsg.value = '';
+}
+function resetHookForm() {
+  hookForm.id = 0;
+  hookForm.url = '';
+  hookForm.label = '';
+  hookForm.enabled = true;
+  hookForm.events = [];
+  hookMsg.value = '';
+}
+async function saveHook() {
+  try {
+    if (hookForm.id === 0) {
+      await api.adminCreateWebhook(hookForm.url, hookForm.label, hookForm.events, hookForm.enabled);
+      hookMsg.value = '宛先を追加しました。';
+    } else {
+      await api.adminUpdateWebhook(
+        hookForm.id,
+        hookForm.url,
+        hookForm.label,
+        hookForm.events,
+        hookForm.enabled,
+      );
+      hookMsg.value = '保存しました。';
+    }
+    resetHookForm();
+    await loadHooks();
+  } catch (e) {
+    hookMsg.value = String(e);
+  }
+}
+async function deleteHook(h: Webhook) {
+  if (!window.confirm(`この宛先を消しますか?\n\n${h.label || h.url}`)) return;
+  try {
+    await api.adminDeleteWebhook(h.id);
+    if (hookForm.id === h.id) resetHookForm();
+    await loadHooks();
+  } catch (e) {
+    hookMsg.value = String(e);
+  }
+}
+async function testHook(h: Webhook) {
+  try {
+    await api.adminTestWebhook(h.id);
+    hookMsg.value = '試し送りを積みました。10秒ほどで届きます。';
+  } catch (e) {
+    hookMsg.value = String(e);
+  }
+}
+/** 直近の結果を1行で。まだ一度も送っていなければ空。 */
+function hookStatus(h: Webhook): string {
+  if (!h.last_sent_at) return 'まだ送っていません';
+  const when = new Date(h.last_sent_at).toLocaleString();
+  if (h.last_error) return `${when} 失敗: ${h.last_error}`;
+  return `${when} 成功(HTTP ${h.last_status ?? '-'})`;
+}
+
 function togglePosts() {
   open.posts = !open.posts;
   if (open.posts && posts.value.length === 0) void loadPosts();
@@ -2125,6 +2222,98 @@ function fmtTime(iso: string): string {
               </section>
             </template>
             <p v-else class="muted">読み込み中…</p>
+          </div>
+        </section>
+
+        <!-- 外部通知(webhook) -->
+        <section class="fold">
+          <button class="fold-head" @click="toggleHooks">
+            <span class="caret">{{ open.hooks ? '▼' : '▶' }}</span> 外部通知(webhook)
+          </button>
+          <div v-if="open.hooks" class="fold-body">
+            <section class="panel">
+              <h3>
+                宛先<span class="hint">
+                  ※DiscordのwebhookのURLをそのまま貼れます。送信はworkerが行うので、
+                  届くまで10秒ほどかかります</span
+                >
+              </h3>
+              <table v-if="hooks.length" class="admin-table">
+                <thead>
+                  <tr>
+                    <th>名前</th>
+                    <th>状態</th>
+                    <th>直近</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="h in hooks" :key="h.id">
+                    <td>
+                      {{ h.label || '(名前なし)' }}
+                      <div class="muted hook-sub">{{ h.url }}</div>
+                      <div class="muted hook-sub">
+                        {{ h.events.length ? h.events.length + '種類' : 'すべてのイベント' }}
+                        <span v-if="h.pending">/ 送信待ち{{ h.pending }}件</span>
+                      </div>
+                    </td>
+                    <td>{{ h.enabled ? '有効' : '停止中' }}</td>
+                    <td class="hook-sub">{{ hookStatus(h) }}</td>
+                    <td class="nowrap">
+                      <button class="btn mini" :disabled="busy" @click="editHook(h)">編集</button>
+                      <button class="btn mini" :disabled="busy" @click="testHook(h)">
+                        試し送り
+                      </button>
+                      <button class="btn mini danger" :disabled="busy" @click="deleteHook(h)">
+                        削除
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <p v-else class="muted">まだ宛先がありません。</p>
+            </section>
+
+            <section class="panel">
+              <h3>{{ hookForm.id ? '宛先を編集' : '宛先を追加' }}</h3>
+              <label class="hook-field">
+                <span>URL</span>
+                <input
+                  v-model="hookForm.url"
+                  type="url"
+                  placeholder="https://discord.com/api/webhooks/…"
+                />
+              </label>
+              <label class="hook-field">
+                <span>名前</span>
+                <input v-model="hookForm.label" maxlength="40" placeholder="運営チャンネル" />
+              </label>
+              <label class="hook-toggle">
+                <ToggleSwitch v-model="hookForm.enabled" />
+                <span>有効にする</span>
+              </label>
+              <h4>
+                送るもの<span class="hint">※ひとつも選ばなければ、すべてのイベントを送ります</span>
+              </h4>
+              <div v-for="g in hookGroups" :key="g.name" class="hook-group">
+                <div class="hook-group-name">{{ g.name }}</div>
+                <div class="hook-events">
+                  <label v-for="e in g.items" :key="e.event" class="hook-event">
+                    <input v-model="hookForm.events" type="checkbox" :value="e.event" />
+                    <span>{{ e.label }}</span>
+                  </label>
+                </div>
+              </div>
+              <div class="money-bar">
+                <button class="btn" :disabled="busy" @click="saveHook">
+                  {{ hookForm.id ? '保存' : '追加' }}
+                </button>
+                <button v-if="hookForm.id" class="btn mini" :disabled="busy" @click="resetHookForm">
+                  やめる
+                </button>
+              </div>
+              <p v-if="hookMsg" class="muted">{{ hookMsg }}</p>
+            </section>
           </div>
         </section>
 
@@ -4932,5 +5121,56 @@ tr.reversed .hint {
   font-size: 12px;
   padding: 2px 4px;
   border-bottom: 1px solid #eee;
+}
+
+/* 外部通知(webhook)の設定 */
+.hook-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.hook-field > span {
+  flex: 0 0 4em;
+}
+.hook-field > input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.hook-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.hook-sub {
+  font-size: 12px;
+  word-break: break-all;
+}
+.hook-group {
+  margin-bottom: 8px;
+}
+.hook-group-name {
+  font-size: 12px;
+  font-weight: bold;
+  margin-bottom: 2px;
+}
+.hook-events {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 14px;
+}
+/* .panel label が flex 指定なので、詳細度で上回るよう label 付きで書く。 */
+.panel label.hook-event {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 2px;
+  font-size: 13px;
+}
+/* .panel label input の flex:1 はテキスト入力向けで、チェックボックスにまで
+   効くと印だけ左端に伸び、ラベルが右端へ離れてしまう。ここでは伸ばさない。 */
+.panel label.hook-event input {
+  flex: 0 0 auto;
 }
 </style>

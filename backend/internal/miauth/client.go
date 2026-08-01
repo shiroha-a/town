@@ -35,10 +35,13 @@ type Client struct {
 	http *http.Client
 }
 
-// NewClient builds the SSRF-guarded HTTP client.
-func NewClient() *Client {
+// GuardedTransport builds an http.Transport that refuses to reach anything but
+// a public address. 相手のホスト名は利用者が持ち込むので(インスタンス名・
+// webhookの宛先)、そのまま繋ぐと社内ネットワークやメタデータサービスへの
+// 踏み台になる。
+func GuardedTransport() *http.Transport {
 	dialer := &net.Dialer{Timeout: dialTimeout}
-	transport := &http.Transport{
+	return &http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			host, port, err := net.SplitHostPort(addr)
 			if err != nil {
@@ -69,19 +72,26 @@ func NewClient() *Client {
 		},
 		TLSHandshakeTimeout: dialTimeout,
 	}
+}
+
+// GuardedRedirect is the redirect policy that goes with GuardedTransport:
+// https だけを追い、回数も抑える(IPの検査は毎回DialContextで掛かる)。
+func GuardedRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= maxRedirects {
+		return fmt.Errorf("リダイレクトが多すぎます")
+	}
+	if req.URL.Scheme != "https" {
+		return fmt.Errorf("https以外へのリダイレクトは許可されません")
+	}
+	return nil
+}
+
+// NewClient builds the SSRF-guarded HTTP client.
+func NewClient() *Client {
 	return &Client{http: &http.Client{
-		Transport: transport,
-		Timeout:   requestTimeout,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= maxRedirects {
-				return fmt.Errorf("リダイレクトが多すぎます")
-			}
-			// リダイレクト先も https 限定(DialContextでIPは毎回検査される)。
-			if req.URL.Scheme != "https" {
-				return fmt.Errorf("https以外へのリダイレクトは許可されません")
-			}
-			return nil
-		},
+		Transport:     GuardedTransport(),
+		Timeout:       requestTimeout,
+		CheckRedirect: GuardedRedirect,
 	}}
 }
 
