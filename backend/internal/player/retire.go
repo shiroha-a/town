@@ -31,6 +31,13 @@ func (s *Service) Retire(ctx context.Context, id int64) error {
 		}
 
 		// 残っているお金(現金・普通預金・スーパー定期)を街へ返す。
+		//
+		// 3口座を1つの仕訳にまとめるのは、ref が取引ごとに一意だから。口座ごとに
+		// 同じ ref で PostTx を呼ぶと、2回目以降が「同一refの二重post」と見なされ
+		// 冪等な no-op になり、普通預金とスーパー定期が返らないまま住民の行だけ
+		// 消えていた(誰のものでもない残高が台帳に残る)。
+		entries := []ledger.Entry{}
+		var total int64
 		for _, acct := range []string{
 			ledger.PlayerAccount(id), ledger.SavingsAccount(id), ledger.SuperSavingsAccount(id),
 		} {
@@ -42,10 +49,12 @@ func (s *Service) Retire(ctx context.Context, id int64) error {
 			if bal == 0 {
 				continue
 			}
-			if err := s.ledger.PostTx(ctx, tx, "retire", fmt.Sprintf("retire:%d", id), []ledger.Entry{
-				{Account: acct, Delta: -bal},
-				{Account: ledger.SystemAccount("retire"), Delta: bal},
-			}); err != nil {
+			entries = append(entries, ledger.Entry{Account: acct, Delta: -bal})
+			total += bal
+		}
+		if len(entries) > 0 {
+			entries = append(entries, ledger.Entry{Account: ledger.SystemAccount("retire"), Delta: total})
+			if err := s.ledger.PostTx(ctx, tx, "retire", fmt.Sprintf("retire:%d", id), entries); err != nil {
 				return fmt.Errorf("return money: %w", err)
 			}
 		}

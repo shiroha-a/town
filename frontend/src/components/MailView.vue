@@ -123,7 +123,12 @@ async function del(m: MailMessage) {
       </label>
       <label class="row">
         <span class="lbl">本文</span>
-        <textarea v-model="body" rows="3" placeholder="メッセージを入力"></textarea>
+        <textarea
+          v-model="body"
+          rows="3"
+          maxlength="1000"
+          placeholder="メッセージを入力"
+        ></textarea>
       </label>
       <label class="row" v-if="gifts.length">
         <span class="lbl">贈り物</span>

@@ -3,8 +3,11 @@ package httpapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"runtime/debug"
+	"slices"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -97,6 +100,12 @@ func NewServer(players *player.Service, actions *action.Service, contentSvc *con
 		pool: auth.Pool, miauth: auth.MiAuth, instanceRules: auth.InstanceRules,
 		sessions: auth.Sessions, profiles: auth.Profiles, emojis: auth.Emojis, push: auth.Push,
 		appName: auth.AppName, allowedOrigins: auth.AllowedOrigins, limiter: newLimiter()}
+	// "all" は開発用の全許可。ここを開けたままにすると、任意のオリジンを
+	// MiAuthのコールバック先に指定でき、認証セッションIDを他所へ配送させられる。
+	// 気付けるよう起動のたびに言う。
+	if slices.Contains(auth.AllowedOrigins, "all") {
+		slog.Warn("TOWN_EXTRA_ORIGINS に \"all\" が入っています。任意のオリジンへMiAuthのコールバックを向けられるため、公開環境では外してください")
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", s.health)
 	mux.HandleFunc("GET /api/v1/site", s.site)
@@ -375,6 +384,7 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("Strict-Transport-Security", hstsValue)
 		h.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
 		// API応答は溜めさせない。ログイン状態や所持金が古いまま出ると実害が出る。
 		// 指定が無いと中間キャッシュやブラウザの経験的キャッシュに委ねることになる。
@@ -385,11 +395,21 @@ func securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
+// hstsValue tells browsers to stick to HTTPS for a year. includeSubDomains は
+// 付けない: 同じドメインの別サブドメインにまで HTTPS を強制してしまい、この
+// ゲームの都合で他所を巻き添えにすることになる。
+const hstsValue = "max-age=31536000"
+
 // recoverer converts panics into 500 responses instead of dropping the connection.
+//
+// 握り潰すだけだと、攻撃も不具合も痕跡が残らない。経路とスタックをログに出す。
 func recoverer(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if rec := recover(); rec != nil {
+				slog.Error("panic in handler",
+					"path", r.URL.Path, "method", r.Method,
+					"panic", fmt.Sprint(rec), "stack", string(debug.Stack()))
 				writeError(w, http.StatusInternalServerError, "internal error")
 			}
 		}()

@@ -6606,7 +6606,7 @@ func count(mu *sync.Mutex, n *int) int {
 // pushService builds a push service against the test database.
 func pushService(t *testing.T, pool *pgxpool.Pool, baseURL string) *pushpkg.Service {
 	t.Helper()
-	p, err := pushpkg.New(context.Background(), pool, baseURL, nil)
+	p, err := pushpkg.New(context.Background(), pool, baseURL, nil, nil)
 	if err != nil {
 		t.Fatalf("push service: %v", err)
 	}

@@ -14,16 +14,21 @@ services:
       TOWN_BASE_URL: "https://town.example.com"
 
       # base_url 以外の経路からもアクセスする場合だけ設定する(カンマ区切り)。
-      # 例: 開発機のTailscale経由・localhost。本番だけなら空でよい。
-      # 特別値 "all" は全許可。**テスト環境専用**。
-      # TOWN_EXTRA_ORIGINS: "http://localhost:5173,http://box.tailnet.ts.net:5173"
+      # ここに書いたオリジンはMiAuthのコールバック先になる。つまりそのアドレスを
+      # 押さえられる者は認証セッションIDを受け取れるので、実際に使う経路だけを
+      # 書くこと。TOWN_COOKIE_SECURE=1 なら平文HTTPのオリジンは書いても
+      # ログインできない(cookieが送られない)ので、書くだけ無駄で危険。
+      # 特別値 "all" は全許可。**テスト環境専用**(起動時に警告が出る)。
+      # TOWN_EXTRA_ORIGINS: "https://town-dev.example.com"
 
       # Misskeyの同意画面に出るアプリ名。
       TOWN_APP_NAME: "TOWN"
 
-      # Misskeyアクセストークンの暗号鍵。未設定だとトークンを保存しないため、
-      # ゲーム内からのフォローが使えなくなる。
+      # 保管時の暗号鍵。Misskeyのアクセストークンと通知(VAPID)の秘密鍵に使う。
+      # 未設定だとトークンを保存しないため、ゲーム内からのフォローが使えない。
+      # 後から設定を消すと、封をした鍵を開けられず通知も止まるので注意。
       # 生成例: openssl rand -base64 32
+      # **worker にも同じ値を渡すこと**(下を参照)。
       TOWN_TOKEN_KEY: "CHANGE_ME"
 
       # HTTPSでのみ公開するなら 1(推奨)。素のHTTPでも開く環境では
@@ -33,9 +38,13 @@ services:
   # 通知(Web Push)を送るのはworkerなので、公開アドレスはこちらにも要る。
   # 配信元(Apple/Googleなど)に名乗る値で、httpsでないと拒否される。
   # web と同じ値にすること(食い違うと通知だけ黙って届かなくなる)。
+  #
+  # TOWN_TOKEN_KEY も web と同じ値が要る。VAPIDの秘密鍵は封をしてDBに入って
+  # いるので、これが無いと worker は復号できず通知が止まる。
   worker:
     environment:
       TOWN_BASE_URL: "https://town.example.com"
+      TOWN_TOKEN_KEY: "CHANGE_ME"
 
   # 別のポートで動かしたいとき(同じホストで2環境立てる場合など)。
   # ports は既定だと「追記」マージで元のポートも残るため、!override で置き換える。

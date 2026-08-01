@@ -112,11 +112,14 @@ func Run(ctx context.Context, mode string, cfg *config.Config) error {
 	// cookieのSecureはHTTPSでのみ有効にする。開発はTailscale等の素のHTTPで
 	// アクセスするため既定はオフで、TOWN_COOKIE_SECURE=1 で有効化する。
 	sessions := session.New(pool, os.Getenv("TOWN_COOKIE_SECURE") == "1", st)
+	// 保管時の暗号鍵。Misskeyのアクセストークンと、通知(VAPID)の秘密鍵に使う。
+	var tokenCipher *miauth.TokenCipher
 	if key := os.Getenv("TOWN_TOKEN_KEY"); key != "" {
 		tc, err := miauth.NewTokenCipher(key)
 		if err != nil {
 			return fmt.Errorf("token cipher: %w", err)
 		}
+		tokenCipher = tc
 		players = players.WithTokenCipher(tc)
 	} else {
 		logger.Warn("TOWN_TOKEN_KEY が未設定のため、Misskeyのアクセストークンは保存されません")
@@ -125,7 +128,7 @@ func Run(ctx context.Context, mode string, cfg *config.Config) error {
 	emojis := emoji.New(pool, miauthClient)
 	profiles := profile.New(pool, miauthClient, players, emojis)
 	// 通知(Web Push)。VAPID鍵はDBに置き、無ければここで作る(設定不要)。
-	pushSvc, err := push.New(ctx, pool, cfg.Server.BaseURL, logger)
+	pushSvc, err := push.New(ctx, pool, cfg.Server.BaseURL, logger, tokenCipher)
 	if err != nil {
 		logger.Error("push init", "err", err)
 		pushSvc = nil // 通知だけ諦める。ゲーム本体は動かす
@@ -161,6 +164,12 @@ func runWeb(ctx context.Context, cfg *config.Config, logger *slog.Logger, player
 		Addr:              cfg.Server.HTTPAddr,
 		Handler:           httpapi.NewServer(players, actions, contentSvc, st, tmap, stockSvc, keibaSvc, mailSvc, greetingSvc, attendanceSvc, cleagueSvc, monsterSvc, feedbackSvc, newsSvc, rankingSvc, serialSvc, authDeps),
 		ReadHeaderTimeout: 5 * time.Second,
+		// ボディをだらだら送り続ける接続を切る。あいさつのSSEは繋ぎっぱなしに
+		// なるが、あちらはハンドラ側で期限を外している。
+		ReadTimeout: 30 * time.Second,
+		// 遊んでいない接続を抱えない。WriteTimeout は置かない(置くとSSEが
+		// その時間で切れる)。
+		IdleTimeout: 120 * time.Second,
 	}
 
 	go func() {

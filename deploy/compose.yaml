@@ -50,7 +50,11 @@ services:
       # ビルド済みの画面をAPIと同じオリジンから配る。
       TOWN_WEB_DIR: "/app/web"
     ports:
-      - "8090:8090"
+      # 公開は Cloudflare Tunnel 経由だけ。cloudflared はホスト上で動いていて
+      # 127.0.0.1:8090 へ繋ぐので、ここを絞っても Tunnel は切れない。
+      # 0.0.0.0 のままだと LAN・Tailscale・同じホストの全コンテナから平文HTTPで
+      # 直に叩けてしまい、Tunnel の TLS も WAF もレート制限も素通りになる。
+      - "127.0.0.1:8090:8090"
     depends_on:
       postgres:
         condition: service_healthy
