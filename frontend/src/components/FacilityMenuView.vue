@@ -2,8 +2,7 @@
 import { ref, computed, onMounted } from 'vue';
 import { api, type Player, type ShopItem } from '../api';
 import { PARAM_COLUMNS } from '../params';
-import Toast from './Toast.vue';
-import { useToast, buildEffectLines } from '../toast';
+import { showToast, buildEffectLines, notifyError, errorText } from '../toast';
 
 // ジム等、メニューを選んで利用する施設の汎用ビュー。
 const props = defineProps<{
@@ -17,10 +16,7 @@ const emit = defineEmits<{ update: [player: Player]; back: [] }>();
 
 const yen = (n: number) => n.toLocaleString('ja-JP');
 const menu = ref<ShopItem[]>([]);
-const message = ref('');
-const kind = ref<'ok' | 'error'>('ok');
 const busy = ref(false);
-const { toast, showToast, closeToast } = useToast();
 
 // 支払い方法。クレジットはカード類(enables_credit)を持っているときだけ選べ、
 // 普通口座から引き落とす(レガシー kyushitu.cgi の支払い方法セレクト)。
@@ -35,8 +31,7 @@ onMounted(async () => {
   try {
     menu.value = await api.facilityMenu(props.facility);
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
-    kind.value = 'error';
+    notifyError('品揃えを読み込めませんでした', e);
   }
 });
 
@@ -56,7 +51,7 @@ async function use(item: ShopItem) {
     showToast({
       variant: 'error',
       title: '利用できませんでした',
-      lines: [e instanceof Error ? e.message : String(e)],
+      lines: [errorText(e)],
       icon: 'item',
     });
   } finally {
@@ -67,7 +62,6 @@ async function use(item: ShopItem) {
 
 <template>
   <div class="facility-page fac-menu-page">
-    <Toast :toast="toast" @close="closeToast" />
     <button class="btn back" @click="emit('back')">街に戻る</button>
 
     <div class="fac-header">
@@ -85,8 +79,6 @@ async function use(item: ShopItem) {
       </div>
       <div class="title">{{ title }}</div>
     </div>
-
-    <div v-if="message" :class="['message', kind]" data-test="message">{{ message }}</div>
 
     <div class="panel-white">
       <div class="table-scroll sticky-table">

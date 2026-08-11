@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { api, type Player } from '../../api';
+import { notifyError } from '../../toast';
 
 const props = defineProps<{ player: Player }>();
 const emit = defineEmits<{ update: [player: Player] }>();
@@ -16,7 +17,6 @@ const boxes = [
 ] as const;
 
 const busy = ref(false);
-const message = ref('');
 
 interface ParamDelta {
   param: string;
@@ -64,14 +64,13 @@ const boxLabels: Record<string, string> = {
 async function play(box: { key: string; cost: number }) {
   if (busy.value) return;
   busy.value = true;
-  message.value = '';
   try {
     const res = await api.casinoPlay(props.player.id, 'otakara', box.cost, { box: box.key });
     emit('update', res.player);
     const d = res.detail as unknown as OtakaraDetail;
     result.value = { ...d, win: res.win, net: res.payout - box.cost };
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
+    notifyError('お宝で遊べませんでした', e);
   } finally {
     busy.value = false;
   }
@@ -118,8 +117,6 @@ async function play(box: { key: string; cost: number }) {
     </div>
 
     <p class="cg-note">スペシャルは全ての宝から抽選される(安い宝も高級な宝も等確率)。</p>
-
-    <div v-if="message" class="message error">{{ message }}</div>
   </div>
 </template>
 
@@ -222,10 +219,5 @@ async function play(box: { key: string; cost: number }) {
   font-size: 11px;
   color: #777;
   margin: 10px 0 0;
-}
-.message.error {
-  margin-top: 10px;
-  color: #cc2200;
-  font-size: 13px;
 }
 </style>

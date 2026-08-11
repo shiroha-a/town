@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { api, type Player, type PokerState } from '../../api';
+import { notifyError } from '../../toast';
 
 const props = defineProps<{ player: Player }>();
 const emit = defineEmits<{ update: [player: Player] }>();
@@ -9,7 +10,6 @@ const yen = (n: number) => n.toLocaleString('ja-JP');
 const state = ref<PokerState | null>(null);
 const hold = ref<boolean[]>([false, false, false, false, false]);
 const busy = ref(false);
-const message = ref('');
 
 const suits = ['♠', '♥', '♦', '♣'];
 function cardLabel(card: number): string {
@@ -24,7 +24,7 @@ async function load() {
   try {
     state.value = await api.pokerState(props.player.id);
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
+    notifyError('ポーカーで遊べませんでした', e);
   }
 }
 onMounted(load);
@@ -32,12 +32,11 @@ onMounted(load);
 async function run(fn: () => Promise<PokerState>) {
   if (busy.value) return;
   busy.value = true;
-  message.value = '';
   try {
     state.value = await fn();
     emit('update', await api.getPlayer(props.player.id));
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
+    notifyError('ポーカーで遊べませんでした', e);
   } finally {
     busy.value = false;
   }
@@ -119,8 +118,6 @@ const cashout = () => run(() => api.pokerCashout(props.player.id));
         清算する（{{ yen(Math.max(0, state.points - 1) * 1000) }}円）
       </button>
     </div>
-
-    <div v-if="message" class="message error">{{ message }}</div>
   </div>
 </template>
 

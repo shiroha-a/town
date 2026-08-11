@@ -8,6 +8,7 @@ import {
   type TransferCandidate,
 } from '../api';
 import { yen, totalAssets } from '../money';
+import { notifyOk, notifyError } from '../toast';
 
 const props = defineProps<{ player: Player }>();
 const emit = defineEmits<{ update: [player: Player]; back: [] }>();
@@ -16,20 +17,15 @@ const total = () => totalAssets(props.player);
 
 const depositAmt = ref<number>(props.player.money);
 const withdrawAmt = ref<number>(0);
-const message = ref('');
-const kind = ref<'ok' | 'error'>('ok');
 const busy = ref(false);
 
 async function run(label: string, fn: () => Promise<Player>) {
   busy.value = true;
-  message.value = '';
   try {
     emit('update', await fn());
-    message.value = `${label}しました。`;
-    kind.value = 'ok';
+    notifyOk(`${label}しました`);
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
-    kind.value = 'error';
+    notifyError(`${label}できませんでした`, e);
   } finally {
     busy.value = false;
   }
@@ -47,13 +43,11 @@ const stmtTitle = computed(() =>
 );
 async function openStatement(account: 'normal' | 'super') {
   busy.value = true;
-  message.value = '';
   try {
     stmtEntries.value = await api.bankStatement(props.player.id, account);
     stmtAccount.value = account;
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
-    kind.value = 'error';
+    notifyError('明細を読み込めませんでした', e);
   } finally {
     busy.value = false;
   }
@@ -98,31 +92,27 @@ async function loadTransferInfo() {
 
 async function doTransfer() {
   if (transferTo.value === '') {
-    message.value = '振込先を選んでください。';
-    kind.value = 'error';
+    notifyError('振込先を選んでください。');
     return;
   }
   busy.value = true;
-  message.value = '';
   try {
     const res = await api.transfer(props.player.id, transferTo.value, transferAmt.value);
     emit('update', res);
     const t = res.transfer;
     if (t.sent === 0) {
       // 冪等キーの重複(二重送信)。同じ振り込みは既に済んでいる。
-      message.value = 'この振り込みは処理済みです。';
+      notifyOk('この振り込みは処理済みです');
     } else if (t.sent < t.requested) {
-      message.value =
-        `上限のため${yen(t.sent)}円だけ振り込みました。` +
-        `残り${yen(t.requested - t.sent)}円は口座に残っています。`;
+      notifyOk(`${t.to_name}さんに${yen(t.sent)}円を振り込みました`, [
+        `上限のため${yen(t.requested - t.sent)}円は口座に残しました。`,
+      ]);
     } else {
-      message.value = `${yen(t.sent)}円を振り込みました。`;
+      notifyOk(`${t.to_name}さんに${yen(t.sent)}円を振り込みました`);
     }
-    kind.value = 'ok';
     await loadTransferInfo();
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
-    kind.value = 'error';
+    notifyError('振り込めませんでした', e);
   } finally {
     busy.value = false;
   }
@@ -144,12 +134,10 @@ const doSuperCancel = (all: boolean) =>
 const loanQuote = ref<LoanQuote | null>(null);
 async function loadLoanQuote() {
   busy.value = true;
-  message.value = '';
   try {
     loanQuote.value = await api.loanQuote(props.player.id);
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
-    kind.value = 'error';
+    notifyError('見積りを取得できませんでした', e);
   } finally {
     busy.value = false;
   }
@@ -174,9 +162,6 @@ const doLoanRepay = () => run('ローンの一括返済', () => api.loanRepay(pr
       </div>
       <div class="title">銀　行</div>
     </div>
-
-    <div v-if="message" :class="['message', kind]" data-test="message">{{ message }}</div>
-
     <!--
       PCは左右2カラム、モバイルは.colをdisplay:contentsで解体しorderで
       普通口座→明細→スーパー定期→明細→振り込み→ローンの縦一列に並べ替える。

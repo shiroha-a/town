@@ -35,6 +35,7 @@ import {
   type Webhook,
   type WebhookEventInfo,
 } from '../api';
+import { notifyOk, notifyError } from '../toast';
 import { PARAM_FULL } from '../params';
 
 const props = defineProps<{ player: Player }>();
@@ -137,8 +138,6 @@ function emptyJob(): JobPayload {
 const job = reactive<JobPayload>(emptyJob());
 
 const sim = ref<SimResult | null>(null);
-const message = ref('');
-const kind = ref<'ok' | 'error'>('ok');
 const busy = ref(false);
 const items = ref<AdminItem[]>([]);
 const jobs = ref<AdminJob[]>([]);
@@ -150,8 +149,7 @@ function addReq(list: Condition[]) {
   list.push({ pred: 'param_gte', param: 'tairyoku', value: 10 });
 }
 function fail(e: unknown) {
-  message.value = e instanceof Error ? e.message : String(e);
-  kind.value = 'error';
+  notifyError('操作に失敗しました', e);
 }
 
 const players = ref<AdminPlayerSummary[]>([]);
@@ -368,8 +366,7 @@ const presetDraft = ref<FacilityPreset>({
 const presetFormOpen = ref(false);
 async function savePreset() {
   if (!presetDraft.value.alt.trim()) {
-    message.value = 'プリセットの表示名を入力してください。';
-    kind.value = 'error';
+    notifyError('プリセットの表示名を入力してください');
     return;
   }
   busy.value = true;
@@ -380,8 +377,7 @@ async function savePreset() {
     ]);
     presetFormOpen.value = false;
     presetDraft.value = { key: 'depart', img: 'depart', alt: '', dest: 0 };
-    message.value = '施設プリセットを保存しました。';
-    kind.value = 'ok';
+    notifyOk('施設プリセットを保存しました');
   } catch (e) {
     fail(e);
   } finally {
@@ -394,8 +390,7 @@ async function deletePreset(i: number) {
   try {
     const next = facPresets.value.filter((_, j) => j !== i);
     facPresets.value = await api.adminUpdateFacilityPresets(next);
-    message.value = '施設プリセットを削除しました。';
-    kind.value = 'ok';
+    notifyOk('施設プリセットを削除しました');
   } catch (e) {
     fail(e);
   } finally {
@@ -453,8 +448,7 @@ function firstFreeCell(): { col: number; row: number } | null {
 function addFacility() {
   const cell = firstFreeCell();
   if (!cell) {
-    message.value = 'マップに空きセルがありません。';
-    kind.value = 'error';
+    notifyError('マップに空きセルがありません');
     return;
   }
   townmap.value.push({
@@ -476,12 +470,10 @@ function deleteFacility() {
 }
 async function saveTownMap() {
   busy.value = true;
-  message.value = '';
   try {
     townmap.value = await api.adminUpdateTownMap(townmap.value);
     selectedIdx.value = null;
-    message.value = 'タウンマップを更新しました。';
-    kind.value = 'ok';
+    notifyOk('タウンマップを更新しました');
   } catch (e) {
     fail(e);
   } finally {
@@ -562,8 +554,7 @@ function paintAsset(col: number, rowIdx: number) {
     return;
   }
   if (idxs.length >= MAX_BG_LAYERS) {
-    message.value = `1マスに置ける背景は${MAX_BG_LAYERS}層までです。`;
-    kind.value = 'error';
+    notifyError(`1マスに置ける背景は${MAX_BG_LAYERS}層までです`);
     return;
   }
   assets.value.push({
@@ -575,11 +566,9 @@ function paintAsset(col: number, rowIdx: number) {
 }
 async function saveTownAssets() {
   busy.value = true;
-  message.value = '';
   try {
     assets.value = await api.adminUpdateTownAssets(assets.value);
-    message.value = '背景レイヤーを更新しました。';
-    kind.value = 'ok';
+    notifyOk('背景レイヤーを更新しました');
   } catch (e) {
     fail(e);
   } finally {
@@ -601,7 +590,6 @@ async function onUploadAsset(e: Event) {
   const file = input.files?.[0];
   if (!file) return;
   busy.value = true;
-  message.value = '';
   try {
     // ファイルをbase64(本体のみ)に変換する。
     const dataUrl: string = await new Promise((resolve, reject) => {
@@ -615,8 +603,7 @@ async function onUploadAsset(e: Event) {
     const res = await api.adminUploadAsset(name, file.type, b64);
     uploadedAssets.value = await api.adminListAssets();
     assetBrush.value = `u:${res.name}`; // アップロードした素材を筆に選択
-    message.value = `背景アセット「${res.name}」を追加しました。`;
-    kind.value = 'ok';
+    notifyOk(`背景アセット「${res.name}」を追加しました`);
   } catch (err) {
     fail(err);
   } finally {
@@ -630,13 +617,11 @@ async function deleteUploadedAsset(img: string) {
   const name = img.slice(2);
   if (!confirm(`背景アセット「${name}」を削除しますか?`)) return;
   busy.value = true;
-  message.value = '';
   try {
     await api.adminDeleteAsset(name);
     uploadedAssets.value = await api.adminListAssets();
     if (assetBrush.value === img) assetBrush.value = BG_PRESETS[0]; // 筆が消えたら組み込みに戻す
-    message.value = `背景アセット「${name}」を削除しました。`;
-    kind.value = 'ok';
+    notifyOk(`背景アセット「${name}」を削除しました`);
   } catch (e) {
     fail(e);
   } finally {
@@ -666,8 +651,7 @@ function onBgDrop(col: number, rowIdx: number) {
     // パレットからドロップ: そのマスの最上層に積む。
     if (d.img === BG_ERASER) return;
     if (tgtCount >= MAX_BG_LAYERS) {
-      message.value = `1マスに置ける背景は${MAX_BG_LAYERS}層までです。`;
-      kind.value = 'error';
+      notifyError(`1マスに置ける背景は${MAX_BG_LAYERS}層までです`);
       return;
     }
     assets.value.push({ img: d.img, town: assetTown.value, col, row: rowIdx });
@@ -678,8 +662,7 @@ function onBgDrop(col: number, rowIdx: number) {
   const srcIdxs = assetIdxsAt(d.col, d.row);
   if (!srcIdxs.length) return;
   if (tgtCount >= MAX_BG_LAYERS) {
-    message.value = `1マスに置ける背景は${MAX_BG_LAYERS}層までです。`;
-    kind.value = 'error';
+    notifyError(`1マスに置ける背景は${MAX_BG_LAYERS}層までです`);
     return;
   }
   const [moved] = assets.value.splice(srcIdxs[srcIdxs.length - 1], 1);
@@ -740,8 +723,7 @@ async function startBingo() {
   busy.value = true;
   try {
     await api.adminStartBingo(bingoCfg);
-    message.value = 'ビンゴ大会を開始しました。';
-    kind.value = 'ok';
+    notifyOk('ビンゴ大会を開始しました');
   } catch (e) {
     fail(e);
   } finally {
@@ -788,8 +770,7 @@ async function saveMonster() {
     else await api.adminCreateMonster(payload);
     resetMonster();
     monsters.value = await api.adminMonsters();
-    message.value = '保存しました。';
-    kind.value = 'ok';
+    notifyOk('保存しました');
   } catch (e) {
     fail(e);
   } finally {
@@ -867,8 +848,7 @@ async function saveSerial() {
     else await api.adminCreateSerial(payload);
     resetSerial();
     await loadSerials();
-    message.value = '保存しました。';
-    kind.value = 'ok';
+    notifyOk('保存しました');
   } catch (e) {
     fail(e);
   } finally {
@@ -972,7 +952,6 @@ function evReset() {
 }
 async function evSave() {
   busy.value = true;
-  message.value = '';
   try {
     const params: Record<string, number> = {};
     for (const r of evParamRows.value) {
@@ -985,8 +964,7 @@ async function evSave() {
     serials.value = await api.adminSerials();
     instanceData.value = await api.adminInstances();
     evReset();
-    message.value = 'イベントを保存しました。';
-    kind.value = 'ok';
+    notifyOk('イベントを保存しました');
   } catch (e) {
     fail(e);
   } finally {
@@ -1003,8 +981,7 @@ async function evDelete() {
     serials.value = await api.adminSerials();
     instanceData.value = await api.adminInstances();
     evReset();
-    message.value = 'イベントを削除しました。';
-    kind.value = 'ok';
+    notifyOk('イベントを削除しました');
   } catch (e) {
     fail(e);
   } finally {
@@ -1034,13 +1011,11 @@ function removeTown(i: number) {
 }
 async function saveTowns() {
   busy.value = true;
-  message.value = '';
   try {
     await api.adminUpdateTowns(townDraft.value);
     townList.value = await api.towns();
     syncTownDraft();
-    message.value = '街の設定を更新しました。';
-    kind.value = 'ok';
+    notifyOk('街の設定を更新しました');
   } catch (e) {
     fail(e);
   } finally {
@@ -1255,11 +1230,9 @@ const SETTINGS_GROUPS: { title: string; fields: SettingField[] }[] = [
 async function saveSettings() {
   if (!settings.value) return;
   busy.value = true;
-  message.value = '';
   try {
     settings.value = await api.adminUpdateSettings(settings.value);
-    message.value = 'サーバー設定を更新しました。';
-    kind.value = 'ok';
+    notifyOk('サーバー設定を更新しました');
   } catch (e) {
     fail(e);
   } finally {
@@ -1302,7 +1275,6 @@ const editingHost = computed(() => editingRow.value?.instance_host ?? '');
 const editingRemoteID = computed(() => editingRow.value?.remote_user_id ?? '');
 
 async function openEditPlayer(id: number) {
-  message.value = '';
   try {
     const p = await api.getPlayer(id);
     await loadHeldItems(id);
@@ -1365,12 +1337,10 @@ async function loadHeldItems(id: number) {
 }
 async function runHeld(fn: () => Promise<AdminHeldItem[]>, done: string) {
   busy.value = true;
-  message.value = '';
   try {
     heldItems.value = await fn();
     syncHeldEdit();
-    message.value = done;
-    kind.value = 'ok';
+    notifyOk(done);
   } catch (e) {
     fail(e);
   } finally {
@@ -1413,12 +1383,10 @@ function cooldownLabel(iso: string | null): string {
 async function savePlayer() {
   if (!editingPlayer.value) return;
   busy.value = true;
-  message.value = '';
   try {
     const { id, ...payload } = editingPlayer.value;
     await api.adminUpdatePlayer(id, payload);
-    message.value = `ユーザー「${payload.display_name}」を更新しました。`;
-    kind.value = 'ok';
+    notifyOk(`ユーザー「${payload.display_name}」を更新しました`);
     closeEditPlayer();
     await refresh();
   } catch (e) {
@@ -1431,11 +1399,9 @@ async function deletePlayer() {
   if (!editingPlayer.value) return;
   if (!window.confirm(`ユーザー「${editingPlayer.value.display_name}」を論理削除しますか?`)) return;
   busy.value = true;
-  message.value = '';
   try {
     await api.adminDeletePlayer(editingPlayer.value.id);
-    message.value = 'ユーザーを論理削除しました。';
-    kind.value = 'ok';
+    notifyOk('ユーザーを論理削除しました');
     closeEditPlayer();
     await refresh();
   } catch (e) {
@@ -1447,7 +1413,6 @@ async function deletePlayer() {
 
 async function simulate() {
   busy.value = true;
-  message.value = '';
   try {
     // 仮想的な標準state(お金10万・全パラメータ10/上限999)で試算する。
     const params = Object.fromEntries(PARAM_OPTIONS.map((p) => [p, { value: 10, max: 999 }]));
@@ -1462,11 +1427,9 @@ async function simulate() {
 
 async function createItem() {
   busy.value = true;
-  message.value = '';
   try {
     await api.adminCreateItem({ ...item, effect: item.effect });
-    message.value = `アイテム「${item.name}」を作成しました。`;
-    kind.value = 'ok';
+    notifyOk(`アイテム「${item.name}」を作成しました`);
     Object.assign(item, blankItem());
     await refresh();
   } catch (e) {
@@ -1478,11 +1441,9 @@ async function createItem() {
 
 async function createJob() {
   busy.value = true;
-  message.value = '';
   try {
     await api.adminCreateJob({ ...job });
-    message.value = `職業「${job.name}」を作成しました。`;
-    kind.value = 'ok';
+    notifyOk(`職業「${job.name}」を作成しました`);
     Object.assign(job, emptyJob());
     await refresh();
   } catch (e) {
@@ -1507,7 +1468,6 @@ function closeEditJob() {
 async function saveJob() {
   if (!editingJob.value) return;
   busy.value = true;
-  message.value = '';
   try {
     const e = editingJob.value;
     await api.adminUpdateJob(e.id, {
@@ -1524,8 +1484,7 @@ async function saveJob() {
       nou_cost: e.nou_cost,
       enabled: e.enabled,
     });
-    message.value = `職業「${e.name}」を更新しました。`;
-    kind.value = 'ok';
+    notifyOk(`職業「${e.name}」を更新しました`);
     closeEditJob();
     await refresh();
   } catch (err) {
@@ -1538,11 +1497,9 @@ async function deleteJob() {
   if (!editingJob.value) return;
   if (!window.confirm(`職業「${editingJob.value.name}」を削除しますか?`)) return;
   busy.value = true;
-  message.value = '';
   try {
     await api.adminDeleteJob(editingJob.value.id);
-    message.value = '職業を削除しました。';
-    kind.value = 'ok';
+    notifyOk('職業を削除しました');
     closeEditJob();
     await refresh();
   } catch (err) {
@@ -1563,12 +1520,10 @@ function closeEdit() {
 async function saveEdit() {
   if (!editing.value) return;
   busy.value = true;
-  message.value = '';
   try {
     const { id: _id, ...payload } = editing.value;
     await api.adminUpdateItem(editing.value.id, payload);
-    message.value = `アイテム「${editing.value.name}」を更新しました。`;
-    kind.value = 'ok';
+    notifyOk(`アイテム「${editing.value.name}」を更新しました`);
     closeEdit();
     await refresh();
   } catch (e) {
@@ -1581,11 +1536,9 @@ async function deleteEdit() {
   if (!editing.value) return;
   if (!window.confirm(`アイテム「${editing.value.name}」を削除しますか?`)) return;
   busy.value = true;
-  message.value = '';
   try {
     await api.adminDeleteItem(editing.value.id);
-    message.value = 'アイテムを削除しました。';
-    kind.value = 'ok';
+    notifyOk('アイテムを削除しました');
     closeEdit();
     await refresh();
   } catch (e) {
@@ -1602,7 +1555,6 @@ async function deleteEdit() {
 const dash = ref<Dashboard | null>(null);
 async function loadDash() {
   busy.value = true;
-  message.value = '';
   try {
     dash.value = await api.adminDashboard();
   } catch (e) {
@@ -1683,7 +1635,6 @@ const postLimit = ref(100);
 
 async function loadPosts() {
   busy.value = true;
-  message.value = '';
   try {
     posts.value = await api.adminPosts(postSource.value, postPlayer.value, postLimit.value);
   } catch (e) {
@@ -1802,11 +1753,9 @@ async function deletePost(p: ModPost) {
     return;
   }
   busy.value = true;
-  message.value = '';
   try {
     await api.adminDeletePost(p.source, p.id);
-    message.value = '書き込みを消しました。';
-    kind.value = 'ok';
+    notifyOk('書き込みを消しました');
     await loadPosts();
   } catch (e) {
     fail(e);
@@ -1831,11 +1780,9 @@ function suspendLabel(s: Suspension | null): string {
 }
 async function runSuspend(fn: () => Promise<Suspension>, done: string) {
   busy.value = true;
-  message.value = '';
   try {
     suspension.value = await fn();
-    message.value = done;
-    kind.value = 'ok';
+    notifyOk(done);
     await refresh(); // 一覧の目印を更新する
   } catch (e) {
     fail(e);
@@ -1889,11 +1836,9 @@ async function sendBroadcast() {
     return;
   }
   busy.value = true;
-  message.value = '';
   try {
     const res = await api.adminBroadcastMail(body);
-    message.value = `${res.sent}人に送りました。`;
-    kind.value = 'ok';
+    notifyOk(`${res.sent}人に送りました`);
     bcBody.value = '';
   } catch (e) {
     fail(e);
@@ -1914,7 +1859,6 @@ const itemTotals = ref<AdminItemTotal[]>([]);
 
 async function loadMoney() {
   busy.value = true;
-  message.value = '';
   try {
     money.value = await api.adminMoney(moneyPlayer.value, moneyLimit.value);
     itemTotals.value = await api.adminItemTotals();
@@ -1958,11 +1902,9 @@ async function reverseTx(m: MoneyMovement) {
     return;
   }
   busy.value = true;
-  message.value = '';
   try {
     await api.adminReverseTx(m.tx_id);
-    message.value = `取引#${m.tx_id}を取り消しました。`;
-    kind.value = 'ok';
+    notifyOk(`取引#${m.tx_id}を取り消しました`);
     await loadMoney();
   } catch (e) {
     fail(e);
@@ -1990,10 +1932,6 @@ function fmtTime(iso: string): string {
     <div v-if="!isAdmin" class="message error">この画面は管理者のみ利用できます。</div>
 
     <template v-else>
-      <div v-if="message" :class="['message', kind]" data-test="message">
-        {{ message }}
-      </div>
-
       <div class="admin-sections">
         <!-- ユーザー -->
         <section class="fold">

@@ -2,7 +2,8 @@
 import CommandIcon from './CommandIcon.vue';
 import type { ToastData } from '../toast';
 
-// 画面上部トーストの表示コンポーネント。状態管理はtoast.tsのuseToastが持つ。
+// 画面上部トーストの表示コンポーネント。中身はtoast.tsが1つだけ持ち、
+// これを描画するのはApp.vueだけ(画面ごとには置かない)。
 // スタイル(.toast等)はstyle.cssにグローバル定義されている。
 defineProps<{ toast: ToastData | null }>();
 const emit = defineEmits<{ close: [] }>();
@@ -10,7 +11,14 @@ const emit = defineEmits<{ close: [] }>();
 
 <template>
   <transition name="wt">
-    <div v-if="toast" class="toast" :class="toast.variant" role="status" @click="emit('close')">
+    <div
+      v-if="toast"
+      class="toast"
+      :class="toast.variant"
+      role="status"
+      data-test="toast"
+      @click="emit('close')"
+    >
       <span class="toast-icon"><CommandIcon :name="toast.icon" /></span>
       <div class="toast-body">
         <div class="toast-title">{{ toast.title }}</div>

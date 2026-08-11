@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { api, type Player } from '../../api';
+import { notifyError } from '../../toast';
 
 const props = defineProps<{ player: Player }>();
 const emit = defineEmits<{ update: [player: Player] }>();
@@ -17,7 +18,6 @@ const prev = ref(randCard());
 const count = ref(1);
 
 const busy = ref(false);
-const message = ref('');
 const result = ref<{
   prev: number;
   card: number;
@@ -37,12 +37,10 @@ function newGame() {
   prev.value = randCard();
   count.value = 1;
   result.value = null;
-  message.value = '';
 }
 
 async function play(choice: 'hi' | 'low') {
   busy.value = true;
-  message.value = '';
   const bet = stake.value;
   try {
     const res = await api.casinoPlay(props.player.id, 'donuts', bet, {
@@ -65,7 +63,7 @@ async function play(choice: 'hi' | 'low') {
     prev.value = d.next_prev;
     count.value = d.next_count;
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
+    notifyError('ドーナツで遊べませんでした', e);
   } finally {
     busy.value = false;
   }
@@ -118,7 +116,6 @@ async function play(choice: 'hi' | 'low') {
         新しく始める
       </button>
     </div>
-    <div v-if="message" class="message error">{{ message }}</div>
   </div>
 </template>
 

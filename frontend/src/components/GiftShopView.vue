@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { api, type Player, type GiftShopState } from '../api';
-import Toast from './Toast.vue';
-import { useToast } from '../toast';
+import { showToast, notifyError, errorText } from '../toast';
 
 // ギフト屋(レガシー gifutoya.cgi)。手数料を払って持ち物を贈答用の「ギフト」に変える。
 // ギフトは自分では使えず、メールに添付して他の住民に贈る。
@@ -14,8 +13,6 @@ const state = ref<GiftShopState | null>(null);
 const selectedItem = ref<number | null>(null);
 const uses = ref(1);
 const busy = ref(false);
-const message = ref('');
-const { toast, showToast, closeToast } = useToast();
 
 async function load() {
   try {
@@ -24,7 +21,7 @@ async function load() {
       selectedItem.value = state.value.convertibles[0].item_id;
     }
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
+    notifyError('ギフト屋を読み込めませんでした', e);
   }
 }
 onMounted(load);
@@ -46,7 +43,7 @@ async function convert() {
     showToast({
       variant: 'error',
       title: 'ギフトにできませんでした',
-      lines: [e instanceof Error ? e.message : String(e)],
+      lines: [errorText(e)],
       icon: 'item',
     });
   } finally {
@@ -57,7 +54,6 @@ async function convert() {
 
 <template>
   <div class="facility-page gift-page">
-    <Toast :toast="toast" @close="closeToast" />
     <button class="btn back" @click="emit('back')">街に戻る</button>
 
     <div class="gift-header">
@@ -70,8 +66,6 @@ async function convert() {
       </div>
       <div class="title">ギフト屋</div>
     </div>
-
-    <div v-if="message" class="message error">{{ message }}</div>
 
     <div class="panel-white">
       <h3 class="sec">■ギフトに変える</h3>

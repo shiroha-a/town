@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
 import { api, type Player, type KeibaHorse, type KeibaRankEntry, type KeibaResult } from '../api';
+import { notifyError } from '../toast';
 
 // 競馬場: 6頭立てレース。1枚500円、最大2頭・合計200枚まで。払戻し=オッズ×枚数×500。
 const props = defineProps<{ player: Player }>();
@@ -17,8 +18,6 @@ const raceId = ref(0);
 const lineup = ref<KeibaHorse[]>([]);
 const ranking = ref<KeibaRankEntry[]>([]);
 const tickets = reactive<number[]>([]);
-const message = ref('');
-const kind = ref<'ok' | 'error'>('ok');
 const busy = ref(false);
 
 const mode = ref<'bet' | 'racing' | 'result'>('bet');
@@ -49,23 +48,19 @@ onUnmounted(() => {
 });
 
 function fail(e: unknown) {
-  message.value = e instanceof Error ? e.message : String(e);
-  kind.value = 'error';
+  notifyError('馬券を買えませんでした', e);
 }
 
 async function startRace() {
   if (totalTickets.value === 0) {
-    message.value = '購入枚数を入力してください。';
-    kind.value = 'error';
+    notifyError('購入枚数を入力してください。');
     return;
   }
   if (horsesBet.value > 2) {
-    message.value = '賭けられるのは2頭までです。';
-    kind.value = 'error';
+    notifyError('賭けられるのは2頭までです。');
     return;
   }
   busy.value = true;
-  message.value = '';
   try {
     const res = await api.keibaBet(props.player.id, raceId.value, [...tickets]);
     emit('update', res.player);
@@ -119,8 +114,6 @@ function retry() {
       </div>
       <div class="title">競馬場</div>
     </div>
-
-    <div v-if="message" :class="['message', kind]" data-test="message">{{ message }}</div>
 
     <div class="keiba-body">
       <div class="main-col">

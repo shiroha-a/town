@@ -2,18 +2,14 @@
 import { ref, computed, onMounted } from 'vue';
 import { api, type Player, type ShopItem } from '../api';
 import { PARAM_COLUMNS, PARAM_COLUMNS_MAIN, PARAM_COLUMNS_POWER } from '../params';
-import Toast from './Toast.vue';
-import { useToast, buildEffectLines } from '../toast';
+import { showToast, buildEffectLines, notifyError, errorText } from '../toast';
 
 const props = defineProps<{ player: Player }>();
 const emit = defineEmits<{ update: [player: Player]; back: [] }>();
 
 const yen = (n: number) => n.toLocaleString('ja-JP');
 const items = ref<ShopItem[]>([]);
-const message = ref('');
-const kind = ref<'ok' | 'error'>('ok');
 const busy = ref(false);
-const { toast, showToast, closeToast } = useToast();
 
 // 支払い方法。クレジットはカード類(enables_credit)を持っているときだけ選べ、
 // 普通口座から引き落とす(レガシー depart.cgi の支払い方法セレクト)。
@@ -26,8 +22,7 @@ onMounted(async () => {
   try {
     items.value = await api.shopItems();
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
-    kind.value = 'error';
+    notifyError('品揃えを読み込めませんでした', e);
   }
 });
 
@@ -46,7 +41,6 @@ const grouped = computed(() => {
 
 async function buy(it: ShopItem) {
   busy.value = true;
-  message.value = '';
   const before = props.player;
   try {
     const after = await api.buy(props.player.id, it.id, '', payMethod.value);
@@ -62,7 +56,7 @@ async function buy(it: ShopItem) {
     showToast({
       variant: 'error',
       title: '購入できませんでした',
-      lines: [e instanceof Error ? e.message : String(e)],
+      lines: [errorText(e)],
       icon: 'item',
     });
   } finally {
@@ -73,7 +67,6 @@ async function buy(it: ShopItem) {
 
 <template>
   <div class="facility-page depart-page">
-    <Toast :toast="toast" @close="closeToast" />
     <button class="btn back" @click="emit('back')">街に戻る</button>
 
     <div class="depart-header">
@@ -93,8 +86,6 @@ async function buy(it: ShopItem) {
       </div>
       <div class="title">デパート</div>
     </div>
-
-    <div v-if="message" :class="['message', kind]" data-test="message">{{ message }}</div>
 
     <div class="panel-white">
       <div class="table-scroll sticky-table">

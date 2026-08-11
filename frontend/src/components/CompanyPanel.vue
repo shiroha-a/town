@@ -5,8 +5,7 @@ import EmojiPicker from './EmojiPicker.vue';
 import RichText from './RichText.vue';
 import { ref, computed, onMounted } from 'vue';
 import { api, type Player, type CompanyView } from '../api';
-import Toast from './Toast.vue';
-import { useToast } from '../toast';
+import { showToast, errorText } from '../toast';
 
 // 運営/株式会社の社員教育画面(レガシーunei_2.pl/kaishiya.pl)。
 // 自分のパラメータを消費して社員に1/10を移転し、養育費(2万円/pt)を支払う。
@@ -22,7 +21,6 @@ function insertEmoji(code: string) {
   else if (emojiFor.value === 'member') memberBody.value += code;
   emojiFor.value = null;
 }
-const { toast, showToast, closeToast } = useToast();
 
 const view = ref<CompanyView | null>(null);
 // 教育の設定は上部で1回だけ選び、社員のパラメータセルをクリックして上げる。
@@ -80,7 +78,7 @@ async function addStaff() {
     showToast({
       variant: 'error',
       title: 'できませんでした',
-      lines: [e instanceof Error ? e.message : String(e)],
+      lines: [errorText(e)],
       icon: 'item',
     });
   } finally {
@@ -115,7 +113,7 @@ async function educate(staffId: number, paramKey: string) {
     showToast({
       variant: 'error',
       title: '教育できませんでした',
-      lines: [e instanceof Error ? e.message : String(e)],
+      lines: [errorText(e)],
       icon: 'item',
     });
   } finally {
@@ -154,7 +152,7 @@ async function run(title: string, fn: () => Promise<import('../api').Player>) {
     showToast({
       variant: 'error',
       title: 'できませんでした',
-      lines: [e instanceof Error ? e.message : String(e)],
+      lines: [errorText(e)],
       icon: 'item',
     });
   } finally {
@@ -239,7 +237,7 @@ const doSeizou = async () => {
     showToast({
       variant: 'error',
       title: '生産できませんでした',
-      lines: [e instanceof Error ? e.message : String(e)],
+      lines: [errorText(e)],
       icon: 'item',
     });
   } finally {
@@ -250,7 +248,6 @@ const doSeizou = async () => {
 
 <template>
   <div v-if="view" class="company">
-    <Toast :toast="toast" @close="closeToast" />
     <!-- 説明+社員教育の見出し(レガシー: assen_style+オレンジ箱) -->
     <table class="co-head">
       <tr>

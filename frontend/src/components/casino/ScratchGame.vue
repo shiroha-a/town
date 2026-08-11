@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue';
 import { api, type Player, type ScratchState } from '../../api';
+import { notifyError } from '../../toast';
 
 const props = defineProps<{ player: Player; game: string }>();
 const emit = defineEmits<{ update: [player: Player] }>();
@@ -8,16 +9,14 @@ const emit = defineEmits<{ update: [player: Player] }>();
 const yen = (n: number) => n.toLocaleString('ja-JP');
 const state = ref<ScratchState | null>(null);
 const busy = ref(false);
-const message = ref('');
 const lastPrize = ref<number | null>(null);
 const lastBonus = ref(false);
 
 async function load() {
-  message.value = '';
   try {
     state.value = await api.scratchState(props.player.id, props.game);
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
+    notifyError('スクラッチで遊べませんでした', e);
   }
 }
 onMounted(load);
@@ -28,7 +27,6 @@ async function open(card: number, cell: number) {
   const c = state.value?.cards[card];
   if (busy.value || !c || c.finished || c.values[cell] !== undefined) return;
   busy.value = true;
-  message.value = '';
   lastPrize.value = null;
   lastBonus.value = false;
   try {
@@ -38,7 +36,7 @@ async function open(card: number, cell: number) {
     lastPrize.value = res.prize;
     lastBonus.value = res.bonus;
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
+    notifyError('スクラッチで遊べませんでした', e);
   } finally {
     busy.value = false;
   }
@@ -86,8 +84,6 @@ async function open(card: number, cell: number) {
         </div>
       </div>
     </div>
-
-    <div v-if="message" class="message error">{{ message }}</div>
   </div>
 </template>
 

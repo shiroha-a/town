@@ -21,6 +21,7 @@ import CommandIcon from './CommandIcon.vue';
 import PowerBar from './PowerBar.vue';
 import { projectedPower } from '../power';
 import { yen, totalAssets } from '../money';
+import { showToast, errorText } from '../toast';
 import GreetingModal from './GreetingModal.vue';
 // v-touch-label: title属性のラベルをモバイルの長押しで表示する
 import { vTouchLabel } from '../touchlabel';
@@ -203,7 +204,7 @@ async function doMoveTown(f: TownFacility) {
     showToast({
       variant: 'error',
       title: '移動できません',
-      lines: [e instanceof Error ? e.message : String(e)],
+      lines: [errorText(e)],
       icon: f.img,
     });
     return;
@@ -314,7 +315,7 @@ async function doWarp() {
     showToast({
       variant: 'error',
       title: 'ワープできません',
-      lines: [e instanceof Error ? e.message : String(e)],
+      lines: [errorText(e)],
       icon: 'reload',
     });
   } finally {
@@ -350,24 +351,6 @@ const commands = computed(() => {
   list.push({ key: 'off', img: 'off', alt: 'ログアウト' });
   return list;
 });
-// 画面上部のトースト(iOS通知バナー風。上からスライドインし数秒で自動的に消える)。
-// 仕事結果やランダムイベントの発生を通知する。
-type ToastVariant = 'work' | 'event-good' | 'event-bad' | 'error' | 'item';
-interface Toast {
-  variant: ToastVariant;
-  title: string;
-  lines: string[];
-  icon: string; // CommandIcon の name
-}
-const toast = ref<Toast | null>(null);
-let toastTimer: number | undefined;
-function showToast(t: Toast) {
-  toast.value = t;
-  if (toastTimer !== undefined) window.clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => {
-    toast.value = null;
-  }, 6000);
-}
 // 仕事アイコン押下でその場で働き、結果をトーストで表示する(画面遷移しない)。
 async function doWork() {
   try {
@@ -384,7 +367,7 @@ async function doWork() {
     showToast({
       variant: 'error',
       title: '仕事に失敗しました',
-      lines: [e instanceof Error ? e.message : String(e)],
+      lines: [errorText(e)],
       icon: 'go_work',
     });
   }
@@ -499,7 +482,6 @@ onMounted(() => {
 onUnmounted(() => {
   if (timer !== undefined) window.clearInterval(timer);
   if (stockTimer !== undefined) window.clearInterval(stockTimer);
-  if (toastTimer !== undefined) window.clearTimeout(toastTimer);
   if (movingTimer !== undefined) window.clearInterval(movingTimer);
 });
 const serverCorrectedNow = computed(() => nowMs.value + skewMs.value);
@@ -620,16 +602,7 @@ function itemAmount(it: ItemStack): string {
 </script>
 
 <template>
-  <!-- トースト(iOS通知バナー風)。仕事結果・イベント発生を通知。タップで即閉じる。 -->
-  <transition name="wt">
-    <div v-if="toast" class="toast" :class="toast.variant" role="status" @click="toast = null">
-      <span class="toast-icon"><CommandIcon :name="toast.icon" /></span>
-      <div class="toast-body">
-        <div class="toast-title">{{ toast.title }}</div>
-        <div v-for="(l, i) in toast.lines" :key="i" class="toast-line">{{ l }}</div>
-      </div>
-    </div>
-  </transition>
+  <!-- 仕事結果・イベント発生の知らせはアプリ共通のトースト(App.vue)に出す。 -->
 
   <!-- 移動中バナー(到着までカウントダウン)。移動時間ぶん表示し、完了で画面が変わる。 -->
   <transition name="wt">

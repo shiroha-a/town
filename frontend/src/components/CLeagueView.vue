@@ -2,6 +2,7 @@
 import { ref, reactive, computed, onMounted } from 'vue';
 import { api, type Player, type Character, type CLeagueRank, type BattleResult } from '../api';
 import { PARAM_LABEL } from '../params';
+import { showToast, notifyOk, notifyError } from '../toast';
 
 // Cリーグ: 自分のパラメータとお金を注いでバトルキャラを育て、他プレイヤーのキャラと対戦する。
 const props = defineProps<{ player: Player }>();
@@ -36,8 +37,6 @@ const newName = ref('');
 const grow = reactive<Record<string, number>>({});
 const opponentId = ref<number | ''>('');
 const battle = ref<BattleResult | null>(null);
-const message = ref('');
-const kind = ref<'ok' | 'error'>('ok');
 const busy = ref(false);
 
 const growCost = computed(() => Object.values(grow).reduce((a, b) => a + (b || 0), 0) * 10000);
@@ -54,18 +53,15 @@ async function load() {
 onMounted(load);
 
 function fail(e: unknown) {
-  message.value = e instanceof Error ? e.message : String(e);
-  kind.value = 'error';
+  notifyError('キャラの操作に失敗しました', e, 'doukyo');
 }
 
 async function create() {
   if (!newName.value.trim()) return;
   busy.value = true;
-  message.value = '';
   try {
     emit('update', await api.setCharacterName(props.player.id, newName.value));
-    message.value = 'キャラを作成しました。';
-    kind.value = 'ok';
+    notifyOk('キャラを作成しました', [], 'doukyo');
     await load();
   } catch (e) {
     fail(e);
@@ -78,16 +74,13 @@ async function doGrow() {
   const inputs: Record<string, number> = {};
   for (const k of ABILITIES) if (grow[k] > 0) inputs[k] = grow[k];
   if (!Object.keys(inputs).length) {
-    message.value = '育成する能力を入力してください。';
-    kind.value = 'error';
+    notifyError('育成する能力を入力してください。', undefined, 'doukyo');
     return;
   }
   busy.value = true;
-  message.value = '';
   try {
     emit('update', await api.growCharacter(props.player.id, inputs));
-    message.value = 'キャラを育成しました。';
-    kind.value = 'ok';
+    notifyOk('キャラを育成しました', [], 'doukyo');
     for (const k of ABILITIES) grow[k] = 0;
     await load();
   } catch (e) {
@@ -100,15 +93,18 @@ async function doGrow() {
 async function doBattle() {
   if (opponentId.value === '') return;
   busy.value = true;
-  message.value = '';
   battle.value = null;
   try {
     const res = await api.battle(props.player.id, opponentId.value);
     emit('update', res.player);
     battle.value = res.result;
     const w = res.result.winner;
-    message.value = w === 'a' ? '勝利！' : w === 'b' ? '敗北…' : '引き分け';
-    kind.value = w === 'b' ? 'error' : 'ok';
+    // 勝敗はイベントと同じ色分け(勝ち=緑・負け=赤)で知らせる。
+    showToast({
+      variant: w === 'b' ? 'event-bad' : 'event-good',
+      title: w === 'a' ? '勝利！' : w === 'b' ? '敗北…' : '引き分け',
+      icon: 'battle',
+    });
     await load();
   } catch (e) {
     fail(e);
@@ -129,8 +125,6 @@ async function doBattle() {
       </div>
       <div class="title">Cリーグ</div>
     </div>
-
-    <div v-if="message" :class="['message', kind]" data-test="message">{{ message }}</div>
 
     <!-- キャラ未作成 -->
     <div v-if="!character" class="panel-white">

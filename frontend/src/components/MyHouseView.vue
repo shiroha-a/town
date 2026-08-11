@@ -10,9 +10,8 @@ import {
   type ShopStockView,
   type ShopStockItem,
 } from '../api';
-import Toast from './Toast.vue';
 import ExteriorPicker from './ExteriorPicker.vue';
-import { useToast } from '../toast';
+import { showToast, notifyOk, notifyError } from '../toast';
 
 // 家の設定(レガシー original_house.cgi my_house_settei)。コマンドバーの
 // 「家の設定」から開く。店設定・基本設定(コメント)・コンテンツ選択・
@@ -22,8 +21,6 @@ const emit = defineEmits<{ update: [player: Player]; back: [] }>();
 
 const yen = (n: number) => n.toLocaleString('ja-JP');
 const busy = ref(false);
-const message = ref('');
-const { toast, showToast, closeToast } = useToast();
 
 const state = ref<BuildingState | null>(null);
 const selectedHouseId = ref<number | null>(null);
@@ -44,7 +41,7 @@ onMounted(async () => {
   try {
     await refresh();
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
+    notifyError('家の設定を読み込めませんでした', e, 'myhome');
   }
 });
 
@@ -126,7 +123,7 @@ async function postNushi() {
     emit('update', after);
     nushiTitle.value = '';
     nushiBody.value = '';
-    showToast({ variant: 'item', title: '投稿しました。', lines: [], icon: 'item' });
+    notifyOk('投稿しました', [], 'myhome');
   });
 }
 
@@ -135,12 +132,7 @@ async function run(fn: () => Promise<void>) {
   try {
     await fn();
   } catch (e) {
-    showToast({
-      variant: 'error',
-      title: 'エラー',
-      lines: [e instanceof Error ? e.message : String(e)],
-      icon: 'item',
-    });
+    notifyError('うまくいきませんでした', e, 'myhome');
   } finally {
     busy.value = false;
   }
@@ -153,7 +145,7 @@ async function saveComment() {
     const after = await api.setHouseComment(props.player.id, h.id, commentDraft.value);
     emit('update', after);
     await refresh();
-    showToast({ variant: 'item', title: 'コメントを保存しました', lines: [], icon: 'item' });
+    notifyOk('コメントを保存しました', [], 'myhome');
   });
 }
 
@@ -171,7 +163,7 @@ async function saveContents() {
     const after = await api.setHouseContents(props.player.id, h.id, contents);
     emit('update', after);
     await refresh();
-    showToast({ variant: 'item', title: 'コンテンツを保存しました', lines: [], icon: 'item' });
+    notifyOk('コンテンツを保存しました', [], 'myhome');
   });
 }
 
@@ -189,7 +181,7 @@ async function saveShop() {
     emit('update', after);
     await refresh();
     showToast({
-      variant: 'item',
+      variant: 'ok',
       title: '店を設定しました',
       lines: [`${shopDraft.value.syubetu}の店（掛け率${shopDraft.value.markup}倍）`],
       icon: 'item',
@@ -273,7 +265,7 @@ async function savePrice(it: ShopStockItem) {
     emit('update', after);
     priceStock.value = await api.houseShopStock(props.player.id, h.id);
     showToast({
-      variant: 'item',
+      variant: 'ok',
       title: '価格を設定しました',
       lines: [`${it.name}: ${yen(price)}円`],
       icon: 'item',
@@ -312,7 +304,7 @@ async function doRebuild() {
     await refresh();
     rebuildOpen.value = false;
     showToast({
-      variant: 'item',
+      variant: 'ok',
       title: '家を建て替えた',
       lines: [`費用 ${yen(rebuildCost.value)}円(現金)`],
       icon: 'item',
@@ -341,21 +333,17 @@ async function doSell() {
     emit('update', after);
     selectedHouseId.value = null;
     await refresh();
-    showToast({ variant: 'item', title: '家を売却しました', lines: [], icon: 'item' });
+    notifyOk('家を売却しました', [], 'myhome');
   });
 }
 </script>
 
 <template>
   <div class="myhouse-page facility-page">
-    <Toast :toast="toast" @close="closeToast" />
     <button class="btn back" @click="emit('back')">街に戻る</button>
 
     <!-- タイトルバー(レガシー: 自分の家設定) -->
     <div class="settei-title">自分の家設定</div>
-
-    <div v-if="message" class="err">{{ message }}</div>
-
     <div v-if="state && state.my_houses.length === 0" class="panel-white">
       まだ家を持っていません。建設会社で家を建てると、ここで設定できます。
     </div>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { api, type Player } from '../../api';
+import { notifyError } from '../../toast';
 
 const props = defineProps<{ player: Player }>();
 const emit = defineEmits<{ update: [player: Player] }>();
@@ -11,7 +12,6 @@ const bet = ref(bets[0]);
 const stage = ref(0); // 現在の連勝段数(dabulu)。0=未プレイ。
 const pot = ref(0); // 現在の段数で精算した場合の受取額。
 const busy = ref(false);
-const message = ref('');
 
 interface KujiDetail {
   action: string;
@@ -34,7 +34,6 @@ const resultClass = computed(() => {
 async function draw(choice: 1 | 2) {
   if (busy.value) return;
   busy.value = true;
-  message.value = '';
   try {
     const res = await api.casinoPlay(props.player.id, 'kuji', bet.value, {
       stage: stage.value,
@@ -47,7 +46,7 @@ async function draw(choice: 1 | 2) {
     pot.value = d.win ? d.syoukin : 0;
     result.value = { ...d, payout: res.payout, net: res.payout - bet.value };
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
+    notifyError('くじで遊べませんでした', e);
   } finally {
     busy.value = false;
   }
@@ -56,7 +55,6 @@ async function draw(choice: 1 | 2) {
 async function settle() {
   if (busy.value || stage.value < 1) return;
   busy.value = true;
-  message.value = '';
   try {
     const res = await api.casinoPlay(props.player.id, 'kuji', bet.value, {
       stage: stage.value,
@@ -68,7 +66,7 @@ async function settle() {
     pot.value = 0;
     result.value = { ...d, payout: res.payout, net: res.payout - bet.value };
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
+    notifyError('くじで遊べませんでした', e);
   } finally {
     busy.value = false;
   }
@@ -125,8 +123,6 @@ async function settle() {
       <button class="btn" :disabled="busy" data-test="draw1" @click="draw(1)">カード1を引く</button>
       <button class="btn" :disabled="busy" data-test="draw2" @click="draw(2)">カード2を引く</button>
     </div>
-
-    <div v-if="message" class="message error">{{ message }}</div>
   </div>
 </template>
 

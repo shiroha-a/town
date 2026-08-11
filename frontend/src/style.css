@@ -579,7 +579,9 @@ body.has-update-bar {
   top: 8px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 1000;
+  /* モーダル(あいさつ1000・明細1000・絵文字1100)より前に出す。App.vueが
+     画面より先に描くので、同じ値だとモーダルの裏に隠れてしまう。 */
+  z-index: 2000;
   display: flex;
   gap: 10px;
   align-items: flex-start;
@@ -620,8 +622,9 @@ body.has-update-bar {
   color: #006699;
   line-height: 1.5;
 }
-/* variantごとの色分け。good=緑、bad/error=赤。work=緑アイコン+黒見出し(既定)。 */
-.toast.event-good .toast-title {
+/* variantごとの色分け。ok/good=緑、bad/error=赤。work=緑アイコン+黒見出し(既定)。 */
+.toast.event-good .toast-title,
+.toast.ok .toast-title {
   color: #067a06;
 }
 .toast.event-bad .toast-title,
@@ -639,7 +642,7 @@ body.has-update-bar {
 .toast.moving .toast-icon {
   background: linear-gradient(180deg, #9b6cff 0%, #7a3ff2 100%);
 }
-/* 移動中の操作ブロック用オーバーレイ。バナー(z-index:1000)の下・本文の上。 */
+/* 移動中の操作ブロック用オーバーレイ。バナー(z-index:2000)の下・本文の上。 */
 .move-overlay {
   position: fixed;
   inset: 0;
@@ -800,6 +803,8 @@ input[type='number'] {
   border: 1px solid #b9bda4;
 }
 
+/* 画面に出しっぱなしにする案内(管理者専用の断りなど)。操作の結果はトーストに
+   寄せてあるので、ここに残るのは「その画面の状態」を示すものだけ。 */
 .message {
   margin: 4px 0;
   padding: 5px 8px;
@@ -808,10 +813,6 @@ input[type='number'] {
 .message.error {
   background: #ffe9e9;
   color: #c00;
-}
-.message.ok {
-  background: #e9f6e9;
-  color: #060;
 }
 .muted {
   color: #999;

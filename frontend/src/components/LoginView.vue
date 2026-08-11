@@ -11,6 +11,7 @@ import {
   type Greeting,
   type StockPrice,
 } from '../api';
+import { notifyError } from '../toast';
 import TownMapBoard from './TownMapBoard.vue';
 import { siteTitle, siteTagline } from '../site';
 import RichText from './RichText.vue';
@@ -26,7 +27,6 @@ const emit = defineEmits<{ login: [player: Player] }>();
 const STORAGE_KEY = 'town.instance';
 
 const instance = ref('');
-const error = ref('');
 const busy = ref(false);
 // コールバックから戻った直後の引き換え中かどうか。
 const exchanging = ref(false);
@@ -77,7 +77,7 @@ onMounted(async () => {
       emit('login', p);
       return;
     } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e);
+      notifyError('ログインできませんでした', e);
       window.history.replaceState({}, '', '/');
     } finally {
       exchanging.value = false;
@@ -136,21 +136,19 @@ const guestBusy = ref(false);
 async function playAsGuest() {
   if (guestBusy.value) return;
   guestBusy.value = true;
-  error.value = '';
   try {
     emit('login', await api.authGuest());
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
+    notifyError('お試しプレイを始められませんでした', e);
     guestBusy.value = false;
   }
 }
 
 async function login() {
   if (!instance.value.trim()) {
-    error.value = 'インスタンスを入力してください。';
+    notifyError('インスタンスを入力してください。');
     return;
   }
-  error.value = '';
   busy.value = true;
   try {
     const res = await api.authStart(instance.value);
@@ -158,7 +156,7 @@ async function login() {
     // インスタンスの承認画面へ。承認するとcallbackへ戻ってくる。
     window.location.href = res.url;
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
+    notifyError('ログインできませんでした', e);
     busy.value = false;
   }
 }
@@ -242,8 +240,6 @@ async function login() {
                 <span v-else>Misskeyの設定</span>
                 から削除できます（設定 → アプリ）。
               </p>
-              <div v-if="error" class="message error" data-test="login-error">{{ error }}</div>
-
               <p class="note">
                 ※初めての方はこの操作でそのまま登録されます。<br />
                 ※ゲーム内から他の住民をフォローするための許可だけをお願いしています。
@@ -451,11 +447,6 @@ async function login() {
   color: #445;
   padding: 8px 10px;
   margin: 12px 0 0;
-}
-.message.error {
-  margin-top: 12px;
-  /* 凍結の知らせは「理由: 〜」を改行して出すので、改行を潰さない。 */
-  white-space: pre-line;
 }
 .exchanging {
   background: #fff;

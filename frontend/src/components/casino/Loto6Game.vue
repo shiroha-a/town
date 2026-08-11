@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import { api, type Player, type Loto6State } from '../../api';
+import { notifyError } from '../../toast';
 
 const props = defineProps<{ player: Player }>();
 const emit = defineEmits<{ update: [player: Player] }>();
@@ -9,7 +10,6 @@ const yen = (n: number) => n.toLocaleString('ja-JP');
 const state = ref<Loto6State | null>(null);
 const picked = ref<number[]>([]);
 const busy = ref(false);
-const message = ref('');
 
 const numbers = Array.from({ length: 36 }, (_, i) => i + 1);
 const canBuy = computed(() => picked.value.length === 6 && !busy.value);
@@ -30,7 +30,7 @@ async function load() {
   try {
     state.value = await api.loto6State(props.player.id);
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
+    notifyError('ロト6で遊べませんでした', e);
   }
 }
 onMounted(load);
@@ -38,7 +38,6 @@ onMounted(load);
 async function buy() {
   if (!canBuy.value) return;
   busy.value = true;
-  message.value = '';
   try {
     state.value = await api.loto6Buy(
       props.player.id,
@@ -47,7 +46,7 @@ async function buy() {
     emit('update', await api.getPlayer(props.player.id));
     picked.value = [];
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
+    notifyError('ロト6で遊べませんでした', e);
   } finally {
     busy.value = false;
   }
@@ -96,8 +95,6 @@ async function buy() {
         <span v-for="n in t.numbers" :key="n" class="ball">{{ n }}</span>
       </div>
     </div>
-
-    <div v-if="message" class="message error">{{ message }}</div>
   </div>
 </template>
 

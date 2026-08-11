@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { api, type Player, type FishingState } from '../api';
-import Toast from './Toast.vue';
-import { useToast } from '../toast';
+import { showToast, notifyError, errorText } from '../toast';
 
 // 釣りゲーム(レガシー tsuri.cgi)。餌を1つ消費してカードを引き、当たりを引くと魚が釣れる。
 // 「引いてる」カードを引くと続行でき、引くほど良い魚になる。外すと逃げられて終了。
@@ -12,10 +11,8 @@ const emit = defineEmits<{ update: [player: Player]; back: [] }>();
 const state = ref<FishingState | null>(null);
 const selectedBait = ref<number | null>(null);
 const busy = ref(false);
-const message = ref('');
 // 直前の結果(演出用)。引いたカードの位置と結末を覚えておく。
 const lastPick = ref<{ card: number; outcome: string } | null>(null);
-const { toast, showToast, closeToast } = useToast();
 
 async function load() {
   try {
@@ -24,7 +21,7 @@ async function load() {
       selectedBait.value = state.value.baits[0].item_id;
     }
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
+    notifyError('釣り場を読み込めませんでした', e);
   }
 }
 onMounted(load);
@@ -33,7 +30,7 @@ function fail(e: unknown) {
   showToast({
     variant: 'error',
     title: 'できませんでした',
-    lines: [e instanceof Error ? e.message : String(e)],
+    lines: [errorText(e)],
     icon: 'item',
   });
 }
@@ -79,7 +76,6 @@ async function pick(card: number) {
 
 <template>
   <div class="facility-page tsuri-page">
-    <Toast :toast="toast" @close="closeToast" />
     <button class="btn back" @click="emit('back')">街に戻る</button>
 
     <div class="tsuri-header">
@@ -89,8 +85,6 @@ async function pick(card: number) {
       </div>
       <div class="title">釣り</div>
     </div>
-
-    <div v-if="message" class="message error">{{ message }}</div>
 
     <div class="panel-white">
       <!-- 準備: 餌を選ぶ -->

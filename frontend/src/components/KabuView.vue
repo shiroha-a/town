@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue';
 import { api, type Player, type StockHolding } from '../api';
+import { notifyOk, notifyError } from '../toast';
 
 // 株取引場: A〜E株の売買。株価は全プレイヤー共有でworkerが変動させる。手数料なし。
 const props = defineProps<{ player: Player }>();
@@ -11,8 +12,6 @@ const yen = (n: number) => n.toLocaleString('ja-JP');
 const holdings = ref<StockHolding[]>([]);
 const eventLog = ref<string[]>([]);
 const history = ref<string[]>([]);
-const message = ref('');
-const kind = ref<'ok' | 'error'>('ok');
 const busy = ref(false);
 
 // 銘柄ごとの購入/売却の入力株数。
@@ -36,19 +35,16 @@ async function load() {
 onMounted(load);
 
 function fail(e: unknown) {
-  message.value = e instanceof Error ? e.message : String(e);
-  kind.value = 'error';
+  notifyError('株の取引に失敗しました', e);
 }
 
 async function buy(h: StockHolding) {
   const qty = buyQty[h.symbol] ?? 0;
   if (qty <= 0) return;
   busy.value = true;
-  message.value = '';
   try {
     emit('update', await api.stockBuy(props.player.id, h.symbol, qty));
-    message.value = `${h.symbol}株を${qty}株購入しました。`;
-    kind.value = 'ok';
+    notifyOk(`${h.symbol}株を${qty}株購入しました`);
     await load();
   } catch (e) {
     fail(e);
@@ -61,11 +57,9 @@ async function sell(h: StockHolding) {
   const qty = sellQty[h.symbol] ?? 0;
   if (qty <= 0) return;
   busy.value = true;
-  message.value = '';
   try {
     emit('update', await api.stockSell(props.player.id, h.symbol, qty));
-    message.value = `${h.symbol}株を${qty}株売却しました。`;
-    kind.value = 'ok';
+    notifyOk(`${h.symbol}株を${qty}株売却しました`);
     await load();
   } catch (e) {
     fail(e);
@@ -77,11 +71,9 @@ async function sell(h: StockHolding) {
 async function settle() {
   if (!window.confirm('全ての持ち株を現在の株価で精算します。よろしいですか?')) return;
   busy.value = true;
-  message.value = '';
   try {
     emit('update', await api.stockSettle(props.player.id));
-    message.value = '精算しました。';
-    kind.value = 'ok';
+    notifyOk('持ち株を精算しました');
     await load();
   } catch (e) {
     fail(e);
@@ -102,8 +94,6 @@ async function settle() {
       </div>
       <div class="title">株取引場</div>
     </div>
-
-    <div v-if="message" :class="['message', kind]" data-test="message">{{ message }}</div>
 
     <div class="panel-white table-scroll">
       <table class="kabu-table">

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { api, type Player } from '../../api';
+import { notifyError } from '../../toast';
 
 const props = defineProps<{ player: Player }>();
 const emit = defineEmits<{ update: [player: Player] }>();
@@ -9,7 +10,6 @@ const yen = (n: number) => n.toLocaleString('ja-JP');
 const bets = [10000, 100000, 500000, 1000000];
 const bet = ref(bets[0]);
 const busy = ref(false);
-const message = ref('');
 const result = ref<{
   dice1: number;
   dice2: number;
@@ -21,14 +21,13 @@ const result = ref<{
 
 async function play(choice: 'even' | 'odd') {
   busy.value = true;
-  message.value = '';
   try {
     const res = await api.casinoPlay(props.player.id, 'saikoro', bet.value, { choice });
     emit('update', res.player);
     const d = res.detail as { dice1: number; dice2: number; sum: number; result: string };
     result.value = { ...d, win: res.win, net: res.win ? res.payout - bet.value : -bet.value };
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
+    notifyError('サイコロで遊べませんでした', e);
   } finally {
     busy.value = false;
   }
@@ -62,7 +61,6 @@ async function play(choice: 'even' | 'odd') {
         奇数に賭ける
       </button>
     </div>
-    <div v-if="message" class="message error">{{ message }}</div>
   </div>
 </template>
 

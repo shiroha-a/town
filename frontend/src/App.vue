@@ -34,8 +34,12 @@ import StreetFightView from './components/StreetFightView.vue';
 import MeyasuView from './components/MeyasuView.vue';
 import AdminView from './components/AdminView.vue';
 import PlaceholderView from './components/PlaceholderView.vue';
+import Toast from './components/Toast.vue';
 import { currentRoute, pushRoute, replaceRoute, type NavParam } from './router';
+import { currentToast, closeToast } from './toast';
 import { watchForUpdate, stopUpdateWatch } from './update';
+
+const toast = currentToast();
 
 const player = ref<Player | null>(null);
 // 表示中の画面はURLと対応させる。リロードしても同じ画面に戻り、ブラウザの
@@ -213,6 +217,9 @@ const facilityTitles: Record<string, string> = {
 </script>
 
 <template>
+  <!-- 画面上部のトーストはアプリ全体で1つ。どの画面のどの操作の知らせも、
+       出す場所と見た目をここに揃える。 -->
+  <Toast :toast="toast" @close="closeToast" />
   <div v-if="updateReady" class="update-bar">
     <span>ゲームが更新されました。</span>
     <button class="update-btn" @click="applyUpdate">読み込み直す</button>

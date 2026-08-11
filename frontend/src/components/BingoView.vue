@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { api, type Player, type BingoState, type BingoCard } from '../api';
-import Toast from './Toast.vue';
-import { useToast } from '../toast';
+import { showToast, notifyError, errorText } from '../toast';
 
 // ビンゴ会場(レガシー bingo.cgi)。街全体で数日かけて行う共有イベントで、
 // 全員が同じ抽選番号を見る。2ライン揃うと上がりで、賞金は上がった順に決まる。
@@ -12,14 +11,12 @@ const emit = defineEmits<{ update: [player: Player]; back: [] }>();
 const yen = (n: number) => n.toLocaleString('ja-JP');
 const state = ref<BingoState | null>(null);
 const busy = ref(false);
-const message = ref('');
-const { toast, showToast, closeToast } = useToast();
 
 async function load() {
   try {
     state.value = await api.bingo(props.player.id);
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
+    notifyError('ビンゴを読み込めませんでした', e);
   }
 }
 onMounted(load);
@@ -28,7 +25,7 @@ function fail(e: unknown) {
   showToast({
     variant: 'error',
     title: 'できませんでした',
-    lines: [e instanceof Error ? e.message : String(e)],
+    lines: [errorText(e)],
     icon: 'item',
   });
 }
@@ -67,7 +64,6 @@ async function claim(card: BingoCard) {
 
 <template>
   <div class="facility-page bingo-page">
-    <Toast :toast="toast" @close="closeToast" />
     <button class="btn back" @click="emit('back')">街に戻る</button>
 
     <div class="bingo-header">
@@ -79,8 +75,6 @@ async function claim(card: BingoCard) {
       </div>
       <div class="title">ビンゴ</div>
     </div>
-
-    <div v-if="message" class="message error">{{ message }}</div>
 
     <div v-if="state && !state.active" class="panel-white">
       <p class="note">いまビンゴ大会は開かれていません。次回をお待ちください。</p>

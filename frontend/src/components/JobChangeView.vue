@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue';
 import { api, type Player, type JobOption } from '../api';
 import { PARAM_COLUMNS } from '../params';
+import { notifyOk, notifyError } from '../toast';
 
 // 身体/頭脳パワーは「必要値」ではなく「1回働くと消費する量」として専用列に出すため、
 // 必要パラメータ列からは除外する。
@@ -11,8 +12,6 @@ const props = defineProps<{ player: Player }>();
 const emit = defineEmits<{ update: [player: Player]; back: [] }>();
 
 const jobs = ref<JobOption[]>([]);
-const message = ref('');
-const kind = ref<'ok' | 'error'>('ok');
 const busy = ref(false);
 const yen = (n: number) => n.toLocaleString('ja-JP');
 
@@ -20,8 +19,7 @@ onMounted(async () => {
   try {
     jobs.value = await api.jobs();
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
-    kind.value = 'error';
+    notifyError('求人を読み込めませんでした', e, 'go_work');
   }
 });
 
@@ -76,14 +74,11 @@ function meets(job: JobOption, key: string): boolean {
 
 async function take(job: JobOption) {
   busy.value = true;
-  message.value = '';
   try {
     emit('update', await api.changeJob(props.player.id, job.name));
-    message.value = `${job.name}に転職しました。仕事ボタンが使えるようになりました。`;
-    kind.value = 'ok';
+    notifyOk(`${job.name}に転職しました`, ['街の仕事ボタンが使えるようになりました。'], 'go_work');
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
-    kind.value = 'error';
+    notifyError('転職できませんでした', e, 'go_work');
   } finally {
     busy.value = false;
   }
@@ -102,8 +97,6 @@ async function take(job: JobOption) {
       </div>
       <div class="title">職業安定所</div>
     </div>
-
-    <div v-if="message" :class="['message', kind]" data-test="message">{{ message }}</div>
 
     <div class="panel-white">
       <div class="cap">

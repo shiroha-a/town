@@ -1,35 +1,85 @@
-import { ref, onUnmounted } from 'vue';
+import { ref } from 'vue';
 import { PARAM_ORDER, PARAM_FULL } from './params';
 import { projectedPower } from './power';
 import type { Player } from './api';
 
 // 画面上部トースト(iOS通知バナー風)の1件分のデータ。variantで色/アイコンの見た目を切り替える。
 export interface ToastData {
-  variant: 'work' | 'event-good' | 'event-bad' | 'error' | 'item';
+  variant: ToastVariant;
   title: string;
   lines: string[];
   icon: string; // CommandIcon の name
 }
 
-// トースト状態を管理するcomposable。showToastで表示し、6秒後に自動で消える。
-// 街トップ(仕事/イベント)とアイテム使用・食事・トレーニングなど複数画面で共有する。
-export function useToast() {
-  const toast = ref<ToastData | null>(null);
-  let timer: number | undefined;
-  function showToast(t: ToastData) {
-    toast.value = t;
-    if (timer !== undefined) window.clearTimeout(timer);
-    timer = window.setTimeout(() => {
-      toast.value = null;
-    }, 6000);
-  }
-  function closeToast() {
+// ok/error は画面を問わない汎用の成功・失敗。ほかは出どころが決まっているもの
+// (仕事・ランダムイベント・アイテム)で、専用のアイコンと色を持つ。
+export type ToastVariant = 'ok' | 'error' | 'work' | 'event-good' | 'event-bad' | 'item';
+
+// アイコン省略時の既定。指定があればそちらを優先する(施設ごとの絵柄を出せる)。
+const DEFAULT_ICON: Record<ToastVariant, string> = {
+  ok: 'ok',
+  error: 'error',
+  work: 'go_work',
+  'event-good': 'event',
+  'event-bad': 'event',
+  item: 'item',
+};
+
+// 表示中のトースト。アプリ全体で1つだけ持ち、App.vueが描画する。画面ごとに
+// 持たせると、遷移した瞬間に消えたり、親子で二重に出たりするため。
+const toast = ref<ToastData | null>(null);
+let timer: number | undefined;
+
+/** The single toast shown at the top of the app (App.vue renders it). */
+export function currentToast() {
+  return toast;
+}
+
+/** Shows a toast for 6 seconds, replacing whatever was on screen. */
+export function showToast(t: {
+  variant: ToastVariant;
+  title: string;
+  lines?: string[];
+  icon?: string;
+}) {
+  toast.value = {
+    variant: t.variant,
+    title: t.title,
+    lines: t.lines ?? [],
+    icon: t.icon ?? DEFAULT_ICON[t.variant],
+  };
+  if (timer !== undefined) window.clearTimeout(timer);
+  timer = window.setTimeout(() => {
     toast.value = null;
-  }
-  onUnmounted(() => {
-    if (timer !== undefined) window.clearTimeout(timer);
+  }, 6000);
+}
+
+export function closeToast() {
+  toast.value = null;
+  if (timer !== undefined) window.clearTimeout(timer);
+}
+
+/** Success notification: 操作が通ったことの短い知らせ。 */
+export function notifyOk(title: string, lines: string[] = [], icon?: string) {
+  showToast({ variant: 'ok', title, lines, icon });
+}
+
+/**
+ * Failure notification. errには例外をそのまま渡せる(文言を取り出して出す)。
+ * サーバーの文言は改行を含むことがある(凍結の理由など)ので、行に分けて渡す。
+ */
+export function notifyError(title: string, err?: unknown, icon?: string) {
+  showToast({
+    variant: 'error',
+    title,
+    lines: err === undefined ? [] : errorText(err).split('\n'),
+    icon,
   });
-  return { toast, showToast, closeToast };
+}
+
+/** Pulls the message out of whatever was thrown (APIのエラーはError)。 */
+export function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 const yen = (n: number) => n.toLocaleString('ja-JP');

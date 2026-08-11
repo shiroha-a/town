@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import { api, type Player, type BJState } from '../../api';
+import { notifyError } from '../../toast';
 
 const props = defineProps<{ player: Player }>();
 const emit = defineEmits<{ update: [player: Player] }>();
@@ -10,7 +11,6 @@ const bets = [10000, 100000, 500000, 1000000];
 const rate = ref(bets[0]);
 const state = ref<BJState | null>(null);
 const busy = ref(false);
-const message = ref('');
 
 // カード0-51をトランプ表記に(スート記号+ランク)。
 const suits = ['♠', '♥', '♦', '♣']; // スペード/ハート/ダイヤ/クラブ
@@ -43,7 +43,7 @@ async function load() {
   try {
     state.value = await api.bjState(props.player.id);
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
+    notifyError('ブラックジャックで遊べませんでした', e);
   }
 }
 onMounted(load);
@@ -51,13 +51,12 @@ onMounted(load);
 async function run(fn: () => Promise<BJState>) {
   if (busy.value) return;
   busy.value = true;
-  message.value = '';
   try {
     state.value = await fn();
     // 掛け金/払戻で所持金が変わるので再取得してヘッダを更新する。
     emit('update', await api.getPlayer(props.player.id));
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
+    notifyError('ブラックジャックで遊べませんでした', e);
   } finally {
     busy.value = false;
   }
@@ -67,7 +66,6 @@ const hit = () => run(() => api.bjHit(props.player.id));
 const stand = () => run(() => api.bjStand(props.player.id));
 function reset() {
   if (state.value) state.value = { ...state.value, active: false };
-  message.value = '';
 }
 </script>
 
@@ -121,8 +119,6 @@ function reset() {
         <button class="btn" :disabled="busy" data-test="again" @click="reset">もう一度</button>
       </div>
     </div>
-
-    <div v-if="message" class="message error">{{ message }}</div>
   </div>
 </template>
 

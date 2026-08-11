@@ -9,9 +9,8 @@ import {
   type TownFacility,
   type TownAsset,
 } from '../api';
-import Toast from './Toast.vue';
 import ExteriorPicker from './ExteriorPicker.vue';
-import { useToast } from '../toast';
+import { showToast, notifyError, errorText } from '../toast';
 
 // 建設会社(建築系フェーズ2a): 5つの街の空地に家を建てる。建築費は普通口座から
 // 引き落とす。1軒目は(地価+外装)×内装倍率、2軒目以降は地価+外装×2。1人4軒まで。
@@ -26,9 +25,7 @@ const yen = (n: number) => n.toLocaleString('ja-JP');
 const state = ref<BuildingState | null>(null);
 const facilities = ref<TownFacility[]>([]); // 全街の施設(選択中の街ぶんを描画)
 const assets = ref<TownAsset[]>([]); // 背景アセット(装飾レイヤー)
-const message = ref('');
 const busy = ref(false);
-const { toast, showToast, closeToast } = useToast();
 
 const selectedTown = ref(0);
 const selectedCell = ref<{ row: number; col: number } | null>(null);
@@ -67,7 +64,7 @@ onMounted(async () => {
     const [f] = await Promise.all([api.townMap(), refresh()]);
     facilities.value = f;
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
+    notifyError('建築会社の情報を読み込めませんでした', e, 'myhome');
   }
   // 街マップの空き地クリックから来た場合はそのマスを選択済みにする。
   const target = props.initialTarget;
@@ -270,7 +267,7 @@ async function build() {
     await refresh();
     selectedCell.value = null;
     showToast({
-      variant: 'item',
+      variant: 'ok',
       title: span > 1 ? '大邸宅を建てた' : '家を建てた',
       lines:
         span > 1
@@ -282,7 +279,7 @@ async function build() {
     showToast({
       variant: 'error',
       title: '建てられませんでした',
-      lines: [e instanceof Error ? e.message : String(e)],
+      lines: [errorText(e)],
       icon: 'item',
     });
   } finally {
@@ -293,7 +290,6 @@ async function build() {
 
 <template>
   <div class="kentiku-page facility-page">
-    <Toast :toast="toast" @close="closeToast" />
     <button class="btn back" @click="emit('back')">街に戻る</button>
 
     <div class="kentiku-header">
@@ -305,8 +301,6 @@ async function build() {
       </div>
       <div class="title">建設会社</div>
     </div>
-
-    <div v-if="message" class="message error" data-test="message">{{ message }}</div>
 
     <template v-if="state">
       <!-- 街タブ(隠し町は空き地クリックで開いた場合のみ表示) -->
