@@ -520,23 +520,87 @@ func (s *Service) DoWithdraw(ctx context.Context, playerID, amount int64, idempo
 	})
 }
 
-// transferLimit caps a single bank transfer; the excess is donated away (寄付),
-// matching the legacy 振り込み. It is also the per-day cap per recipient.
-const transferLimit = 1_000_000
+// transferLimit is the bank-transfer cap in effect: the most one transfer can
+// move, and also the daily total to one recipient. 管理画面から変えられる。
+func (s *Service) transferLimit() int64 {
+	return s.settings.Get().EffectiveTransferLimit()
+}
 
-// DoTransfer sends money from the player's savings to another member's savings,
-// the recipient identified by display name. Amount above transferLimit is
-// donated (removed from circulation). Students/day-laborers cannot send, self-
-// transfer is rejected, and the daily total to one recipient is capped.
-func (s *Service) DoTransfer(ctx context.Context, fromID int64, toName string, amount int64, idempotencyKey string) (*player.Player, error) {
+// transferDayStart returns the game-day boundary used for the daily transfer cap.
+func (s *Service) transferDayStart() time.Time {
+	return gametime.Date(time.Now(), s.loc, s.dayBoundaryHour).Add(time.Duration(s.dayBoundaryHour) * time.Hour)
+}
+
+// TransferResult reports what a transfer actually moved. Sent is less than
+// Requested when the cap trimmed it; the difference stays in the sender's
+// account (かつては超過分を寄付として消していたが、黙って金が消えるので廃止した)。
+type TransferResult struct {
+	Requested      int64 // 入力された金額
+	Sent           int64 // 実際に相手へ届いた金額
+	Limit          int64 // 現在の上限
+	RemainingToday int64 // この相手へ今日あと振り込める額(振込後)
+	ToName         string
+}
+
+// TransferCandidate is one possible recipient with the sender's daily allowance
+// toward them.
+type TransferCandidate struct {
+	ID          int64
+	DisplayName string
+	SentToday   int64
+	Remaining   int64
+}
+
+// TransferInfo is the 振込画面 data: the current cap and who can be paid.
+type TransferInfo struct {
+	Limit      int64
+	Recipients []TransferCandidate
+}
+
+// TransferInfo lists the players the given player may transfer to, with how
+// much of today's per-recipient allowance is left for each.
+func (s *Service) TransferInfo(ctx context.Context, fromID int64) (TransferInfo, error) {
+	limit := s.transferLimit()
+	rows, err := s.pool.Query(ctx,
+		`SELECT p.id, p.display_name,
+		        COALESCE((SELECT SUM(t.amount) FROM transfer_log t
+		                  WHERE t.from_id = $1 AND t.to_id = p.id AND t.created_at >= $2), 0)
+		 FROM players p
+		 WHERE p.deleted_at IS NULL AND NOT p.is_guest AND p.id <> $1
+		 ORDER BY p.id`, fromID, s.transferDayStart())
+	if err != nil {
+		return TransferInfo{}, fmt.Errorf("list transfer recipients: %w", err)
+	}
+	defer rows.Close()
+	info := TransferInfo{Limit: limit, Recipients: []TransferCandidate{}}
+	for rows.Next() {
+		var c TransferCandidate
+		if err := rows.Scan(&c.ID, &c.DisplayName, &c.SentToday); err != nil {
+			return TransferInfo{}, fmt.Errorf("scan transfer recipient: %w", err)
+		}
+		c.Remaining = max(limit-c.SentToday, 0)
+		info.Recipients = append(info.Recipients, c)
+	}
+	return info, rows.Err()
+}
+
+// DoTransfer sends money from the player's savings to another member's savings.
+// Students/day-laborers cannot send and self-transfer is rejected. The amount is
+// trimmed to what the cap still allows toward that recipient today; the trimmed
+// part simply stays in the sender's account.
+func (s *Service) DoTransfer(ctx context.Context, fromID, toID, amount int64, idempotencyKey string) (*player.Player, *TransferResult, error) {
 	if amount <= 0 {
-		return nil, &ConditionError{Message: "0円、マイナスの金額は振り込めません。"}
+		return nil, nil, &ConditionError{Message: "0円、マイナスの金額は振り込めません。"}
 	}
-	toName = strings.TrimSpace(toName)
-	if toName == "" {
-		return nil, &ConditionError{Message: "振込先の名前を入力してください。"}
+	if toID <= 0 {
+		return nil, nil, &ConditionError{Message: "振込先を選んでください。"}
 	}
-	return s.runAction(ctx, fromID, "transfer", idempotencyKey, func(ctx context.Context, tx pgx.Tx, _ effects.State) error {
+	if toID == fromID {
+		return nil, nil, &ConditionError{Message: "自分宛に振り込むことはできません。"}
+	}
+	limit := s.transferLimit()
+	result := TransferResult{Requested: amount, Limit: limit}
+	p, err := s.runAction(ctx, fromID, "transfer", idempotencyKey, func(ctx context.Context, tx pgx.Tx, _ effects.State) error {
 		var job string
 		if err := tx.QueryRow(ctx, `SELECT job FROM player_status WHERE player_id = $1`, fromID).Scan(&job); err != nil {
 			return fmt.Errorf("read job: %w", err)
@@ -544,47 +608,40 @@ func (s *Service) DoTransfer(ctx context.Context, fromID int64, toName string, a
 		if job == "学生" || job == "日払いバイト" {
 			return &ConditionError{Message: "学生・日払いバイト中は送金できません。"}
 		}
-		// 相手をメンバー名で逆引き。同名が複数いる場合は特定できないため断る。
-		var cnt, toID int64
-		if err := tx.QueryRow(ctx,
-			`SELECT COUNT(*), COALESCE(MIN(id), 0) FROM players WHERE display_name = $1`,
-			toName).Scan(&cnt, &toID); err != nil {
+		// 退会済み・お試しプレイは振込先にできない。届いても誰も使えないため。
+		var toName string
+		err := tx.QueryRow(ctx,
+			`SELECT display_name FROM players WHERE id = $1 AND deleted_at IS NULL AND NOT is_guest`,
+			toID).Scan(&toName)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return &ConditionError{Message: "その参加者は見つかりません。"}
+		}
+		if err != nil {
 			return fmt.Errorf("lookup recipient: %w", err)
 		}
-		if cnt == 0 {
-			return &ConditionError{Message: "その名前の参加者が見つかりません。"}
+		result.ToName = toName
+		// 同一相手への当日送金合計。上限までの残りを超える分は振り込まない
+		// (減額するだけで、減らした分は自分の口座に残る)。
+		var todaySum int64
+		if err := tx.QueryRow(ctx,
+			`SELECT COALESCE(SUM(amount), 0) FROM transfer_log WHERE from_id = $1 AND to_id = $2 AND created_at >= $3`,
+			fromID, toID, s.transferDayStart()).Scan(&todaySum); err != nil {
+			return err
 		}
-		if cnt > 1 {
-			return &ConditionError{Message: "同じ名前の参加者が複数います。振込できません。"}
+		remaining := max(limit-todaySum, 0)
+		if remaining <= 0 {
+			return &ConditionError{Message: fmt.Sprintf(
+				"今日この相手にはもう振り込めません(1日%d円までです)。", limit)}
 		}
-		if toID == fromID {
-			return &ConditionError{Message: "自分宛に振り込むことはできません。"}
-		}
+		sent := min(amount, remaining)
 		var savings int64
 		if err := tx.QueryRow(ctx,
 			`SELECT COALESCE(SUM(delta), 0) FROM ledger_entry WHERE account = $1`,
 			ledger.SavingsAccount(fromID)).Scan(&savings); err != nil {
 			return fmt.Errorf("read savings: %w", err)
 		}
-		if savings < amount {
+		if savings < sent {
 			return &ConditionError{Message: "普通口座のお金が足りません。"}
-		}
-		// 上限超過分は寄付として自口座から引かれ、相手には届かない。
-		sent, donation := amount, int64(0)
-		if sent > transferLimit {
-			donation = sent - transferLimit
-			sent = transferLimit
-		}
-		// 同一相手への当日送金合計(相手に届いた額)が上限を超えないか。
-		dayStart := gametime.Date(time.Now(), s.loc, s.dayBoundaryHour).Add(time.Duration(s.dayBoundaryHour) * time.Hour)
-		var todaySum int64
-		if err := tx.QueryRow(ctx,
-			`SELECT COALESCE(SUM(amount), 0) FROM transfer_log WHERE from_id = $1 AND to_id = $2 AND created_at >= $3`,
-			fromID, toID, dayStart).Scan(&todaySum); err != nil {
-			return err
-		}
-		if todaySum+sent > transferLimit {
-			return &ConditionError{Message: fmt.Sprintf("今日この相手への送金は合計%d円までです。", transferLimit)}
 		}
 		if err := s.ledger.PostTx(ctx, tx, "transfer", "", []ledger.Entry{
 			{Account: ledger.SavingsAccount(fromID), Delta: -sent},
@@ -592,21 +649,19 @@ func (s *Service) DoTransfer(ctx context.Context, fromID int64, toName string, a
 		}); err != nil {
 			return fmt.Errorf("transfer: %w", err)
 		}
-		if donation > 0 {
-			if err := s.ledger.PostTx(ctx, tx, "transfer_donation", "", []ledger.Entry{
-				{Account: ledger.SavingsAccount(fromID), Delta: -donation},
-				{Account: ledger.SystemAccount("donation"), Delta: donation},
-			}); err != nil {
-				return fmt.Errorf("donation: %w", err)
-			}
-		}
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO transfer_log (from_id, to_id, amount) VALUES ($1, $2, $3)`,
 			fromID, toID, sent); err != nil {
 			return err
 		}
+		result.Sent = sent
+		result.RemainingToday = remaining - sent
 		return nil
 	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return p, &result, nil
 }
 
 // superUnit is the deposit/cancel unit for the super time-deposit (100万円).
@@ -1806,6 +1861,8 @@ func statementLabel(reason string, amount int64) string {
 			return "振込(送金)"
 		}
 		return "振込(入金)"
+	// 振込の上限超過分を寄付として消していた頃の記帳。もう発生しないが、
+	// 過去の通帳に出るので残す。
 	case reason == "transfer_donation":
 		return "寄付"
 	case reason == "super_deposit":

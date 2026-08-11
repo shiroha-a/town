@@ -4,7 +4,7 @@ CREATE TABLE transfer_log (
     id         BIGSERIAL PRIMARY KEY,
     from_id    BIGINT NOT NULL,
     to_id      BIGINT NOT NULL,
-    amount     BIGINT NOT NULL, -- 相手に届いた額(寄付として消える超過分は含まない)
+    amount     BIGINT NOT NULL, -- 相手に届いた額(上限で減額された分は含まない)
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX transfer_log_from_to_idx ON transfer_log(from_id, to_id, created_at);
