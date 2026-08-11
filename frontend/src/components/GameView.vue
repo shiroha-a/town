@@ -13,6 +13,7 @@ import ScratchGame from './casino/ScratchGame.vue';
 import BlackjackGame from './casino/BlackjackGame.vue';
 import PokerGame from './casino/PokerGame.vue';
 import Loto6Game from './casino/Loto6Game.vue';
+import KaburiGame from './casino/KaburiGame.vue';
 
 defineProps<{ player: Player }>();
 const emit = defineEmits<{ update: [player: Player]; back: [] }>();
@@ -47,6 +48,11 @@ const games: { key: string; name: string; desc: string; props?: Record<string, u
   { key: 'blackjack', name: 'ブラックジャック', desc: '21に近づけてディーラーに勝つ(配当1:1)' },
   { key: 'poker', name: 'ポーカー', desc: '5カードドロー、役でポイントを増やして換金' },
   { key: 'loto6', name: 'ロト6', desc: '1〜36から6個選んで購入、毎日抽選で銀行に賞金' },
+  {
+    key: 'kaburi',
+    name: 'カード引き',
+    desc: '場から1枚引き、前の人と同じカードを引いたら負け。場は街のみんなで共有',
+  },
 ];
 const gameComponents: Record<string, Component> = {
   saikoro: SaikoroGame,
@@ -62,6 +68,7 @@ const gameComponents: Record<string, Component> = {
   blackjack: BlackjackGame,
   poker: PokerGame,
   loto6: Loto6Game,
+  kaburi: KaburiGame,
 };
 
 const yen = (n: number) => n.toLocaleString('ja-JP');

@@ -1082,6 +1082,167 @@ func TestBankTransfer(t *testing.T) {
 	}
 }
 
+// kaburiResp mirrors the カード引き play response.
+type kaburiResp struct {
+	Player playerResp `json:"player"`
+	Card   int        `json:"card"`
+	Hidden int        `json:"hidden"`
+	Win    bool       `json:"win"`
+	Payout int64      `json:"payout"`
+	State  struct {
+		Cards         []int `json:"cards"`
+		Size          int   `json:"size"`
+		Streak        int   `json:"streak"`
+		PayoutPercent int64 `json:"payout_percent"`
+		Recent        []struct {
+			Name string `json:"name"`
+			Size int    `json:"size"`
+			Win  bool   `json:"win"`
+		} `json:"recent"`
+	} `json:"state"`
+}
+
+func kaburiPlay(t *testing.T, base string, playerID int64, bet int64, idemKey string) (kaburiResp, int) {
+	t.Helper()
+	body, _ := json.Marshal(map[string]any{"bet": bet, "idempotency_key": idemKey})
+	resp, err := http.Post(base+"/api/v1/players/"+strconv.FormatInt(playerID, 10)+"/kaburi/play",
+		"application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("kaburi play: %v", err)
+	}
+	defer resp.Body.Close()
+	var out kaburiResp
+	if resp.StatusCode == http.StatusOK {
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			t.Fatalf("kaburi decode: %v", err)
+		}
+	}
+	return out, resp.StatusCode
+}
+
+// TestKaburi covers カード引き: the shared table, the server-side draw against
+// the previous player's card, the payout/shrink on a miss and the reset on a match.
+func TestKaburi(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	led := ledger.New(pool)
+
+	alice := register(t, srv.URL, "misskey.example", "alice")
+	bob := register(t, srv.URL, "misskey.example", "bob")
+	carol := register(t, srv.URL, "misskey.example", "carol")
+
+	// 引くのはサーバーなので、場と伏せ札を決め打ちにして勝敗を固定する。
+	// cards に伏せ札1枚だけを置けば必ずかぶり、伏せ札を場の外にすれば必ずセーフ。
+	seed := func(hidden int, cards string, streak int) {
+		t.Helper()
+		if _, err := pool.Exec(ctx,
+			`UPDATE kaburi_table SET hidden_card=$1, cards=$2, streak=$3, last_player=NULL
+			 WHERE id=1`, hidden, cards, streak); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 同じ人は5秒あけないと出せない(連打で場を独占させないため)。テストは続けて
+	// 出すので、その人の記録だけ消して待ち時間を無かったことにする。
+	clearWait := func(playerID int64) {
+		t.Helper()
+		if _, err := pool.Exec(ctx,
+			`DELETE FROM game_plays WHERE game='kaburi' AND player_id=$1`, playerID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 場は3の1枚だけ = 必ずかぶる。
+	seed(3, "{3}", 0)
+
+	// かぶり: 伏せ札と同じカードを引いたら掛け金は戻らず、場は10枚に戻る。
+	res, code := kaburiPlay(t, srv.URL, alice.ID, 10000, "kb-1")
+	if code != http.StatusOK {
+		t.Fatalf("play status = %d, want 200", code)
+	}
+	if res.Win || res.Payout != 0 || res.Hidden != 3 || res.Card != 3 {
+		t.Errorf("かぶり: win=%v payout=%d card=%d hidden=%d, want false/0/3/3",
+			res.Win, res.Payout, res.Card, res.Hidden)
+	}
+	if res.Player.Money != 490000 {
+		t.Errorf("money = %d, want 490000 (掛け金を失う)", res.Player.Money)
+	}
+	if res.State.Size != 10 || res.State.Streak != 0 {
+		t.Errorf("かぶり後の場 = %d枚/連鎖%d, want 10/0", res.State.Size, res.State.Streak)
+	}
+
+	// セーフ: 伏せ札(7)が場(2の1枚)に無いので必ず避けられる。10枚のときの配当は5%。
+	seed(7, "{2}", 0)
+	res, code = kaburiPlay(t, srv.URL, bob.ID, 10000, "kb-2")
+	if code != http.StatusOK {
+		t.Fatalf("bob play status = %d", code)
+	}
+	if !res.Win || res.Card != 2 {
+		t.Fatalf("セーフのはずが card=%d hidden=%d win=%v", res.Card, res.Hidden, res.Win)
+	}
+	if res.Payout != 10500 || res.Player.Money != 500500 {
+		t.Errorf("payout=%d money=%d, want 10500/500500", res.Payout, res.Player.Money)
+	}
+	if res.State.Size != 9 || res.State.Streak != 1 || res.State.PayoutPercent != 6 {
+		t.Errorf("セーフ後の場 = %d枚/連鎖%d/配当%d%%, want 9/1/6",
+			res.State.Size, res.State.Streak, res.State.PayoutPercent)
+	}
+	// 引いたカードは次の人の伏せ札になる。
+	var nextHidden int
+	if err := pool.QueryRow(ctx, `SELECT hidden_card FROM kaburi_table WHERE id=1`).
+		Scan(&nextHidden); err != nil {
+		t.Fatal(err)
+	}
+	if nextHidden != res.Card {
+		t.Errorf("次の伏せ札 = %d, want %d(引いたカード)", nextHidden, res.Card)
+	}
+	// 記録には引いた数字を出さない(枚数と勝敗だけ)。
+	if len(res.State.Recent) == 0 {
+		t.Error("直近の記録が空")
+	}
+
+	// 許されない掛け金は断る。
+	seed(1, "{1,2,3,4,5,6,7,8,9,10}", 0)
+	if _, code = kaburiPlay(t, srv.URL, carol.ID, 12345, "kb-3"); code != http.StatusUnprocessableEntity {
+		t.Errorf("掛け金が不正 status = %d, want 422", code)
+	}
+	// 連打は5秒の待ちで断る(直前の勝負が記録されている状態で続けて引く)。
+	if _, code = kaburiPlay(t, srv.URL, bob.ID, 10000, "kb-4"); code != http.StatusUnprocessableEntity {
+		t.Errorf("連打 status = %d, want 422", code)
+	}
+	clearWait(bob.ID)
+	if _, code = kaburiPlay(t, srv.URL, bob.ID, 10000, "kb-5"); code != http.StatusOK {
+		t.Errorf("待ちを空けた後 status = %d, want 200", code)
+	}
+
+	// 卓ごと消えても(住民データの全消し)、次に触ったときに出し直せる。
+	if _, err := pool.Exec(ctx, `DELETE FROM kaburi_table`); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Get(srv.URL + "/api/v1/players/" + strconv.FormatInt(carol.ID, 10) + "/kaburi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("state status = %d, want 200", resp.StatusCode)
+	}
+	var st struct {
+		Cards  []int `json:"cards"`
+		Size   int   `json:"size"`
+		Streak int   `json:"streak"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
+		t.Fatal(err)
+	}
+	if st.Size != 10 || st.Streak != 0 || len(st.Cards) != 10 {
+		t.Errorf("作り直した場 = %d枚/連鎖%d, want 10/0", st.Size, st.Streak)
+	}
+
+	// 台帳のゼロ和(胴元が損益を吸収する)。
+	if sum, _ := led.AuditZeroSum(ctx); sum != 0 {
+		t.Errorf("ledger zero-sum broken: %d", sum)
+	}
+}
+
 func adminPost(t *testing.T, base, path string, actingID int64, body any) (int, []byte) {
 	t.Helper()
 	b, _ := json.Marshal(body)
