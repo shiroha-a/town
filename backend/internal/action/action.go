@@ -900,6 +900,8 @@ var gameLimits = map[string]struct {
 	"omikuji":  {daily: 10, interval: time.Minute},
 	"otakara":  {interval: time.Minute},
 	"fukubiki": {daily: 1},
+	// カード引きは卓を全員で共有するので、連打で場を独占されないようにする。
+	"kaburi": {interval: 5 * time.Second},
 }
 
 // checkGameLimit enforces the per-game daily cap and cooldown from game_plays.

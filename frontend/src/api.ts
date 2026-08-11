@@ -403,6 +403,33 @@ export interface CasinoPlayResult {
   detail: Record<string, unknown>;
 }
 
+// カード引き: 街でひとつの卓を共有する。場から1枚引き、前の人が引いたカード
+// (伏せ札)とかぶらなければ勝ち。引くのはサーバーなので選ぶ操作はない。
+export interface KaburiEntry {
+  name: string;
+  size: number;
+  win: boolean;
+  at: string;
+}
+
+export interface KaburiState {
+  cards: number[]; // 場に並んでいるカード(昇順)
+  size: number;
+  streak: number; // かぶらずに続いた回数
+  payout_percent: number; // 勝ったときの配当(掛け金比%)
+  bets: number[];
+  recent: KaburiEntry[];
+}
+
+export interface KaburiPlayResult {
+  player: Player;
+  state: KaburiState;
+  card: number; // 自分が引いたカード
+  hidden: number; // 前の人のカード
+  win: boolean;
+  payout: number; // 戻ってきた額(掛け金を含む。負けは0)
+}
+
 // スクラッチのカード1枚。valuesは開封済みセルのindex->値(未開封は含まない)。
 export interface ScratchCard {
   index: number;
@@ -1860,6 +1887,12 @@ export const api = {
     request<CasinoPlayResult>('POST', `/players/${id}/casino/${game}/play`, {
       bet,
       params,
+      idempotency_key: newIdempotencyKey(),
+    }),
+  kaburiState: (id: number) => request<KaburiState>('GET', `/players/${id}/kaburi`),
+  kaburiPlay: (id: number, bet: number) =>
+    request<KaburiPlayResult>('POST', `/players/${id}/kaburi/play`, {
+      bet,
       idempotency_key: newIdempotencyKey(),
     }),
   scratchState: (id: number, game: string) =>

@@ -196,6 +196,8 @@ Misskeyの[MiAuth](https://misskey-hub.net/docs/for-developers/api/token/miauth/
 | 認可 | Method | Path | 内容 |
 | --- | --- | --- | --- |
 | 本人 | POST | `/players/{id}/casino/{game}/play` | 1回プレイする(サイコロ・スロット・くじ等) |
+| 本人 | GET | `/players/{id}/kaburi` | カード引きの場(全員で共有する卓) |
+| 本人 | POST | `/players/{id}/kaburi/play` | 場から1枚引く。body: `{bet}` |
 | 本人 | GET | `/players/{id}/scratch/{game}` | スクラッチの状態 |
 | 本人 | POST | `/players/{id}/scratch/{game}/open` | スクラッチを削る |
 | 本人 | GET | `/players/{id}/blackjack` | ブラックジャックの状態 |

@@ -57,6 +57,69 @@ func (s *Server) casinoPlay(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// kaburiState returns the shared カード引き table (場のカード・連鎖・直近の記録)。
+func (s *Server) kaburiState(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	st, err := s.actions.KaburiGetState(r.Context(), id)
+	if err != nil {
+		writeInternal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, st)
+}
+
+type kaburiPlayReq struct {
+	Bet            int64  `json:"bet"`
+	IdempotencyKey string `json:"idempotency_key"`
+}
+
+type kaburiPlayResp struct {
+	Player playerResp          `json:"player"`
+	State  *action.KaburiState `json:"state"`
+	Card   int                 `json:"card"`
+	Hidden int                 `json:"hidden"`
+	Win    bool                `json:"win"`
+	Payout int64               `json:"payout"`
+}
+
+func (s *Server) kaburiPlay(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	var req kaburiPlayReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	res, err := s.actions.KaburiPlay(r.Context(), id, req.Bet, req.IdempotencyKey)
+	if err != nil {
+		var condErr *action.ConditionError
+		switch {
+		case errors.Is(err, player.ErrNotFound):
+			writeError(w, http.StatusNotFound, "player not found")
+		case errors.As(err, &condErr):
+			writeError(w, http.StatusUnprocessableEntity, condErr.Message)
+		default:
+			writeInternal(w, r, err)
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, kaburiPlayResp{
+		Player: toResp(res.Player),
+		State:  res.State,
+		Card:   res.Card,
+		Hidden: res.Hidden,
+		Win:    res.Win,
+		Payout: res.Payout,
+	})
+}
+
 func (s *Server) scratchState(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
