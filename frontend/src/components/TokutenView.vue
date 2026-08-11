@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { api, type Player } from '../api';
-import Toast from './Toast.vue';
-import { useToast, buildEffectLines } from '../toast';
+import { showToast, buildEffectLines, errorText } from '../toast';
 
 // 特典(レガシー tokuten.cgi)。管理者が発行したシリアルコードを入力すると、
 // 設定された景品(アイテム/パラメータ/お金など)を1人1回だけ受け取れる。
@@ -11,7 +10,6 @@ const emit = defineEmits<{ update: [player: Player]; back: [] }>();
 
 const code = ref('');
 const busy = ref(false);
-const { toast, showToast, closeToast } = useToast();
 
 async function redeem() {
   if (!code.value.trim()) return;
@@ -36,7 +34,7 @@ async function redeem() {
     showToast({
       variant: 'error',
       title: '受け取れませんでした',
-      lines: [e instanceof Error ? e.message : String(e)],
+      lines: [errorText(e)],
       icon: 'item',
     });
   } finally {
@@ -47,7 +45,6 @@ async function redeem() {
 
 <template>
   <div class="facility-page tokuten-page">
-    <Toast :toast="toast" @close="closeToast" />
     <button class="btn back" @click="emit('back')">街に戻る</button>
 
     <div class="tokuten-header">

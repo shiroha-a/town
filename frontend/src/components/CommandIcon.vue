@@ -96,5 +96,16 @@ defineProps<{ name: string }>();
       <line x1="4" y1="17" x2="20" y2="17" />
       <circle cx="15" cy="17" r="2.5" />
     </g>
+    <!-- 通知(成功: チェック) -->
+    <g v-else-if="name === 'ok'">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M8 12.5l2.8 2.8L16 9.5" />
+    </g>
+    <!-- 通知(失敗: 感嘆符) -->
+    <g v-else-if="name === 'error'">
+      <circle cx="12" cy="12" r="9" />
+      <line x1="12" y1="7.5" x2="12" y2="13" />
+      <line x1="12" y1="16.5" x2="12.01" y2="16.5" />
+    </g>
   </svg>
 </template>

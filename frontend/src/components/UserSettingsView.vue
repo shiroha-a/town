@@ -4,8 +4,7 @@ import { api, type Player, type UserSettings, type PushPrefs } from '../api';
 import { pushSupported, permission, subscribe, unsubscribe, deviceSubscribed } from '../notify';
 import { unregisterServiceWorker } from '../pwa';
 import ToggleSwitch from './ToggleSwitch.vue';
-import Toast from './Toast.vue';
-import { useToast } from '../toast';
+import { notifyOk, notifyError } from '../toast';
 
 // 住民が自分で変えられる設定。管理者が街全体を変える「ゲーム設定」とは別物で、
 // ここは自分のアカウントの話だけを置く。
@@ -13,9 +12,6 @@ const props = defineProps<{ player: Player }>();
 const emit = defineEmits<{ update: [player: Player]; back: []; retired: [] }>();
 
 const form = ref<UserSettings | null>(null);
-// 完了はトーストで知らせる(他の画面と同じ扱い)。エラーは画面に残す。
-const { toast, showToast, closeToast } = useToast();
-const error = ref('');
 const busy = ref(false);
 
 // 退会は取り消せないので、名前を打ち込ませてから実行する。
@@ -38,34 +34,23 @@ const thisDevice = ref(false);
 async function toggleDevice() {
   if (pushBusy.value) return;
   pushBusy.value = true;
-  error.value = '';
   try {
     if (thisDevice.value) {
       await unsubscribe(props.player.id);
       thisDevice.value = false;
-      showToast({
-        variant: 'item',
-        title: 'この端末への通知を止めました',
-        lines: [],
-        icon: 'usersettings',
-      });
+      notifyOk('この端末への通知を止めました', [], 'usersettings');
     } else {
       const ok = await subscribe(props.player.id);
       if (!ok) {
-        error.value = 'ブラウザで通知が許可されませんでした。';
+        notifyError('ブラウザで通知が許可されませんでした。', undefined, 'usersettings');
         return;
       }
       thisDevice.value = true;
-      showToast({
-        variant: 'item',
-        title: 'この端末で通知を受け取ります',
-        lines: [],
-        icon: 'usersettings',
-      });
+      notifyOk('この端末で通知を受け取ります', [], 'usersettings');
     }
     await loadPush();
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
+    notifyError('通知の設定を変えられませんでした', e, 'usersettings');
   } finally {
     pushBusy.value = false;
   }
@@ -84,7 +69,6 @@ async function loadPush() {
 async function togglePush(key: 'mail' | 'energy' | 'work') {
   if (!push.value || pushBusy.value) return;
   pushBusy.value = true;
-  error.value = '';
   const next = { ...push.value, [key]: !push.value[key] };
   try {
     push.value = await api.updatePushPrefs(props.player.id, {
@@ -92,14 +76,9 @@ async function togglePush(key: 'mail' | 'energy' | 'work') {
       energy: next.energy,
       work: next.work,
     });
-    showToast({
-      variant: 'item',
-      title: '通知の設定を保存しました',
-      lines: [],
-      icon: 'usersettings',
-    });
+    notifyOk('通知の設定を保存しました', [], 'usersettings');
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
+    notifyError('通知の設定を変えられませんでした', e, 'usersettings');
   } finally {
     pushBusy.value = false;
   }
@@ -110,7 +89,7 @@ async function load() {
   try {
     form.value = await api.userSettings(props.player.id);
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
+    notifyError('設定を読み込めませんでした', e, 'usersettings');
   }
 }
 onMounted(load);
@@ -118,13 +97,12 @@ onMounted(load);
 async function save() {
   if (!form.value || busy.value) return;
   busy.value = true;
-  error.value = '';
   try {
     form.value = await api.updateUserSettings(props.player.id, form.value);
-    showToast({ variant: 'item', title: '保存しました', lines: [], icon: 'usersettings' });
+    notifyOk('保存しました', [], 'usersettings');
     emit('update', await api.getPlayer(props.player.id));
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
+    notifyError('保存できませんでした', e, 'usersettings');
   } finally {
     busy.value = false;
   }
@@ -139,7 +117,6 @@ function useMisskeyName() {
 async function clearCaches() {
   if (busy.value) return;
   busy.value = true;
-  error.value = '';
   try {
     await unregisterServiceWorker();
   } catch {
@@ -151,18 +128,12 @@ async function clearCaches() {
 async function refreshMisskey() {
   if (busy.value) return;
   busy.value = true;
-  error.value = '';
   try {
     await api.refreshMisskeyProfile(props.player.id);
     await load();
-    showToast({
-      variant: 'item',
-      title: 'Misskeyの情報を取り直しました',
-      lines: [],
-      icon: 'usersettings',
-    });
+    notifyOk('Misskeyの情報を取り直しました', [], 'usersettings');
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
+    notifyError('Misskeyの情報を取り直せませんでした', e, 'usersettings');
   } finally {
     busy.value = false;
   }
@@ -171,12 +142,11 @@ async function refreshMisskey() {
 async function retire() {
   if (busy.value) return;
   busy.value = true;
-  error.value = '';
   try {
     await api.retire(props.player.id, retireConfirm.value);
     emit('retired');
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
+    notifyError('引っ越しできませんでした', e, 'usersettings');
   } finally {
     busy.value = false;
   }
@@ -193,10 +163,6 @@ async function retire() {
       </div>
       <div class="title">ユーザー設定</div>
     </div>
-
-    <Toast :toast="toast" @close="closeToast" />
-    <div v-if="error" class="message error">{{ error }}</div>
-
     <div v-if="form" class="us-body">
       <section class="us-sec">
         <div class="us-head">街での名前</div>
@@ -413,9 +379,6 @@ async function retire() {
 }
 .retire-form {
   margin-top: 6px;
-}
-.message {
-  margin-bottom: 8px;
 }
 @media (max-width: 700px) {
   .us-header .title {

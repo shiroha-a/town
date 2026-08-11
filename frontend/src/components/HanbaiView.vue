@@ -2,8 +2,7 @@
 import { ref, onMounted } from 'vue';
 import { api, type Player, type ShopItem } from '../api';
 import { PARAM_COLUMNS } from '../params';
-import Toast from './Toast.vue';
-import { useToast, buildEffectLines } from '../toast';
+import { showToast, buildEffectLines, notifyError, errorText } from '../toast';
 
 // 自動販売機: 日用品を毎日ランダム3品陳列する(レガシー hanbai1.cgi)。家システムに非依存。
 const props = defineProps<{ player: Player }>();
@@ -11,17 +10,13 @@ const emit = defineEmits<{ update: [player: Player]; back: [] }>();
 
 const yen = (n: number) => n.toLocaleString('ja-JP');
 const items = ref<ShopItem[]>([]);
-const message = ref('');
-const kind = ref<'ok' | 'error'>('ok');
 const busy = ref(false);
-const { toast, showToast, closeToast } = useToast();
 
 onMounted(async () => {
   try {
     items.value = await api.facilityMenu('hanbai');
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
-    kind.value = 'error';
+    notifyError('商品を読み込めませんでした', e);
   }
 });
 
@@ -42,7 +37,7 @@ async function buy(it: ShopItem) {
     showToast({
       variant: 'error',
       title: '購入できませんでした',
-      lines: [e instanceof Error ? e.message : String(e)],
+      lines: [errorText(e)],
       icon: 'item',
     });
   } finally {
@@ -53,7 +48,6 @@ async function buy(it: ShopItem) {
 
 <template>
   <div class="facility-page hanbai-page">
-    <Toast :toast="toast" @close="closeToast" />
     <button class="btn back" @click="emit('back')">街に戻る</button>
 
     <div class="hanbai-header">
@@ -63,8 +57,6 @@ async function buy(it: ShopItem) {
       </div>
       <div class="title">自動販売機</div>
     </div>
-
-    <div v-if="message" :class="['message', kind]" data-test="message">{{ message }}</div>
 
     <div class="panel-white">
       <div class="table-scroll sticky-table">

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onUnmounted } from 'vue';
 import { api, type Player, type FightResult } from '../api';
+import { notifyError } from '../toast';
 import { PARAM_LABEL } from '../params';
 
 // ストリートファイト(レガシー game.cgi mode=battle)。通りすがりのモンスターと
@@ -13,7 +14,6 @@ const yen = (n: number) => n.toLocaleString('ja-JP');
 const label = (k: string) => PARAM_LABEL[k] ?? k;
 
 const result = ref<FightResult | null>(null);
-const message = ref('');
 const busy = ref(false);
 // 何ターン目まで見せたか。1ターンずつ出して殴り合いに見せる。
 const shown = ref(0);
@@ -54,7 +54,6 @@ function skip() {
 async function fight() {
   if (busy.value) return;
   busy.value = true;
-  message.value = '';
   stopPlayback();
   result.value = null;
   shown.value = 0;
@@ -70,7 +69,7 @@ async function fight() {
       shown.value++;
     }, 700);
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
+    notifyError('戦えませんでした', e, 'battle');
   } finally {
     busy.value = false;
   }
@@ -90,8 +89,6 @@ async function fight() {
       </div>
       <div class="title">ストリート<br />ファイト</div>
     </div>
-
-    <div v-if="message" class="message error" data-test="message">{{ message }}</div>
 
     <div class="panel-white sf-start">
       <button class="btn primary" :disabled="busy" data-test="fight" @click="fight">

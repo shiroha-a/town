@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { api, type Player, type ShopItem } from '../api';
+import { notifyError } from '../toast';
 import PowerBar from './PowerBar.vue';
 import { projectedPower } from '../power';
 import { requestWakeLock, releaseWakeLock } from '../wakelock';
@@ -10,8 +11,6 @@ const emit = defineEmits<{ update: [player: Player]; back: [] }>();
 
 const yen = (n: number) => n.toLocaleString('ja-JP');
 const baths = ref<ShopItem[]>([]);
-const message = ref('');
-const kind = ref<'ok' | 'error'>('ok');
 const busy = ref(false);
 
 // 画面フェーズ。入浴ボタンを押すと結果画面(bathing)に移る。
@@ -45,8 +44,7 @@ onMounted(async () => {
   try {
     baths.value = await api.facilityMenu('onsen');
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
-    kind.value = 'error';
+    notifyError('お風呂を読み込めませんでした', e);
   }
 });
 onUnmounted(() => {
@@ -141,7 +139,6 @@ function stopPolling() {
 
 async function bathe(bath: ShopItem) {
   busy.value = true;
-  message.value = '';
   // 入浴開始時のパワーを基準にし、以降の回復量を差分で表示する。
   baseEnergy.value = props.player.status.energy;
   baseNou.value = props.player.status.nou_energy;
@@ -154,8 +151,7 @@ async function bathe(bath: ShopItem) {
     requestWakeLock();
     startPolling();
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
-    kind.value = 'error';
+    notifyError('お風呂に入れませんでした', e);
   } finally {
     busy.value = false;
   }
@@ -176,7 +172,6 @@ async function leaveOnsen() {
 async function backToSelect() {
   await leaveOnsen();
   phase.value = 'select';
-  message.value = '';
 }
 
 // 街へ戻る(入浴中なら通常速度に戻してから)。
@@ -234,8 +229,6 @@ async function backToTown() {
         ／ 身体パワー {{ player.status.energy }}/{{ player.status.energy_max }} ・頭脳パワー
         {{ player.status.nou_energy }}/{{ player.status.nou_energy_max }}
       </div>
-
-      <div v-if="message" :class="['message', kind]" data-test="message">{{ message }}</div>
 
       <div class="onsen-note">
         風呂は自然回復を「回復倍率」ぶん加速します。入浴中はその速さで回復し続け、満タンになるか街に戻ると終了します。

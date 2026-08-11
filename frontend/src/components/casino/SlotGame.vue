@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { api, type Player } from '../../api';
+import { notifyError } from '../../toast';
 
 const props = defineProps<{ player: Player }>();
 const emit = defineEmits<{ update: [player: Player] }>();
@@ -9,7 +10,6 @@ const yen = (n: number) => n.toLocaleString('ja-JP');
 const bets = [500, 1000, 5000, 10000, 50000, 100000];
 const bet = ref(bets[0]);
 const busy = ref(false);
-const message = ref('');
 
 // 絵柄0..6の表示トークン/名称/倍率。slot.goのslotMultipliersと対応させる。
 const symTokens = ['チェ', 'ベル', 'スイ', 'プラ', 'ＢＡＲ', 'ダイ', '７'];
@@ -85,14 +85,13 @@ const winCells = computed(() => {
 
 async function play() {
   busy.value = true;
-  message.value = '';
   try {
     const res = await api.casinoPlay(props.player.id, 'slot', bet.value, {});
     emit('update', res.player);
     const d = res.detail as unknown as SlotDetail;
     result.value = { ...d, win: res.win, net: res.payout - bet.value };
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
+    notifyError('スロットで遊べませんでした', e);
   } finally {
     busy.value = false;
   }
@@ -164,8 +163,6 @@ async function play() {
         </tr>
       </tbody>
     </table>
-
-    <div v-if="message" class="message error">{{ message }}</div>
   </div>
 </template>
 

@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { api, type Player, type ShopItem } from '../api';
-import Toast from './Toast.vue';
-import { useToast, buildEffectLines } from '../toast';
+import { showToast, buildEffectLines, notifyError, errorText } from '../toast';
 
 // 学校: 頭脳科目を1日1回だけ大きく伸ばす施設。頭脳パワー(nou_energy)と現金を消費する。
 const props = defineProps<{ player: Player }>();
@@ -22,10 +21,7 @@ const SUBJECTS: { key: string; label: string }[] = [
 ];
 
 const menu = ref<ShopItem[]>([]);
-const message = ref('');
-const kind = ref<'ok' | 'error'>('ok');
 const busy = ref(false);
-const { toast, showToast, closeToast } = useToast();
 
 // 頭脳消費は effect の nou_energy 負値。ジムの身体消費と同じくマイナス表記で見せる。
 const brainCost = (item: ShopItem) => Math.min(0, item.params['nou_energy'] ?? 0);
@@ -34,8 +30,7 @@ onMounted(async () => {
   try {
     menu.value = await api.facilityMenu('school');
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
-    kind.value = 'error';
+    notifyError('講座を読み込めませんでした', e);
   }
 });
 
@@ -55,7 +50,7 @@ async function attend(item: ShopItem) {
     showToast({
       variant: 'error',
       title: '受講できませんでした',
-      lines: [e instanceof Error ? e.message : String(e)],
+      lines: [errorText(e)],
       icon: 'item',
     });
   } finally {
@@ -66,7 +61,6 @@ async function attend(item: ShopItem) {
 
 <template>
   <div class="facility-page school-page">
-    <Toast :toast="toast" @close="closeToast" />
     <button class="btn back" @click="emit('back')">街に戻る</button>
 
     <div class="fac-header">
@@ -77,8 +71,6 @@ async function attend(item: ShopItem) {
       </div>
       <div class="title">学校</div>
     </div>
-
-    <div v-if="message" :class="['message', kind]" data-test="message">{{ message }}</div>
 
     <div class="panel-white">
       <div class="table-scroll sticky-table">

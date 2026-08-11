@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { api, type Player } from '../../api';
+import { notifyError } from '../../toast';
 
 const props = defineProps<{ player: Player }>();
 const emit = defineEmits<{ update: [player: Player] }>();
@@ -28,7 +29,6 @@ const kibouOptions = [
 const saisengaku = ref(4); // 既定は100円(レガシーのselected)。
 const kibou = ref('gaku');
 const busy = ref(false);
-const message = ref('');
 
 interface OmikujiFortune {
   kibou: string;
@@ -79,7 +79,6 @@ const resultClass = computed(() => {
 async function draw() {
   if (busy.value) return;
   busy.value = true;
-  message.value = '';
   try {
     const res = await api.casinoPlay(props.player.id, 'omikuji', 0, {
       saisengaku: saisengaku.value,
@@ -88,7 +87,7 @@ async function draw() {
     emit('update', res.player);
     result.value = res.detail as unknown as OmikujiDetail;
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
+    notifyError('おみくじで遊べませんでした', e);
   } finally {
     busy.value = false;
   }
@@ -152,8 +151,6 @@ async function draw() {
       </label>
       <button class="btn" :disabled="busy" data-test="draw" @click="draw">おみくじを引く</button>
     </div>
-
-    <div v-if="message" class="message error">{{ message }}</div>
   </div>
 </template>
 

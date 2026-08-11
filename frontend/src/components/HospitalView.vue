@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { api, type Player } from '../api';
+import { showToast, notifyError, buildEffectLines } from '../toast';
 
 const props = defineProps<{ player: Player }>();
 const emit = defineEmits<{ update: [player: Player]; back: [] }>();
 
 const yen = (n: number) => n.toLocaleString('ja-JP');
-const message = ref('');
-const kind = ref<'ok' | 'error'>('ok');
 const busy = ref(false);
 
 // 治療費は表示用。実際の徴収額はサーバが病名から権威的に決める。
@@ -28,14 +27,18 @@ const fee = computed(() => (isSick.value ? (FEES[diseaseName.value] ?? HEALTHY_F
 
 async function treat() {
   busy.value = true;
-  message.value = '';
+  const before = props.player;
+  const sick = isSick.value;
   try {
-    emit('update', await api.hospitalTreat(props.player.id));
-    message.value = isSick.value ? '治療しました。お大事に。' : '元気注射を打ちました。';
-    kind.value = 'ok';
+    const after = await api.hospitalTreat(props.player.id);
+    emit('update', after);
+    showToast({
+      variant: 'ok',
+      title: sick ? '治療しました。お大事に。' : '元気注射を打ちました。',
+      lines: buildEffectLines(before, after),
+    });
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
-    kind.value = 'error';
+    notifyError(sick ? '治療できませんでした' : '元気注射を打てませんでした', e);
   } finally {
     busy.value = false;
   }
@@ -54,8 +57,6 @@ async function treat() {
       </div>
       <div class="title">病　院</div>
     </div>
-
-    <div v-if="message" :class="['message', kind]" data-test="message">{{ message }}</div>
 
     <div class="panel-white">
       <table class="diag-table">

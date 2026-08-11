@@ -9,13 +9,13 @@ import {
   type RankingKey,
   type RankingResult,
 } from '../api';
+import { notifyError } from '../toast';
 import { satietyLabel } from '../params';
 
 const props = defineProps<{ player: Player }>();
 const emit = defineEmits<{ back: [] }>();
 
 const yen = (n: number) => n.toLocaleString('ja-JP');
-const message = ref('');
 
 type Tab = 'roster' | 'news' | 'ranking';
 const tab = ref<Tab>('roster');
@@ -26,7 +26,7 @@ const TABS: { key: Tab; label: string }[] = [
 ];
 
 function fail(e: unknown) {
-  message.value = e instanceof Error ? e.message : String(e);
+  notifyError('役場の情報を読み込めませんでした', e);
 }
 
 // 日時表示。ニュースは年をまたぐので月日+時刻まで。
@@ -104,7 +104,6 @@ async function select(id: number) {
   if (id === selectedId.value) return;
   selectedId.value = id;
   other.value = null;
-  message.value = '';
   if (id !== props.player.id) {
     try {
       other.value = await api.playerProfile(id);
@@ -157,7 +156,6 @@ const rankValue = (v: number) => `${yen(v)}${rank.value?.unit ?? ''}`;
 
 watch(rankKey, loadRanking);
 watch(tab, (t) => {
-  message.value = '';
   if (t === 'news' && !newsLoaded.value) loadNews();
   if (t === 'ranking' && !rank.value) loadRanking();
 });
@@ -197,8 +195,6 @@ onMounted(async () => {
         {{ t.label }}
       </button>
     </div>
-
-    <div v-if="message" class="message error">{{ message }}</div>
 
     <!-- 住民名鑑 -->
     <div v-if="tab === 'roster'" class="profile-layout">

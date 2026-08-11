@@ -2,25 +2,20 @@
 import { ref, onMounted } from 'vue';
 import { api, type Player, type ShopItem } from '../api';
 import { PARAM_COLUMNS, PARAM_COLUMNS_MAIN, PARAM_COLUMNS_POWER, satietyLabel } from '../params';
-import Toast from './Toast.vue';
-import { useToast, buildEffectLines } from '../toast';
+import { showToast, buildEffectLines, notifyError, errorText } from '../toast';
 
 const props = defineProps<{ player: Player }>();
 const emit = defineEmits<{ update: [player: Player]; back: [] }>();
 
 const yen = (n: number) => n.toLocaleString('ja-JP');
 const menu = ref<ShopItem[]>([]);
-const message = ref('');
-const kind = ref<'ok' | 'error'>('ok');
 const busy = ref(false);
-const { toast, showToast, closeToast } = useToast();
 
 onMounted(async () => {
   try {
     menu.value = await api.facilityMenu('syokudou');
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
-    kind.value = 'error';
+    notifyError('メニューを読み込めませんでした', e);
   }
 });
 
@@ -41,7 +36,7 @@ async function eat(food: ShopItem) {
     showToast({
       variant: 'error',
       title: '食べられませんでした',
-      lines: [e instanceof Error ? e.message : String(e)],
+      lines: [errorText(e)],
       icon: 'item',
     });
   } finally {
@@ -52,7 +47,6 @@ async function eat(food: ShopItem) {
 
 <template>
   <div class="facility-page syokudou-page">
-    <Toast :toast="toast" @close="closeToast" />
     <button class="btn back" @click="emit('back')">街に戻る</button>
 
     <div class="syokudou-header">
@@ -64,8 +58,6 @@ async function eat(food: ShopItem) {
       </div>
       <div class="title">食　堂</div>
     </div>
-
-    <div v-if="message" :class="['message', kind]" data-test="message">{{ message }}</div>
 
     <div class="panel-white">
       <div class="table-scroll sticky-table">

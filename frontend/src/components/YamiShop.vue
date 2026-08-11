@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import { api, type Player, type YamiView, type YamiInventoryItem } from '../api';
-import Toast from './Toast.vue';
-import { useToast } from '../toast';
+import { showToast, errorText } from '../toast';
 
 // 持ち物販売店=闇市(レガシーmotimono_hanbai/mothimonohanbai.cgi)。
 // 売り場: 1行=1品、種別ごとにまとめ、買うボタン+支払い方法。家主には倉庫品も表示。
@@ -12,7 +11,6 @@ const emit = defineEmits<{ update: [player: Player] }>();
 
 const yen = (n: number) => n.toLocaleString('ja-JP');
 const busy = ref(false);
-const { toast, showToast, closeToast } = useToast();
 
 const view = ref<YamiView | null>(null);
 const mode = ref<'shop' | 'list'>('shop');
@@ -90,7 +88,7 @@ async function buy(listingId: number) {
     showToast({
       variant: 'error',
       title: '購入できませんでした',
-      lines: [e instanceof Error ? e.message : String(e)],
+      lines: [errorText(e)],
       icon: 'item',
     });
   } finally {
@@ -122,7 +120,7 @@ async function listItem(it: YamiInventoryItem, warehouse: boolean) {
     showToast({
       variant: 'error',
       title: '出品できませんでした',
-      lines: [e instanceof Error ? e.message : String(e)],
+      lines: [errorText(e)],
       icon: 'item',
     });
   } finally {
@@ -133,7 +131,6 @@ async function listItem(it: YamiInventoryItem, warehouse: boolean) {
 
 <template>
   <div v-if="view" class="yami">
-    <Toast :toast="toast" @close="closeToast" />
     <!-- タイトル行(レガシー: 説明+闇市の黒箱) -->
     <table class="yami-head">
       <tr>

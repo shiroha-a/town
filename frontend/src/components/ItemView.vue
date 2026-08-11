@@ -2,14 +2,12 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { api, type Player, type ItemStack } from '../api';
 import { PARAM_COLUMNS, PARAM_COLUMNS_MAIN, PARAM_COLUMNS_POWER } from '../params';
-import Toast from './Toast.vue';
-import { useToast, buildEffectLines } from '../toast';
+import { showToast, buildEffectLines, errorText } from '../toast';
 
 const props = defineProps<{ player: Player }>();
 const emit = defineEmits<{ update: [player: Player]; back: [] }>();
 
 const busy = ref(false);
-const { toast, showToast, closeToast } = useToast();
 
 // カテゴリ別にグループ化(デパートと同じカテゴリ見出し付き表を再現)
 const grouped = computed(() => {
@@ -116,7 +114,7 @@ async function useAll() {
     showToast({
       variant: 'error',
       title: '使えませんでした',
-      lines: [e instanceof Error ? e.message : String(e)],
+      lines: [errorText(e)],
       icon: 'item',
     });
   } finally {
@@ -144,7 +142,7 @@ async function use(it: ItemStack) {
     showToast({
       variant: 'error',
       title: '使えませんでした',
-      lines: [e instanceof Error ? e.message : String(e)],
+      lines: [errorText(e)],
       icon: 'item',
     });
   } finally {
@@ -155,7 +153,6 @@ async function use(it: ItemStack) {
 
 <template>
   <div class="facility-page item-page">
-    <Toast :toast="toast" @close="closeToast" />
     <button class="btn back" @click="emit('back')">街に戻る</button>
     <div class="item-header">
       <div class="lead">

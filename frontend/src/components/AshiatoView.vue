@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { api, type Player, type AttendanceBoard } from '../api';
+import { notifyError } from '../toast';
 
 // 足あと(出席簿): 縦=住人、横=日付のマトリクス。来た日は足跡、来なかった日は×。
 defineProps<{ player: Player }>();
 const emit = defineEmits<{ back: [] }>();
 
 const board = ref<AttendanceBoard | null>(null);
-const message = ref('');
 
 const cellMark = (c: string) => (c === 'present' ? '👣' : c === 'absent' ? '×' : '');
 
@@ -15,7 +15,7 @@ onMounted(async () => {
   try {
     board.value = await api.attendanceBoard();
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
+    notifyError('足あと帳を読み込めませんでした', e, 'ashiato');
   }
 });
 </script>
@@ -31,8 +31,6 @@ onMounted(async () => {
       </div>
       <div class="title">足あと帳</div>
     </div>
-
-    <div v-if="message" class="message error">{{ message }}</div>
 
     <div v-if="board" class="ashi-body">
       <div class="panel-white">

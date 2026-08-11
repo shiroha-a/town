@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { api, type Player } from '../../api';
+import { notifyError } from '../../toast';
 
 const props = defineProps<{ player: Player }>();
 const emit = defineEmits<{ update: [player: Player] }>();
@@ -12,7 +13,6 @@ const digitOptions = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
 // 6桁の予想(各位置0-9)。旧loto.cgiのloto1..loto6に対応。
 const picks = ref<number[]>([0, 0, 0, 0, 0, 0]);
 const busy = ref(false);
-const message = ref('');
 // 一致桁数→倍率の対応表(表示用)。
 const paytable = [
   { hit: 1, bai: 2 },
@@ -33,7 +33,6 @@ const result = ref<{
 
 async function play() {
   busy.value = true;
-  message.value = '';
   try {
     const res = await api.casinoPlay(props.player.id, 'loto', bet.value, { digits: picks.value });
     emit('update', res.player);
@@ -45,7 +44,7 @@ async function play() {
     };
     result.value = { ...d, win: res.win, net: res.win ? res.payout - bet.value : -bet.value };
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
+    notifyError('ロトで遊べませんでした', e);
   } finally {
     busy.value = false;
   }
@@ -112,8 +111,6 @@ async function play() {
         </tr>
       </tbody>
     </table>
-
-    <div v-if="message" class="message error">{{ message }}</div>
   </div>
 </template>
 

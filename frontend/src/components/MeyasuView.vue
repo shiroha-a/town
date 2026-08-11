@@ -8,8 +8,7 @@ import {
   type FeedbackPost,
   type FeedbackDetail,
 } from '../api';
-import Toast from './Toast.vue';
-import { useToast } from '../toast';
+import { showToast, notifyOk, notifyError, errorText } from '../toast';
 
 // 目安箱: 不具合・要望・質問の投稿所。GitHub issueのうち、この規模で効く要素
 // (種別・状態・コメント・賛同)だけを持つ。状態を動かせるのは運営だけ。
@@ -17,8 +16,6 @@ const props = defineProps<{ player: Player }>();
 const emit = defineEmits<{ back: [] }>();
 
 const isAdmin = computed(() => props.player.roles.includes('admin'));
-const { toast, showToast, closeToast } = useToast();
-const message = ref('');
 const busy = ref(false);
 
 const posts = ref<FeedbackPost[]>([]);
@@ -44,7 +41,7 @@ async function loadList() {
   try {
     posts.value = await api.feedbackList(filterKind.value, filterStatus.value, sort.value);
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
+    notifyError('目安箱を読み込めませんでした', e);
   }
 }
 onMounted(loadList);
@@ -55,7 +52,7 @@ async function open(pid: number) {
     detail.value = await api.feedbackGet(pid);
     commentDraft.value = '';
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
+    notifyError('投稿を開けませんでした', e);
   } finally {
     busy.value = false;
   }
@@ -69,7 +66,6 @@ function closeDetail() {
 async function run(fn: () => Promise<void>) {
   if (busy.value) return;
   busy.value = true;
-  message.value = '';
   try {
     await fn();
     await loadList();
@@ -77,7 +73,7 @@ async function run(fn: () => Promise<void>) {
     showToast({
       variant: 'error',
       title: 'できませんでした',
-      lines: [e instanceof Error ? e.message : String(e)],
+      lines: [errorText(e)],
       icon: 'item',
     });
   } finally {
@@ -96,7 +92,7 @@ async function submit() {
     detail.value = d;
     formOpen.value = false;
     draft.value = { kind: 'bug', title: '', body: '' };
-    showToast({ variant: 'item', title: '投稿しました', lines: [], icon: 'item' });
+    notifyOk('投稿しました');
   });
 }
 
@@ -143,7 +139,6 @@ const canDelete = (authorID: number | null) => isAdmin.value || authorID === pro
 
 <template>
   <div class="facility-page my-page">
-    <Toast :toast="toast" @close="closeToast" />
     <button class="btn back" @click="emit('back')">街に戻る</button>
 
     <div class="my-header">
@@ -154,8 +149,6 @@ const canDelete = (authorID: number | null) => isAdmin.value || authorID === pro
       </div>
       <div class="title">目安箱</div>
     </div>
-
-    <div v-if="message" class="message error">{{ message }}</div>
 
     <!-- 詳細 -->
     <template v-if="detail">

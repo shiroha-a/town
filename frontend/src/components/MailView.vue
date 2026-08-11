@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { api, type Player, type MailMessage, type PublicSummary, type Gift } from '../api';
+import { notifyOk, notifyError } from '../toast';
 
 // メール: 住人あての1対1メッセージ。受信箱・送信箱を1画面にまとめて表示する。
 const props = defineProps<{ player: Player }>();
@@ -14,8 +15,6 @@ const recipientId = ref<number | ''>('');
 const gifts = ref<Gift[]>([]);
 const giftId = ref<number | ''>('');
 const body = ref('');
-const message = ref('');
-const kind = ref<'ok' | 'error'>('ok');
 const busy = ref(false);
 
 const fmtDate = (iso: string) => new Date(iso).toLocaleString('ja-JP', { hour12: false });
@@ -40,18 +39,15 @@ onMounted(async () => {
 });
 
 function fail(e: unknown) {
-  message.value = e instanceof Error ? e.message : String(e);
-  kind.value = 'error';
+  notifyError('メールの操作に失敗しました', e, 'mail');
 }
 
 async function send() {
   if (recipientId.value === '' || !body.value.trim()) {
-    message.value = '宛先とメッセージを入力してください。';
-    kind.value = 'error';
+    notifyError('宛先とメッセージを入力してください。', undefined, 'mail');
     return;
   }
   busy.value = true;
-  message.value = '';
   try {
     await api.mailSend(
       props.player.id,
@@ -60,8 +56,7 @@ async function send() {
       giftId.value === '' ? 0 : giftId.value,
     );
     giftId.value = '';
-    message.value = 'メッセージを送信しました。';
-    kind.value = 'ok';
+    notifyOk('メッセージを送信しました', [], 'mail');
     body.value = '';
     await load();
   } catch (e) {
@@ -108,8 +103,6 @@ async function del(m: MailMessage) {
       </div>
       <div class="title">メール</div>
     </div>
-
-    <div v-if="message" :class="['message', kind]" data-test="message">{{ message }}</div>
 
     <!-- 送信フォーム -->
     <div class="panel-white send-form">

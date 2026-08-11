@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { api, type Player } from '../../api';
+import { notifyError } from '../../toast';
 
 const props = defineProps<{ player: Player }>();
 const emit = defineEmits<{ update: [player: Player] }>();
@@ -10,7 +11,6 @@ const cardCount = 3;
 const cards = Array.from({ length: cardCount }, (_, i) => i + 1);
 
 const busy = ref(false);
-const message = ref('');
 const played = ref(false);
 const selected = ref(0);
 
@@ -37,7 +37,6 @@ function cardRank(card: number): string {
 async function play(card: number) {
   if (busy.value || played.value) return;
   busy.value = true;
-  message.value = '';
   selected.value = card;
   try {
     // 福引きは無料のため掛け金は0で呼ぶ。
@@ -46,7 +45,7 @@ async function play(card: number) {
     result.value = res.detail as unknown as FukubikiDetail;
     played.value = true;
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
+    notifyError('福引きで遊べませんでした', e);
     selected.value = 0;
   } finally {
     busy.value = false;
@@ -57,7 +56,6 @@ function reset() {
   result.value = null;
   played.value = false;
   selected.value = 0;
-  message.value = '';
 }
 </script>
 
@@ -91,8 +89,6 @@ function reset() {
     <div v-if="played" class="cg-controls">
       <button class="btn" :disabled="busy" data-test="again" @click="reset">もう一度引く</button>
     </div>
-
-    <div v-if="message" class="message error">{{ message }}</div>
   </div>
 </template>
 

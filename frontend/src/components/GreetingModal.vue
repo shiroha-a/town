@@ -3,6 +3,7 @@ import CommandIcon from './CommandIcon.vue';
 import EmojiPicker from './EmojiPicker.vue';
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { api, type Player } from '../api';
+import { notifyError } from '../toast';
 
 // あいさつのSNS風投稿モーダル(旧ChatViewの専用ページを置き換え)。
 // 投稿フォームのみのコンパクトなモーダル。最新の投稿は街トップの
@@ -53,26 +54,21 @@ function insertEmoji(code: string) {
 }
 const color = ref('#333333');
 const janken = ref('none');
-const message = ref('');
-const kind = ref<'ok' | 'error'>('ok');
 const busy = ref(false);
 
 const yen = (n: number) => n.toLocaleString('ja-JP');
 const remain = computed(() => MAX_LEN - body.value.length);
 
 function fail(e: unknown) {
-  message.value = e instanceof Error ? e.message : String(e);
-  kind.value = 'error';
+  notifyError('投稿できませんでした', e, 'aisatu');
 }
 
 async function post() {
   if (!body.value.trim()) {
-    message.value = 'ひとことを入力してください。';
-    kind.value = 'error';
+    notifyError('ひとことを入力してください。', undefined, 'aisatu');
     return;
   }
   busy.value = true;
-  message.value = '';
   try {
     const res = await api.postGreeting(
       props.player.id,
@@ -148,7 +144,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
         <div class="gm-hint">
           投稿すると報酬がもらえます（ジャンケンに勝つと倍、負けると半分）。「宣伝」は2万円、NGワードは罰金。
         </div>
-        <div v-if="message" :class="['gm-message', kind]">{{ message }}</div>
       </div>
     </div>
   </div>
@@ -277,19 +272,5 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
   font-size: 10px;
   color: #999;
   line-height: 1.5;
-}
-.gm-message {
-  margin-top: 6px;
-  font-size: 12px;
-  padding: 5px 8px;
-  border-radius: 4px;
-}
-.gm-message.ok {
-  background: #eef7e8;
-  color: #2a6a2a;
-}
-.gm-message.error {
-  background: #fbe9e9;
-  color: #b33;
 }
 </style>

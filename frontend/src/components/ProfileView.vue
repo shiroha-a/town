@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue';
 import { api, type Player, type PublicSummary, type MisskeyProfileResp } from '../api';
 import RichText from './RichText.vue';
+import { notifyOk, notifyError } from '../toast';
 
 // prof施設。役場の住民名鑑がゲーム内ステータスを見る場所なのに対し、ここは
 // 住民のMisskey側の顔を見る場所。ゲーム内からリモートフォローもできる。
@@ -11,7 +12,6 @@ const emit = defineEmits<{ back: [] }>();
 const roster = ref<PublicSummary[]>([]);
 const selectedId = ref(props.player.id);
 const data = ref<MisskeyProfileResp | null>(null);
-const message = ref('');
 const loading = ref(false);
 const busy = ref(false);
 
@@ -22,13 +22,12 @@ const follow = computed(() => data.value?.follow ?? null);
 const shownName = computed(() => prof.value?.name?.trim() || prof.value?.username || '');
 
 function fail(e: unknown) {
-  message.value = e instanceof Error ? e.message : String(e);
+  notifyError('プロフィールを取得できませんでした', e, 'emoji');
 }
 
 async function select(id: number) {
   selectedId.value = id;
   data.value = null;
-  message.value = '';
   loading.value = true;
   try {
     data.value = await api.misskeyProfile(id);
@@ -42,10 +41,9 @@ async function select(id: number) {
 async function doFollow() {
   if (busy.value) return;
   busy.value = true;
-  message.value = '';
   try {
     const res = await api.misskeyFollow(selectedId.value);
-    message.value = res.message;
+    notifyOk(res.message, [], 'emoji');
     if (data.value?.follow) {
       data.value.follow.following = res.following;
       data.value.follow.pending = res.pending;
@@ -62,10 +60,9 @@ async function doFollow() {
 async function doUnfollow() {
   if (busy.value) return;
   busy.value = true;
-  message.value = '';
   try {
     const res = await api.misskeyUnfollow(selectedId.value);
-    message.value = res.message;
+    notifyOk(res.message, [], 'emoji');
     if (data.value?.follow) {
       data.value.follow.following = res.following;
       data.value.follow.pending = false;
@@ -104,8 +101,6 @@ onMounted(async () => {
       </div>
       <div class="title">プロフィール</div>
     </div>
-
-    <div v-if="message" class="message" :class="{ error: !data }">{{ message }}</div>
 
     <div class="prof-layout">
       <div class="roster">
@@ -403,9 +398,6 @@ onMounted(async () => {
 }
 .stale {
   color: #cc6600;
-}
-.message {
-  margin-bottom: 8px;
 }
 /* モバイル: 一覧とカードを縦に積む */
 @media (max-width: 700px) {

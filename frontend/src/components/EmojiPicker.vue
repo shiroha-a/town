@@ -2,6 +2,7 @@
 import ToggleSwitch from './ToggleSwitch.vue';
 import { ref, computed, watch, onMounted } from 'vue';
 import { api, type PickerEmoji } from '../api';
+import { notifyError } from '../toast';
 import { rememberEmoji } from '../emoji';
 
 // カスタム絵文字のピッカー。インスタンスによっては1000個近くあるので、
@@ -19,7 +20,6 @@ const items = ref<PickerEmoji[]>([]);
 const category = ref('');
 const query = ref('');
 const loading = ref(false);
-const message = ref('');
 const busyName = ref('');
 // 判定済みの絵文字。'ok' か拒否理由が入る。使えないものに印を付けるために持つ。
 const verdicts = ref<Record<string, string>>({});
@@ -67,7 +67,6 @@ const shown = computed(() => filtered.value.slice(0, MAX_SHOWN));
 
 async function load(h?: string) {
   loading.value = true;
-  message.value = '';
   try {
     const res = await api.emojiList(h);
     host.value = res.host;
@@ -76,7 +75,7 @@ async function load(h?: string) {
     verdicts.value = res.verdicts ?? {};
     category.value = '';
   } catch (e) {
-    message.value = e instanceof Error ? e.message : String(e);
+    notifyError('絵文字を読み込めませんでした', e, 'emoji');
     items.value = [];
   } finally {
     loading.value = false;
@@ -86,11 +85,10 @@ async function load(h?: string) {
 async function pick(e: PickerEmoji) {
   if (busyName.value) return;
   busyName.value = e.name;
-  message.value = '';
   try {
     const res = await api.resolveEmoji(host.value, e.name);
     if (!res.allowed) {
-      message.value = res.message ?? 'この絵文字は使えません。';
+      notifyError(res.message ?? 'この絵文字は使えません。', undefined, 'emoji');
       // その場で印を付ける。押すまで分からないままにしない。
       verdicts.value = { ...verdicts.value, [e.name]: res.reason ?? 'no_license' };
       return;
@@ -99,7 +97,7 @@ async function pick(e: PickerEmoji) {
     if (res.emoji) rememberEmoji(res.emoji);
     emit('pick', res.shortcode ?? `:${e.name}@${host.value}:`);
   } catch (err) {
-    message.value = err instanceof Error ? err.message : String(err);
+    notifyError('絵文字を選べませんでした', err, 'emoji');
   } finally {
     busyName.value = '';
   }
@@ -132,9 +130,6 @@ onMounted(() => load());
         <input v-model="query" class="ep-search" placeholder="名前で検索" spellcheck="false" />
         <ToggleSwitch v-model="hideUnusable" label="使えないものを隠す" class="ep-hide" />
       </div>
-
-      <div v-if="message" class="ep-message">{{ message }}</div>
-
       <div class="ep-body">
         <div v-if="loading" class="ep-note">読み込んでいます…</div>
         <template v-else>
@@ -233,13 +228,6 @@ onMounted(() => load());
   color: #666;
   white-space: nowrap;
   cursor: pointer;
-}
-.ep-message {
-  background: #ffeeee;
-  border-bottom: 1px solid #ecc;
-  color: #a33;
-  font-size: 12px;
-  padding: 6px 8px;
 }
 .ep-body {
   flex: 1 1 auto;

@@ -13,10 +13,9 @@ import {
   type HouseShopItem,
   type BbsPost,
 } from '../api';
-import Toast from './Toast.vue';
 import YamiShop from './YamiShop.vue';
 import CompanyPanel from './CompanyPanel.vue';
-import { useToast } from '../toast';
+import { showToast, notifyOk, errorText } from '../toast';
 
 // 家訪問(レガシー original_house.cgi houmon)。レガシーのレイアウトを再現:
 // 上部1行[街に戻る|コンテンツボタン|さい銭箱] + 中央寄せのコンテンツボックス。
@@ -28,7 +27,6 @@ const emit = defineEmits<{ update: [player: Player]; back: [] }>();
 const yen = (n: number) => n.toLocaleString('ja-JP');
 const busy = ref(false);
 const message = ref('');
-const { toast, showToast, closeToast } = useToast();
 
 const house = ref<HouseCell | null>(null);
 const allHouses = ref<HouseCell[]>([]);
@@ -112,7 +110,7 @@ async function doSaisen() {
     const after = await api.saisen(props.player.id, house.value.id, amt);
     emit('update', after);
     showToast({
-      variant: 'item',
+      variant: 'ok',
       title: 'さい銭しました',
       lines: [`${house.value.owner_name}さんに ${yen(amt)}円 をさい銭しました`],
       icon: 'item',
@@ -121,7 +119,7 @@ async function doSaisen() {
     showToast({
       variant: 'error',
       title: 'さい銭できませんでした',
-      lines: [e instanceof Error ? e.message : String(e)],
+      lines: [errorText(e)],
       icon: 'item',
     });
   } finally {
@@ -204,7 +202,7 @@ async function doBuy() {
     showToast({
       variant: 'error',
       title: '購入できませんでした',
-      lines: [e instanceof Error ? e.message : String(e)],
+      lines: [errorText(e)],
       icon: 'item',
     });
   } finally {
@@ -287,7 +285,7 @@ async function doPostBbs(body: string, parentNo = 0) {
     bbs.value = await api.houseBbs(props.player.id, house.value.id);
     const r = after.bbs_result;
     showToast({
-      variant: 'item',
+      variant: 'ok',
       title: '投稿しました',
       lines: [
         r.bonus
@@ -300,7 +298,7 @@ async function doPostBbs(body: string, parentNo = 0) {
     showToast({
       variant: 'error',
       title: '書き込めませんでした',
-      lines: [e instanceof Error ? e.message : String(e)],
+      lines: [errorText(e)],
       icon: 'item',
     });
   } finally {
@@ -325,12 +323,12 @@ async function doDeleteBbs(
     delArticleNo.value = '';
     delThreadNo.value = '';
     delNushiNo.value = '';
-    showToast({ variant: 'item', title: '記事を削除しました。', lines: [], icon: 'item' });
+    notifyOk('記事を削除しました');
   } catch (e) {
     showToast({
       variant: 'error',
       title: '削除できませんでした',
-      lines: [e instanceof Error ? e.message : String(e)],
+      lines: [errorText(e)],
       icon: 'item',
     });
   } finally {
@@ -341,8 +339,6 @@ async function doDeleteBbs(
 
 <template>
   <div class="house-page facility-page" :style="{ backgroundColor: house ? pageBg : '#ffcc66' }">
-    <Toast :toast="toast" @close="closeToast" />
-
     <!-- 訪問不可(コンテンツ未公開)や読み込みエラー -->
     <div v-if="message" class="err-panel">
       <div class="err">{{ message }}</div>
