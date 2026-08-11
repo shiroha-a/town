@@ -1156,6 +1156,11 @@ const SETTINGS_GROUPS: { title: string; fields: SettingField[] }[] = [
         label: '日次利息',
         hint: '貯金に対する1日あたりの利息(‰/千分率)',
       },
+      {
+        key: 'transfer_limit',
+        label: '振込上限',
+        hint: '1回の振込の上限(円)。同じ相手への1日の合計上限でもある。超えた分は振り込まれず手元に残る。0以下で既定100万円',
+      },
     ],
   },
   {

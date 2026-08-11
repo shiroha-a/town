@@ -132,7 +132,7 @@ func setup(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 	if _, err := pool.Exec(ctx,
 		`TRUNCATE players, player_roles, player_status, status_history,
 		 ledger_entry, ledger_tx, action_log, worker_jobs, shop_daily_stock,
-		 serial_codes, webhooks RESTART IDENTITY CASCADE`); err != nil {
+		 serial_codes, webhooks, transfer_log RESTART IDENTITY CASCADE`); err != nil {
 		pool.Close()
 		t.Fatalf("truncate: %v", err)
 	}
@@ -934,6 +934,151 @@ func TestBankAndInterest(t *testing.T) {
 	// 台帳ゼロ和は利息(faucet)後も維持。
 	if sum, _ := led.AuditZeroSum(ctx); sum != 0 {
 		t.Errorf("ledger zero-sum broken after interest: %d", sum)
+	}
+}
+
+// transferResp is the 振込 response: the player state plus what actually moved.
+type transferTestResp struct {
+	playerResp
+	Transfer struct {
+		Requested      int64  `json:"requested"`
+		Sent           int64  `json:"sent"`
+		Limit          int64  `json:"limit"`
+		RemainingToday int64  `json:"remaining_today"`
+		ToName         string `json:"to_name"`
+	} `json:"transfer"`
+}
+
+func doTransfer(t *testing.T, base string, fromID, toID, amount int64, idemKey string) (transferTestResp, int) {
+	t.Helper()
+	body, _ := json.Marshal(map[string]any{"to_id": toID, "amount": amount, "idempotency_key": idemKey})
+	resp, err := http.Post(base+"/api/v1/players/"+strconv.FormatInt(fromID, 10)+"/bank/transfer",
+		"application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("transfer post: %v", err)
+	}
+	defer resp.Body.Close()
+	var out transferTestResp
+	if resp.StatusCode == http.StatusOK {
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			t.Fatalf("transfer decode: %v", err)
+		}
+	}
+	return out, resp.StatusCode
+}
+
+// TestBankTransfer covers 振り込み: the cap trims the amount instead of burning
+// the excess (かつては超過分が寄付として消えていた), the daily per-recipient cap,
+// and who may send or receive.
+func TestBankTransfer(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	led := ledger.New(pool)
+
+	alice := register(t, srv.URL, "misskey.example", "alice")
+	bob := register(t, srv.URL, "misskey.example", "bob")
+	carol := register(t, srv.URL, "misskey.example", "carol")
+
+	// 学生・日払いバイトは送金できないので、aliceだけ働く職に就ける。
+	if _, err := pool.Exec(ctx,
+		`UPDATE player_status SET job = '正社員' WHERE player_id = $1`, alice.ID); err != nil {
+		t.Fatal(err)
+	}
+	// aliceの普通口座に300万円(蛇口経由。ゼロ和は保つ)。
+	if err := led.Post(ctx, "test_seed", "", []ledger.Entry{
+		{Account: ledger.SystemAccount("test_faucet"), Delta: -3_000_000},
+		{Account: ledger.SavingsAccount(alice.ID), Delta: 3_000_000},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 上限(既定100万円)を超える振り込みは、上限まで減額される。減った分は
+	// 消えずにaliceの口座に残る。
+	res, code := doTransfer(t, srv.URL, alice.ID, bob.ID, 2_500_000, "tr-1")
+	if code != http.StatusOK {
+		t.Fatalf("transfer status = %d, want 200", code)
+	}
+	if res.Transfer.Requested != 2_500_000 || res.Transfer.Sent != 1_000_000 {
+		t.Errorf("transfer = requested %d / sent %d, want 2500000/1000000",
+			res.Transfer.Requested, res.Transfer.Sent)
+	}
+	if res.Transfer.RemainingToday != 0 || res.Transfer.Limit != 1_000_000 {
+		t.Errorf("limit=%d remaining=%d, want 1000000/0", res.Transfer.Limit, res.Transfer.RemainingToday)
+	}
+	if res.Savings != 2_000_000 {
+		t.Errorf("sender savings = %d, want 2000000 (超過分は減額されるだけで消えない)", res.Savings)
+	}
+	bobSav, err := led.Balance(ctx, ledger.SavingsAccount(bob.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bobSav != 1_000_000 {
+		t.Errorf("recipient savings = %d, want 1000000", bobSav)
+	}
+	// 誰の口座にも入らずに消えた金が無いこと(ゼロ和 + 2人の合計が元の300万)。
+	if sum, _ := led.AuditZeroSum(ctx); sum != 0 {
+		t.Errorf("ledger zero-sum broken: %d", sum)
+	}
+	if bobSav+res.Savings != 3_000_000 {
+		t.Errorf("savings total = %d, want 3000000 (お金が消えている)", bobSav+res.Savings)
+	}
+
+	// 同じ相手へは1日の合計も上限まで。使い切っていれば断る。
+	if _, code = doTransfer(t, srv.URL, alice.ID, bob.ID, 1, "tr-2"); code != http.StatusUnprocessableEntity {
+		t.Errorf("over-daily-cap status = %d, want 422", code)
+	}
+	// 相手が変われば振り込める。
+	res, code = doTransfer(t, srv.URL, alice.ID, carol.ID, 400_000, "tr-3")
+	if code != http.StatusOK {
+		t.Fatalf("transfer to carol status = %d, want 200", code)
+	}
+	if res.Transfer.Sent != 400_000 || res.Transfer.RemainingToday != 600_000 {
+		t.Errorf("sent=%d remaining=%d, want 400000/600000", res.Transfer.Sent, res.Transfer.RemainingToday)
+	}
+
+	// 自分宛・存在しない相手・貯金不足は断る。
+	if _, code = doTransfer(t, srv.URL, alice.ID, alice.ID, 1000, "tr-4"); code != http.StatusUnprocessableEntity {
+		t.Errorf("self-transfer status = %d, want 422", code)
+	}
+	if _, code = doTransfer(t, srv.URL, alice.ID, 99999, 1000, "tr-5"); code != http.StatusUnprocessableEntity {
+		t.Errorf("unknown-recipient status = %d, want 422", code)
+	}
+	// 学生は送金できない(carolは学生のまま)。
+	if _, code = doTransfer(t, srv.URL, carol.ID, alice.ID, 1000, "tr-6"); code != http.StatusUnprocessableEntity {
+		t.Errorf("student transfer status = %d, want 422", code)
+	}
+
+	// 振込先一覧: 自分は出ず、相手ごとに今日の残りが付く。
+	resp, err := http.Get(srv.URL + "/api/v1/players/" + strconv.FormatInt(alice.ID, 10) + "/bank/transfer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var info struct {
+		Limit      int64 `json:"limit"`
+		Recipients []struct {
+			ID          int64  `json:"id"`
+			DisplayName string `json:"display_name"`
+			SentToday   int64  `json:"sent_today"`
+			Remaining   int64  `json:"remaining"`
+		} `json:"recipients"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		t.Fatal(err)
+	}
+	if info.Limit != 1_000_000 || len(info.Recipients) != 2 {
+		t.Fatalf("transfer info = limit %d / %d recipients, want 1000000/2", info.Limit, len(info.Recipients))
+	}
+	for _, r := range info.Recipients {
+		if r.ID == alice.ID {
+			t.Error("自分が振込先候補に出ている")
+		}
+		if r.ID == bob.ID && (r.SentToday != 1_000_000 || r.Remaining != 0) {
+			t.Errorf("bob: sent_today=%d remaining=%d, want 1000000/0", r.SentToday, r.Remaining)
+		}
+		if r.ID == carol.ID && (r.SentToday != 400_000 || r.Remaining != 600_000) {
+			t.Errorf("carol: sent_today=%d remaining=%d, want 400000/600000", r.SentToday, r.Remaining)
+		}
 	}
 }
 

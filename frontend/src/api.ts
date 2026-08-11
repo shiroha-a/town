@@ -369,6 +369,32 @@ export interface StatementEntry {
   balance: number;
 }
 
+// 振込先の候補(1人分)。remainingは今日この相手にあと振り込める額。
+export interface TransferCandidate {
+  id: number;
+  display_name: string;
+  sent_today: number;
+  remaining: number;
+}
+
+// 振込画面のデータ(現在の上限と振込先の候補)。
+export interface TransferInfo {
+  limit: number;
+  recipients: TransferCandidate[];
+}
+
+// 振り込みの結果。sentがrequestedより少ないときは上限で減額されている
+// (減った分は自分の口座に残る)。
+export interface TransferResult {
+  requested: number;
+  sent: number;
+  limit: number;
+  remaining_today: number;
+  to_name: string;
+}
+
+export type TransferResp = Player & { transfer: TransferResult };
+
 // ミニゲーム(カジノ)1プレイの結果。detailはゲーム別の結果詳細。
 export interface CasinoPlayResult {
   player: Player;
@@ -775,6 +801,8 @@ export interface GameSettings {
   day_boundary_hour: number;
   initial_money: number;
   daily_interest_permille: number;
+  /** 振込の上限(円)。1回の上限であり、同じ相手への1日の合計上限でもある。 */
+  transfer_limit: number;
   energy_recovery_sec: number;
   nou_recovery_sec: number;
   satiety_decay_sec: number;
@@ -1800,9 +1828,10 @@ export const api = {
       'GET',
       `/players/${id}/bank/statement${account === 'super' ? '?account=super' : ''}`,
     ),
-  transfer: (id: number, toName: string, amount: number) =>
-    request<Player>('POST', `/players/${id}/bank/transfer`, {
-      to_name: toName,
+  transferInfo: (id: number) => request<TransferInfo>('GET', `/players/${id}/bank/transfer`),
+  transfer: (id: number, toId: number, amount: number) =>
+    request<TransferResp>('POST', `/players/${id}/bank/transfer`, {
+      to_id: toId,
       amount,
       idempotency_key: newIdempotencyKey(),
     }),

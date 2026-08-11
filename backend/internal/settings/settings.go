@@ -22,10 +22,15 @@ import (
 type Game struct {
 	// Timezone / DayBoundaryHour decide when a "game day" rolls over (利息・日次処理)。
 	// 起動時に読むため、変更の反映には再起動が要る。
-	Timezone                 string       `json:"timezone"`
-	DayBoundaryHour          int          `json:"day_boundary_hour"`
-	InitialMoney             int64        `json:"initial_money"`
-	DailyInterestPermille    int          `json:"daily_interest_permille"`
+	Timezone              string `json:"timezone"`
+	DayBoundaryHour       int    `json:"day_boundary_hour"`
+	InitialMoney          int64  `json:"initial_money"`
+	DailyInterestPermille int    `json:"daily_interest_permille"`
+	// TransferLimit: 銀行振込の上限(円)。1回の上限であり、同じ相手への1日の
+	// 合計上限でもある。0以下は既定(100万円)として扱う。無制限にしたいときは
+	// 大きな値を入れる: 0を無制限にすると、この設定を持たない既存インストールが
+	// 黙って無制限になってしまうため。
+	TransferLimit            int64        `json:"transfer_limit"`
 	EnergyRecoverySec        int          `json:"energy_recovery_sec"`
 	NouRecoverySec           int          `json:"nou_recovery_sec"`
 	SatietyDecaySec          int          `json:"satiety_decay_sec"`
@@ -74,24 +79,25 @@ type TownConfig struct {
 func Defaults() Game {
 	return Game{
 		Timezone:                 "Asia/Tokyo",
-		DayBoundaryHour:          5,      // 日付の切り替わり(利息・日次処理)はAM5:00
-		InitialMoney:             500000, // 新規登録時の初期所持金(円)
-		DailyInterestPermille:    5,      // 貯金の日次利息(パーミル。5=0.5%、切り捨て)
-		EnergyRecoverySec:        60,     // 身体パワー1回復に必要な秒数
-		NouRecoverySec:           60,     // 頭脳パワー1回復に必要な秒数
-		SatietyDecaySec:          300,    // 空腹値が1減るのに必要な秒数
-		ConditionEvalIntervalMin: 10,     // 病気指数のコンディション評価間隔(分)
-		WorkIntervalMin:          3,      // 就労のクールタイム(分)
-		DebugNoCooldown:          false,  // 各種クールタイムを無視する(開発用)
-		DepartDailyCount:         100,    // デパートで毎日陳列する品数(0以下=全件)
-		SyokudouDailyCount:       9,      // 食堂で毎日陳列する品数(0以下=全件)
-		HanbaiDailyCount:         3,      // 自販機で毎日陳列する品数(0以下=全件)
-		ItemKindLimit:            25,     // 所持できるアイテムの種類上限(0以下=無制限)
-		StockAdjust:              2,      // 店頭在庫の割り算倍率
-		MoveMaigoEnabled:         false,  // 徒歩移動の迷子(レガシー既定OFF)
-		MoveWalkSecs:             10,     // 徒歩の街移動にかかる秒数
-		MoveBusSecs:              5,      // バスの街移動にかかる秒数
-		SessionTTLDays:           30,     // ログインは最後に遊んでから30日で切れる
+		DayBoundaryHour:          5,       // 日付の切り替わり(利息・日次処理)はAM5:00
+		InitialMoney:             500000,  // 新規登録時の初期所持金(円)
+		DailyInterestPermille:    5,       // 貯金の日次利息(パーミル。5=0.5%、切り捨て)
+		TransferLimit:            1000000, // 振込の上限(1回・同じ相手への1日の合計)
+		EnergyRecoverySec:        60,      // 身体パワー1回復に必要な秒数
+		NouRecoverySec:           60,      // 頭脳パワー1回復に必要な秒数
+		SatietyDecaySec:          300,     // 空腹値が1減るのに必要な秒数
+		ConditionEvalIntervalMin: 10,      // 病気指数のコンディション評価間隔(分)
+		WorkIntervalMin:          3,       // 就労のクールタイム(分)
+		DebugNoCooldown:          false,   // 各種クールタイムを無視する(開発用)
+		DepartDailyCount:         100,     // デパートで毎日陳列する品数(0以下=全件)
+		SyokudouDailyCount:       9,       // 食堂で毎日陳列する品数(0以下=全件)
+		HanbaiDailyCount:         3,       // 自販機で毎日陳列する品数(0以下=全件)
+		ItemKindLimit:            25,      // 所持できるアイテムの種類上限(0以下=無制限)
+		StockAdjust:              2,       // 店頭在庫の割り算倍率
+		MoveMaigoEnabled:         false,   // 徒歩移動の迷子(レガシー既定OFF)
+		MoveWalkSecs:             10,      // 徒歩の街移動にかかる秒数
+		MoveBusSecs:              5,       // バスの街移動にかかる秒数
+		SessionTTLDays:           30,      // ログインは最後に遊んでから30日で切れる
 		SiteTitle:                "ＴＯＷＮ",
 		SiteTagline:              "働いて、買って、暮らす街",
 		GuestEnabled:             true, // お試しプレイを受け付ける
@@ -106,6 +112,24 @@ func (g Game) Location() (*time.Location, error) {
 		return time.UTC, err
 	}
 	return loc, nil
+}
+
+// DefaultTransferLimit is the fallback bank-transfer cap (レガシー準拠の100万円)。
+const DefaultTransferLimit = 1000000
+
+// EffectiveTransferLimit returns the transfer cap to enforce, substituting the
+// default for an unset (0) or negative value.
+func (g Game) EffectiveTransferLimit() int64 {
+	if g.TransferLimit <= 0 {
+		return DefaultTransferLimit
+	}
+	return g.TransferLimit
+}
+
+// normalize fills in fields that were added after the settings row was written,
+// so the admin screen shows the value actually in force instead of a bare 0.
+func (g *Game) normalize() {
+	g.TransferLimit = g.EffectiveTransferLimit()
 }
 
 // ErrInvalid marks a rejected settings update (管理画面からの入力エラー)。
@@ -168,6 +192,7 @@ func NewStore(ctx context.Context, pool *pgxpool.Pool, defaults Game) (*Store, e
 	if err := json.Unmarshal(data, &g); err != nil {
 		return nil, fmt.Errorf("parse settings: %w", err)
 	}
+	g.normalize()
 	s.g = g
 	return s, nil
 }
@@ -184,6 +209,7 @@ func (s *Store) Set(ctx context.Context, g Game) error {
 	if err := g.Validate(); err != nil {
 		return err
 	}
+	g.normalize()
 	b, err := json.Marshal(g)
 	if err != nil {
 		return fmt.Errorf("encode settings: %w", err)
@@ -209,6 +235,7 @@ func (s *Store) Reload(ctx context.Context) error {
 	if err := json.Unmarshal(data, &g); err != nil {
 		return fmt.Errorf("parse settings: %w", err)
 	}
+	g.normalize()
 	s.mu.Lock()
 	s.g = g
 	s.mu.Unlock()

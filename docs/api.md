@@ -171,7 +171,8 @@ Misskeyの[MiAuth](https://misskey-hub.net/docs/for-developers/api/token/miauth/
 | 本人 | POST | `/players/{id}/bank/deposit` | 普通口座へ預ける |
 | 本人 | POST | `/players/{id}/bank/withdraw` | 普通口座から引き出す |
 | 本人 | GET | `/players/{id}/bank/statement` | 入出金明細。`?account=super` でスーパー定期 |
-| 本人 | POST | `/players/{id}/bank/transfer` | 他の住民へ振り込む |
+| 本人 | GET | `/players/{id}/bank/transfer` | 振込先の候補と上限(相手ごとに本日の残り) |
+| 本人 | POST | `/players/{id}/bank/transfer` | 他の住民へ振り込む(`to_id`。上限超過分は減額され手元に残る) |
 | 本人 | POST | `/players/{id}/bank/super/deposit` | スーパー定期に預ける |
 | 本人 | POST | `/players/{id}/bank/super/cancel` | スーパー定期を解約する |
 | 本人 | GET | `/players/{id}/bank/loan/quote` | ローンの見積もり |

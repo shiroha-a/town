@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { api, type Player, type StatementEntry, type LoanQuote } from '../api';
+import {
+  api,
+  type Player,
+  type StatementEntry,
+  type LoanQuote,
+  type TransferCandidate,
+} from '../api';
 import { yen, totalAssets } from '../money';
 
 const props = defineProps<{ player: Player }>();
@@ -60,7 +66,10 @@ function closeStatement() {
 function onKey(e: KeyboardEvent) {
   if (e.key === 'Escape') closeStatement();
 }
-onMounted(() => window.addEventListener('keydown', onKey));
+onMounted(() => {
+  window.addEventListener('keydown', onKey);
+  loadTransferInfo();
+});
 onUnmounted(() => window.removeEventListener('keydown', onKey));
 const fmtDate = (iso: string) => {
   const d = new Date(iso);
@@ -68,11 +77,56 @@ const fmtDate = (iso: string) => {
   return `${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
 };
 
-// 振り込み(送金)。相手はメンバー名、普通口座から引き落とす。
-const transferName = ref('');
+// 振り込み(送金)。相手はメンバー一覧から選び、普通口座から引き落とす。
+// 上限(管理設定)は同じ相手への1日の合計にも掛かるので、候補ごとに今日の残りを
+// サーバーから貰って出す。
+const transferTo = ref<number | ''>('');
 const transferAmt = ref<number>(0);
-const doTransfer = () =>
-  run('振り込み', () => api.transfer(props.player.id, transferName.value, transferAmt.value));
+const transferLimit = ref(0);
+const recipients = ref<TransferCandidate[]>([]);
+const selectedRecipient = computed(() => recipients.value.find((r) => r.id === transferTo.value));
+
+async function loadTransferInfo() {
+  try {
+    const info = await api.transferInfo(props.player.id);
+    transferLimit.value = info.limit;
+    recipients.value = info.recipients;
+  } catch {
+    recipients.value = [];
+  }
+}
+
+async function doTransfer() {
+  if (transferTo.value === '') {
+    message.value = '振込先を選んでください。';
+    kind.value = 'error';
+    return;
+  }
+  busy.value = true;
+  message.value = '';
+  try {
+    const res = await api.transfer(props.player.id, transferTo.value, transferAmt.value);
+    emit('update', res);
+    const t = res.transfer;
+    if (t.sent === 0) {
+      // 冪等キーの重複(二重送信)。同じ振り込みは既に済んでいる。
+      message.value = 'この振り込みは処理済みです。';
+    } else if (t.sent < t.requested) {
+      message.value =
+        `上限のため${yen(t.sent)}円だけ振り込みました。` +
+        `残り${yen(t.requested - t.sent)}円は口座に残っています。`;
+    } else {
+      message.value = `${yen(t.sent)}円を振り込みました。`;
+    }
+    kind.value = 'ok';
+    await loadTransferInfo();
+  } catch (e) {
+    message.value = e instanceof Error ? e.message : String(e);
+    kind.value = 'error';
+  } finally {
+    busy.value = false;
+  }
+}
 
 // スーパー定期(100万円単位で入力)。
 const superDepositMan = ref<number>(0);
@@ -169,18 +223,24 @@ const doLoanRepay = () => run('ローンの一括返済', () => api.loanRepay(pr
         <section class="bsec bsec-transfer">
           <h3 class="sec">■振り込み</h3>
           <p class="note">
-            ※参加者のメンバー名がわかれば送金することができます。<br />
-            お金は普通口座から引き落とされます(送金は1回100万円まで、超えた分は寄付されます)。
+            ※参加者を選んで送金することができます。お金は普通口座から引き落とされます。<br />
+            送金は1回{{ yen(transferLimit) }}円まで(同じ相手へは1日の合計もこの額まで)。<br />
+            超えた分は振り込まれず、あなたの口座に残ります。
           </p>
           <div class="row">
             <span class="lbl">◆お相手</span>
-            <input
-              type="text"
-              v-model.trim="transferName"
-              placeholder="メンバー名"
-              data-test="transfer-name"
-            />
+            <select v-model="transferTo" data-test="transfer-to">
+              <option value="">選んでください</option>
+              <option v-for="r in recipients" :key="r.id" :value="r.id">
+                {{ r.display_name }}
+              </option>
+            </select>
           </div>
+          <p v-if="selectedRecipient" class="note" data-test="transfer-remaining">
+            {{ selectedRecipient.display_name }}さんへは本日あと{{
+              yen(selectedRecipient.remaining)
+            }}円まで振り込めます。
+          </p>
           <div class="row">
             <span class="lbl">◆金　額</span>
             <input type="number" v-model.number="transferAmt" data-test="transfer-amount" /> 円
