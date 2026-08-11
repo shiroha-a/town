@@ -9,6 +9,9 @@ const emit = defineEmits<{ update: [player: Player]; back: [] }>();
 const yen = (n: number) => n.toLocaleString('ja-JP');
 const TICKET_OPTIONS = [0, 1, 2, 3, 5, 10, 20, 30, 50, 100, 150, 200];
 const GOAL = 910;
+// アニメーションの1コマの長さ。CSSのtransitionもこの値に合わせて動かす
+const TICK_MS = 270;
+const tickDuration = `${TICK_MS / 1000}s`;
 
 const raceId = ref(0);
 const lineup = ref<KeibaHorse[]>([]);
@@ -97,7 +100,7 @@ function animate(res: KeibaResult) {
       animTimer = undefined;
       mode.value = 'result';
     }
-  }, 90);
+  }, TICK_MS);
 }
 
 function retry() {
@@ -360,7 +363,7 @@ function retry() {
   top: 1px;
   width: 26px;
   height: 20px;
-  transition: left 0.09s linear;
+  transition: left v-bind(tickDuration) linear;
 }
 .goal {
   font-size: 14px;
