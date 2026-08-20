@@ -24,6 +24,9 @@ const mode = ref<'bet' | 'racing' | 'result'>('bet');
 const result = ref<KeibaResult | null>(null);
 const positions = ref<number[]>([]); // 0-100% 各馬の現在位置
 let animTimer: number | undefined;
+// レース中に持ち金が変わるとゴール前に勝敗が分かってしまうため、
+// 賭けの結果はゴールするまで持ち越してから親へ渡す
+let pendingPlayer: Player | null = null;
 
 const totalTickets = computed(() => tickets.reduce((a, b) => a + b, 0));
 const horsesBet = computed(() => tickets.filter((t) => t > 0).length);
@@ -45,7 +48,16 @@ async function loadRace() {
 onMounted(loadRace);
 onUnmounted(() => {
   if (animTimer !== undefined) window.clearInterval(animTimer);
+  // レースの途中で街に戻っても持ち金の更新は取りこぼさない
+  flushPlayer();
 });
+
+/** Hands the held player update to the parent, if any is pending. */
+function flushPlayer() {
+  if (!pendingPlayer) return;
+  emit('update', pendingPlayer);
+  pendingPlayer = null;
+}
 
 function fail(e: unknown) {
   notifyError('馬券を買えませんでした', e);
@@ -63,7 +75,7 @@ async function startRace() {
   busy.value = true;
   try {
     const res = await api.keibaBet(props.player.id, raceId.value, [...tickets]);
-    emit('update', res.player);
+    pendingPlayer = res.player;
     result.value = res.result;
     animate(res.result);
   } catch (e) {
@@ -94,6 +106,7 @@ function animate(res: KeibaResult) {
       window.clearInterval(animTimer);
       animTimer = undefined;
       mode.value = 'result';
+      flushPlayer();
     }
   }, TICK_MS);
 }
