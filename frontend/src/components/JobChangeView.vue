@@ -53,9 +53,14 @@ function limits(job: JobOption): Limit[] {
     out.push({ text: `BMI ${job.bmi_max}以下`, met: st.bmi <= job.bmi_max });
   }
   if (job.height_min > 0) {
-    out.push({ text: `身長${job.height_min}cm以上`, met: st.height_cm >= job.height_min });
+    out.push({ text: `身長${job.height_min}cm以上`, met: heightOk(job) });
   }
   return out;
+}
+
+// 身長の条件(求職時にサーバも見る)。
+function heightOk(job: JobOption): boolean {
+  return job.height_min <= 0 || props.player.status.height_cm >= job.height_min;
 }
 
 // プレイヤーの現在値を取得(学力・能力はplayer.paramsに入っている)。
@@ -70,6 +75,13 @@ function lacking(job: JobOption, key: string): boolean {
 function meets(job: JobOption, key: string): boolean {
   const need = job.requirements[key] ?? 0;
   return need > 0 && playerParam(key) >= need;
+}
+
+// その職に今就けるか。サーバのDoChangeJobが転職時に弾く条件
+// (必要パラメータ・身長・前提マスター職)と揃える。BMIは転職時ではなく
+// 出勤時にしか見られないので、ここには含めない。
+function canTake(job: JobOption): boolean {
+  return masterOk(job) && heightOk(job) && !REQ_COLUMNS.some((c) => lacking(job, c.key));
 }
 
 async function take(job: JobOption) {
@@ -102,7 +114,8 @@ async function take(job: JobOption) {
       <div class="cap">
         必要パラメータ(不足は赤・達成は緑で表示)／ 職業名の横は体格の条件(満たしていないものは赤)／
         身P・頭P消費(1回働くと消費するパワー)／ ボーナス(レベルアップ時に給料の何倍が出るか)／
-        給料の下は昇給(レベル1ごとに基本給が何%増えるか)
+        給料の下は昇給(レベル1ごとに基本給が何%増えるか)<br />
+        条件を満たしていない職業には「就く」ボタンが出ません
       </div>
       <div class="table-scroll sticky-table">
         <table class="job-table">
@@ -154,13 +167,11 @@ async function take(job: JobOption) {
                 <span v-if="job.bonus_rate > 0">×{{ job.bonus_rate }}</span>
               </td>
               <td class="right">
-                <button
-                  class="btn"
-                  :disabled="busy || player.status.job === job.name || !masterOk(job)"
-                  @click="take(job)"
-                >
-                  {{ player.status.job === job.name ? '就業中' : '就く' }}
+                <button v-if="player.status.job === job.name" class="btn" disabled>就業中</button>
+                <button v-else-if="canTake(job)" class="btn" :disabled="busy" @click="take(job)">
+                  就く
                 </button>
+                <span v-else class="no-take">条件不足</span>
               </td>
             </tr>
           </tbody>
@@ -318,6 +329,12 @@ async function take(job: JobOption) {
   background: #ffe8e8;
   color: #c33;
   font-weight: bold;
+}
+/* 就けない職はボタンを出さない。空のセルは壊れて見えるので理由だけ残す。 */
+.no-take {
+  font-size: 11px;
+  color: #999;
+  white-space: nowrap;
 }
 .req-master {
   font-size: 10px;
