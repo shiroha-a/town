@@ -74,6 +74,12 @@ onMounted(async () => {
       const p = await api.authCallback(session);
       // URLからsessionを消してから通常画面へ(リロードで再送されないように)。
       window.history.replaceState({}, '', '/');
+      // 連携の追加はログイン済みでしか始められないので、ここには来ない。
+      // 来たときはログインが外れているので、入り直してもらう。
+      if ('mode' in p) {
+        notifyError('ログインし直してから、連携の追加をやり直してください。');
+        return;
+      }
       emit('login', p);
       return;
     } catch (e) {

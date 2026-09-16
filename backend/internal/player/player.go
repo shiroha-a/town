@@ -369,14 +369,22 @@ func (s *Service) Register(ctx context.Context, instanceHost, remoteUserID, disp
 			 RETURNING id`, instanceHost, remoteUserID, displayName).Scan(&id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			// 既存プレイヤー: 既存IDを引く
-			return tx.QueryRow(ctx,
+			if err := tx.QueryRow(ctx,
 				`SELECT id FROM players WHERE instance_host = $1 AND remote_user_id = $2`,
-				instanceHost, remoteUserID).Scan(&id)
+				instanceHost, remoteUserID).Scan(&id); err != nil {
+				return err
+			}
+			// 連携テーブルより前から居た住民を取りこぼさない(移行の漏れも直る)。
+			return linkPrimaryAccount(ctx, tx, id, instanceHost, remoteUserID)
 		}
 		if err != nil {
 			return fmt.Errorf("insert player: %w", err)
 		}
 		created = true
+		// ログインの識別は連携テーブル側で行う。自分の身元もそこへ入れておく。
+		if err := linkPrimaryAccount(ctx, tx, id, instanceHost, remoteUserID); err != nil {
+			return err
+		}
 
 		// 初期身長/体重はサーバRNGで生成する(design 17.3。性別未実装のため旧の女性テーブル)。
 		heightCm := 150 + s.rng.IntN(25)        // 150〜174cm

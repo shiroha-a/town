@@ -239,6 +239,25 @@ export interface AuthStartResp {
   instance_name: string;
 }
 
+/** 連携しているMisskeyアカウント。1人の住民が複数持てる。 */
+export interface MisskeyAccount {
+  host: string;
+  remote_user_id: string;
+  username: string;
+  acct: string;
+  /** プロフィールに出すアカウント。フォローの発信元インスタンスでもある。 */
+  primary: boolean;
+  /** 使えるアクセストークンを持っているか(フォローが使えるかの目安)。 */
+  has_token: boolean;
+  linked_at: string;
+}
+
+/** 連携の追加としてコールバックを引き換えたときの応答。ログインのときは Player が返る。 */
+export interface LinkCallbackResp {
+  mode: 'link';
+  accounts: MisskeyAccount[];
+}
+
 // ビンゴ大会。
 export interface BingoCard {
   id: number;
@@ -1627,8 +1646,28 @@ export const api = {
       instance,
       origin: window.location.origin,
     }),
-  // コールバックで受け取ったsessionを引き換えてログインする。
-  authCallback: (session: string) => request<Player>('POST', '/auth/callback', { session }),
+  // コールバックで受け取ったsessionを引き換える。ログインか連携の追加かは
+  // サーバーが保留レコードを見て決めるので、応答の形で見分ける。
+  authCallback: (session: string) =>
+    request<Player | LinkCallbackResp>('POST', '/auth/callback', { session }),
+  misskeyAccounts: (id: number) =>
+    request<MisskeyAccount[]>('GET', `/players/${id}/misskey-accounts`),
+  // 連携を追加するための認可URLをもらう(飛ばすのは呼び出し側)。
+  misskeyAccountStart: (id: number, instance: string) =>
+    request<AuthStartResp>('POST', `/players/${id}/misskey-accounts/start`, {
+      instance,
+      origin: window.location.origin,
+    }),
+  setPrimaryMisskeyAccount: (id: number, host: string, user: string) =>
+    request<MisskeyAccount[]>(
+      'POST',
+      `/players/${id}/misskey-accounts/${encodeURIComponent(host)}/${encodeURIComponent(user)}/primary`,
+    ),
+  unlinkMisskeyAccount: (id: number, host: string, user: string) =>
+    request<MisskeyAccount[]>(
+      'DELETE',
+      `/players/${id}/misskey-accounts/${encodeURIComponent(host)}/${encodeURIComponent(user)}`,
+    ),
   authMe: () => request<Player>('GET', '/auth/me'),
   authGuest: () => request<Player>('POST', '/auth/guest'),
   authLogout: () => request<{ ok: boolean }>('POST', '/auth/logout'),
