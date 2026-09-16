@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
-import { api, type Player, type UserSettings, type PushPrefs } from '../api';
+import { api, type Player, type UserSettings, type PushPrefs, type MisskeyAccount } from '../api';
 import { pushSupported, permission, subscribe, unsubscribe, deviceSubscribed } from '../notify';
 import { unregisterServiceWorker } from '../pwa';
 import ToggleSwitch from './ToggleSwitch.vue';
@@ -84,8 +84,72 @@ async function togglePush(key: 'mail' | 'energy' | 'work') {
   }
 }
 
+// --- Misskeyアカウントの連携 ---
+// 連携先が1つだけだと、そのインスタンスがサービス終了した時点でログインできなく
+// なる。複数持てるようにして、代表(プロフィールに出すアカウント)を選べる。
+const accounts = ref<MisskeyAccount[]>([]);
+const addHost = ref('');
+const accountBusy = ref(false);
+
+async function loadAccounts() {
+  try {
+    accounts.value = await api.misskeyAccounts(props.player.id);
+  } catch {
+    // ゲストや連携の無い住民では取れない。欄ごと出さないので黙って諦める。
+    accounts.value = [];
+  }
+}
+
+/** 別のMisskeyサーバーの認可画面へ飛ぶ。戻り先は /auth/callback。 */
+async function addAccount() {
+  if (accountBusy.value || !addHost.value.trim()) return;
+  accountBusy.value = true;
+  try {
+    const res = await api.misskeyAccountStart(props.player.id, addHost.value.trim());
+    window.location.href = res.url;
+  } catch (e) {
+    notifyError('連携を始められませんでした', e, 'usersettings');
+    accountBusy.value = false;
+  }
+}
+
+async function makePrimary(a: MisskeyAccount) {
+  if (accountBusy.value) return;
+  accountBusy.value = true;
+  try {
+    accounts.value = await api.setPrimaryMisskeyAccount(props.player.id, a.host, a.remote_user_id);
+    notifyOk(`${a.acct}を表に出すようにしました`, [], 'usersettings');
+    emit('update', await api.getPlayer(props.player.id));
+  } catch (e) {
+    notifyError('切り替えられませんでした', e, 'usersettings');
+  } finally {
+    accountBusy.value = false;
+  }
+}
+
+async function removeAccount(a: MisskeyAccount) {
+  if (accountBusy.value) return;
+  // 連携を外してもMisskey側のアクセストークンはこちらから消せないので、
+  // 自分で消してもらう必要がある。先に伝えてから実行する。
+  const ok = window.confirm(
+    `${a.acct}の連携を外しますか？\nこのアカウントではログインできなくなります。\n` +
+      `Misskey側の連携アプリは残るので、https://${a.host}/settings/apps からも消してください。`,
+  );
+  if (!ok) return;
+  accountBusy.value = true;
+  try {
+    accounts.value = await api.unlinkMisskeyAccount(props.player.id, a.host, a.remote_user_id);
+    notifyOk(`${a.acct}の連携を外しました`, [], 'usersettings');
+  } catch (e) {
+    notifyError('連携を外せませんでした', e, 'usersettings');
+  } finally {
+    accountBusy.value = false;
+  }
+}
+
 async function load() {
   void loadPush();
+  void loadAccounts();
   try {
     form.value = await api.userSettings(props.player.id);
   } catch (e) {
@@ -238,6 +302,55 @@ async function retire() {
         </template>
       </section>
 
+      <section v-if="accounts.length" class="us-sec">
+        <div class="us-head">Misskeyアカウントの連携</div>
+        <div class="us-hint">
+          複数のサーバーのアカウントを連携できます。どれでログインしても同じ住民になります。
+          連携先が1つだけだと、そのサーバーが終わったときにログインできなくなります。
+        </div>
+        <ul class="acct-list">
+          <li v-for="a in accounts" :key="a.host + '/' + a.remote_user_id" class="acct">
+            <span class="acct-name">{{ a.acct }}</span>
+            <span v-if="a.primary" class="acct-badge">表に出している</span>
+            <span v-else-if="!a.has_token" class="acct-note">認証のやり直しが必要</span>
+            <span class="acct-actions">
+              <button v-if="!a.primary" class="btn" :disabled="accountBusy" @click="makePrimary(a)">
+                表に出す
+              </button>
+              <button
+                v-if="!a.primary && accounts.length > 1"
+                class="btn danger-btn"
+                :disabled="accountBusy"
+                @click="removeAccount(a)"
+              >
+                外す
+              </button>
+            </span>
+          </li>
+        </ul>
+        <div class="us-row">
+          <input
+            v-model="addHost"
+            class="us-name"
+            placeholder="misskey.example"
+            @keyup.enter="addAccount"
+          />
+          <button
+            class="btn primary"
+            :disabled="accountBusy || !addHost.trim()"
+            @click="addAccount"
+          >
+            このサーバーを連携する
+          </button>
+        </div>
+        <div class="us-hint">
+          サーバー名を入れると、そのサーバーの承認画面へ移ります。承認すると、この画面に戻って
+          連携が終わります。<b>いまのログインはそのままです。</b>
+          「表に出す」に選んだアカウントが、プロフィール・名鑑に出る名前と、
+          街からフォローするときの発信元になります。
+        </div>
+      </section>
+
       <section class="us-sec">
         <div class="us-head">Misskeyの情報</div>
         <button class="btn" :disabled="busy" @click="refreshMisskey">いま取り直す</button>
@@ -376,6 +489,40 @@ async function retire() {
 .btn.danger-btn {
   border-color: #c99;
   color: #a33;
+}
+/* 連携アカウントの一覧。1行に「誰か・状態・操作」を並べ、狭い画面では折り返す。 */
+.acct-list {
+  list-style: none;
+  margin: 6px 0;
+  padding: 0;
+}
+.acct {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  border-bottom: 1px dotted #c9bda0;
+}
+.acct-name {
+  font-weight: bold;
+  word-break: break-all;
+}
+.acct-badge {
+  background: #336633;
+  color: #fff;
+  border-radius: 8px;
+  padding: 0 6px;
+  font-size: 11px;
+}
+.acct-note {
+  color: #cc0000;
+  font-size: 11px;
+}
+.acct-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
 }
 .retire-form {
   margin-top: 6px;

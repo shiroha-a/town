@@ -267,6 +267,11 @@ func NewServer(players *player.Service, actions *action.Service, contentSvc *con
 	// セッションの本人が実行者なのでパスにIDを取らない。
 	mux.HandleFunc("GET /api/v1/players/{id}/misskey", s.misskeyProfile)
 	mux.HandleFunc("POST /api/v1/players/{id}/misskey/refresh", s.refreshMisskeyProfile)
+	// 連携するMisskeyアカウント(複数可)。引き換えは /auth/callback が兼ねる。
+	mux.HandleFunc("GET /api/v1/players/{id}/misskey-accounts", s.misskeyAccounts)
+	mux.HandleFunc("POST /api/v1/players/{id}/misskey-accounts/start", s.misskeyAccountStart)
+	mux.HandleFunc("POST /api/v1/players/{id}/misskey-accounts/{host}/{user}/primary", s.setPrimaryMisskeyAccount)
+	mux.HandleFunc("DELETE /api/v1/players/{id}/misskey-accounts/{host}/{user}", s.unlinkMisskeyAccount)
 	mux.HandleFunc("GET /api/v1/players/{id}/settings", s.userSettings)
 	mux.HandleFunc("PUT /api/v1/players/{id}/settings", s.updateUserSettings)
 	mux.HandleFunc("POST /api/v1/players/{id}/retire", s.retire)

@@ -106,6 +106,10 @@ Misskeyの[MiAuth](https://misskey-hub.net/docs/for-developers/api/token/miauth/
 要求する権限は `write:following` だけです(ゲーム内から他の住民をフォローするため)。
 プロフィールの取得は認証不要のAPIで行うため、閲覧の権限は求めません。
 
+1人の住民は**複数のMisskeyアカウントを連携できます**(連携先が1つだけだと、その
+インスタンスがサービス終了した時点でログインできなくなるため)。どのアカウントで
+ログインしても同じ住民になります。追加は[Misskey連携](#misskey連携)を参照。
+
 インスタンスは管理者がブラックリスト/ホワイトリスト方式で制限できます
 (`/admin/instances`)。
 
@@ -292,6 +296,10 @@ Misskeyの[MiAuth](https://misskey-hub.net/docs/for-developers/api/token/miauth/
 | 認可 | Method | Path | 内容 |
 | --- | --- | --- | --- |
 | ログイン | GET | `/players/{id}/misskey` | **その住民の**Misskeyプロフィールと、自分との関係(フォロー状態) |
+| 本人 | GET | `/players/{id}/misskey-accounts` | 連携しているアカウントの一覧 |
+| 本人 | POST | `/players/{id}/misskey-accounts/start` | 連携を1つ足すための承認画面URL。body: `{instance, origin}` |
+| 本人 | POST | `/players/{id}/misskey-accounts/{host}/{user}/primary` | 表に出すアカウントを切り替える |
+| 本人 | DELETE | `/players/{id}/misskey-accounts/{host}/{user}` | 連携を外す |
 | ログイン | POST | `/misskey/follow` | フォローする。body: `{target_id}` |
 | ログイン | POST | `/misskey/unfollow` | フォローを外す。body: `{target_id}` |
 | ログイン | GET | `/emojis` | 絵文字ピッカー用の一覧。`?host=` 省略時は自分のインスタンス |
@@ -300,6 +308,24 @@ Misskeyの[MiAuth](https://misskey-hub.net/docs/for-developers/api/token/miauth/
 
 フォローは**実行者のインスタンス上で実行者のトークン**を使うため、パスに
 プレイヤーIDを取りません(常にログイン中の本人が主語です)。
+
+### 連携アカウント
+
+追加の承認は `POST /players/{id}/misskey-accounts/start` で始め、戻りは**ログインと
+同じ** `POST /auth/callback` で引き換えます。ログインか連携の追加かはサーバーが
+保留レコードで判別するので、クライアントは指定しません。連携の追加だったときの応答は
+`{mode: "link", accounts: [...]}` で、**ログイン中のセッションはそのまま**です
+(ログインし直しは発生しません)。
+
+- 他の住民が使っているアカウントは連携できません(409)。
+- 「表に出す」に選んだアカウントが、プロフィール・名鑑に出る身元と、フォローの
+  発信元インスタンスになります。切り替えるとプロフィールのキャッシュは捨てて
+  取り直します。
+- 表に出しているアカウントと、最後の1つは外せません(409)。外せるようにすると
+  ログイン手段が無くなるためです。
+- 連携を外しても、Misskey側のアクセストークンはこちらから失効させられません
+  (`i/revoke-token` は `secure:true`)。`https://<host>/settings/apps` から
+  利用者自身に消してもらいます。
 
 絵文字は次の3つをすべて満たすものだけ使えます。判定は選ばれた時点で1件だけ行い、
 以後キャッシュします。

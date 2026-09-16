@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/shiroha-a/town/internal/miauth"
+	"github.com/shiroha-a/town/internal/player"
 	"github.com/shiroha-a/town/internal/session"
 	"github.com/shiroha-a/town/internal/webhook"
 )
@@ -75,11 +76,19 @@ func (s *Server) authStart(w http.ResponseWriter, r *http.Request) {
 	// すでにログインしている場合は認可をやり直さない。MiAuthはログインのたびに
 	// インスタンス側へ新しいアクセストークンを作り、それを我々からは失効させられない
 	// (i/revoke-tokenはsecure:trueでアクセストークンからは呼べない)。無用な
-	// 再認証で連携アプリ一覧を増やさないためのガード。
+	// 再認証で連携アプリ一覧を増やさないためのガード。連携アカウントの追加だけは
+	// ログイン済みで行うので、そちらは /players/{id}/misskey-accounts/start を使う。
 	if id := PlayerIDFrom(r.Context()); id != 0 {
 		writeError(w, http.StatusConflict, "すでにログインしています。")
 		return
 	}
+	s.beginMiAuth(w, r, req, 0)
+}
+
+// beginMiAuth validates the instance, records the pending MiAuth session and
+// returns the approval URL. linkTo is the player the approval will be attached
+// to (0 = a plain login), and is what /auth/callback later branches on.
+func (s *Server) beginMiAuth(w http.ResponseWriter, r *http.Request, req authStartReq, linkTo int64) {
 	host, err := miauth.NormalizeHost(req.Instance)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -112,8 +121,13 @@ func (s *Server) authStart(w http.ResponseWriter, r *http.Request) {
 		writeInternal(w, r, err)
 		return
 	}
+	var owner *int64
+	if linkTo != 0 {
+		owner = &linkTo
+	}
 	if _, err := s.pool.Exec(r.Context(),
-		`INSERT INTO auth_sessions (id, host) VALUES ($1, $2)`, sessionID, host); err != nil {
+		`INSERT INTO auth_sessions (id, host, player_id) VALUES ($1, $2, $3)`,
+		sessionID, host, owner); err != nil {
 		writeInternal(w, r, err)
 		return
 	}
@@ -141,13 +155,27 @@ func (s *Server) authCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	// 保留レコードと突き合わせる。これをしないと、任意の session と host を
 	// 載せたコールバックで別インスタンスへ問い合わせさせられる。
-	var host string
+	// player_id が入っていれば連携アカウントの追加。どちらの経路かはこの行だけで
+	// 決め、クライアントの申告には従わない。
+	var (
+		host   string
+		linkTo *int64
+	)
 	err := s.pool.QueryRow(r.Context(),
-		`SELECT host FROM auth_sessions WHERE id = $1 AND created_at > now() - interval '1 hour'`,
-		req.Session).Scan(&host)
+		`SELECT host, player_id FROM auth_sessions WHERE id = $1 AND created_at > now() - interval '1 hour'`,
+		req.Session).Scan(&host, &linkTo)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "認証セッションが見つかりません。もう一度お試しください。")
 		return
+	}
+	if linkTo != nil {
+		// 始めた本人か確かめてから問い合わせる。他人のコールバックを横取りして
+		// 自分の住民にアカウントを付けられないようにする。
+		if id := PlayerIDFrom(r.Context()); id != *linkTo {
+			writeError(w, http.StatusForbidden,
+				"連携を始めたときのログインと違います。ログインし直してからやり直してください。")
+			return
+		}
 	}
 
 	res, err := s.miauth.Check(r.Context(), host, req.Session)
@@ -161,12 +189,18 @@ func (s *Server) authCallback(w http.ResponseWriter, r *http.Request) {
 		writeInternal(w, r, err)
 		return
 	}
+	if linkTo != nil {
+		s.finishAccountLink(w, r, *linkTo, host, res)
+		return
+	}
 	displayName := res.User.Name
 	if strings.TrimSpace(displayName) == "" {
 		displayName = res.User.Username
 	}
-	// 入居の知らせは player.Register が出す(登録の経路が複数あるため)。
-	p, _, err := s.players.Register(r.Context(), host, res.User.ID, displayName)
+	// 連携済みのアカウントなら、そのアカウントを持つ住民としてログインする。
+	// players の (instance_host, remote_user_id) は代表アカウントの写しでしか
+	// ないので、2つ目以降のアカウントはこちらでしか引けない。
+	p, err := s.loginPlayer(r, host, res.User.ID, displayName)
 	if err != nil {
 		writeInternal(w, r, err)
 		return
@@ -181,8 +215,10 @@ func (s *Server) authCallback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, sus.Message())
 		return
 	}
-	// Misskeyのアクセストークンを保存(prof表示やフォローで使う)。
-	if err := s.players.SetMisskeyToken(r.Context(), p.ID, res.Token); err != nil {
+	// Misskeyのアクセストークンを保存(prof表示やフォローで使う)。入れ先は連携テーブルで、
+	// 認証したのが代表アカウントなら players 側の写しも一緒に更新される。
+	// 代表を切り替えたときに、その先のトークンが要るのでアカウントごとに持つ。
+	if err := s.players.LinkMisskeyAccount(r.Context(), p.ID, host, res.User.ID, res.User.Username, res.Token); err != nil {
 		writeInternal(w, r, err)
 		return
 	}
@@ -198,6 +234,51 @@ func (s *Server) authCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	s.sessions.SetCookie(w, token)
 	writeJSON(w, http.StatusOK, toResp(p))
+}
+
+// loginPlayer resolves the authenticated Misskey account to a resident. A linked
+// account belongs to whoever linked it; anything else registers (or finds) the
+// resident whose public identity it is.
+func (s *Server) loginPlayer(r *http.Request, host, remoteUserID, displayName string) (*player.Player, error) {
+	id, err := s.players.FindByMisskeyAccount(r.Context(), host, remoteUserID)
+	if err != nil {
+		return nil, err
+	}
+	if id != 0 {
+		return s.players.Get(r.Context(), id)
+	}
+	// 入居の知らせは player.Register が出す(登録の経路が複数あるため)。
+	p, _, err := s.players.Register(r.Context(), host, remoteUserID, displayName)
+	return p, err
+}
+
+// linkCallbackResp is the /auth/callback answer for a link (rather than a
+// login). ログインの応答は住民そのものなので、mode の有無で見分けられる。
+type linkCallbackResp struct {
+	Mode     string                  `json:"mode"` // 常に "link"
+	Accounts []player.MisskeyAccount `json:"accounts"`
+}
+
+// finishAccountLink attaches the approved account to an already logged-in
+// resident. セッションは触らない: いま入っている経路が唯一の復旧手段のことが
+// あるので、連携の追加でログインし直させてはいけない。
+func (s *Server) finishAccountLink(w http.ResponseWriter, r *http.Request, playerID int64, host string, res *miauth.CheckResult) {
+	err := s.players.LinkMisskeyAccount(r.Context(), playerID, host, res.User.ID, res.User.Username, res.Token)
+	if errors.Is(err, player.ErrAccountTaken) {
+		writeError(w, http.StatusConflict,
+			"このMisskeyアカウントは、別の住民がすでに使っています。")
+		return
+	}
+	if err != nil {
+		writeInternal(w, r, err)
+		return
+	}
+	accounts, err := s.players.ListMisskeyAccounts(r.Context(), playerID)
+	if err != nil {
+		writeInternal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, linkCallbackResp{Mode: "link", Accounts: accounts})
 }
 
 // maxLiveGuests caps how many guests may exist at once.

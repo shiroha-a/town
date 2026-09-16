@@ -36,7 +36,7 @@ import AdminView from './components/AdminView.vue';
 import PlaceholderView from './components/PlaceholderView.vue';
 import Toast from './components/Toast.vue';
 import { currentRoute, pushRoute, replaceRoute, type NavParam } from './router';
-import { currentToast, closeToast } from './toast';
+import { currentToast, closeToast, notifyOk, notifyError } from './toast';
 import { watchForUpdate, stopUpdateWatch } from './update';
 
 const toast = currentToast();
@@ -76,10 +76,33 @@ onMounted(async () => {
     player.value = await api.authMe();
   } catch {
     player.value = null;
-  } finally {
-    booting.value = false;
   }
+  // 連携の追加から戻ってきたとき。未ログインならログイン画面が引き換えるので、
+  // ここで受けるのはログインしたままアカウントを足した場合だけ。
+  if (player.value) await finishAccountLink();
+  booting.value = false;
 });
+
+// MiAuthの承認から戻ってきたら、連携の追加として引き換えてユーザー設定へ戻す。
+// ログイン中のセッションはそのまま(連携の追加でログインし直させない)。
+async function finishAccountLink() {
+  const session = new URL(window.location.href).searchParams.get('session');
+  if (!session) return;
+  try {
+    const res = await api.authCallback(session);
+    if ('mode' in res) {
+      notifyOk(
+        'Misskeyアカウントを連携しました',
+        ['このアカウントでもログインできます。'],
+        'usersettings',
+      );
+    }
+  } catch (e) {
+    notifyError('連携できませんでした', e, 'usersettings');
+  }
+  applyRoute('usersettings');
+  replaceRoute('usersettings');
+}
 
 function onLogin(p: Player) {
   player.value = p;
