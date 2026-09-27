@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import { api, type Player, type ShopItem } from '../api';
-import { PARAM_COLUMNS } from '../params';
+import { PARAM_COLUMNS, powerShort } from '../params';
 import { showToast, buildEffectLines, notifyError, errorText } from '../toast';
+import { useFacilityCooldown } from '../cooldown';
 
 // ジム等、メニューを選んで利用する施設の汎用ビュー。
 const props = defineProps<{
@@ -26,6 +27,12 @@ const hasCreditCard = computed(() =>
 );
 
 const intervalLabel = (m: number) => (m > 0 ? `${m}分` : '-');
+
+// クールタイムは品ごとではなく施設ごと。待っている間はどの品も押せない。
+const cooldown = useFacilityCooldown(
+  () => props.player,
+  () => props.facility,
+);
 
 onMounted(async () => {
   try {
@@ -67,8 +74,14 @@ async function use(item: ShopItem) {
     <div class="fac-header">
       <div class="lead">
         {{ lead }}<br />
+        <span v-if="cooldown" class="cooldown" data-test="facility-cooldown">
+          次に利用できるまで{{ cooldown }}<br />
+        </span>
         ●{{ player.display_name }}さんの所持金：<span class="money">{{ yen(player.money) }}円</span>
-        ／ 身体パワー：{{ player.status.energy }} / {{ player.status.energy_max }}
+        ／ 身体パワー：{{ player.status.energy }} / {{ player.status.energy_max }} ／ 頭脳パワー：{{
+          player.status.nou_energy
+        }}
+        / {{ player.status.nou_energy_max }}
         <span class="pay">
           支払い
           <select v-model="payMethod" data-test="pay-method">
@@ -96,7 +109,16 @@ async function use(item: ShopItem) {
             <tr v-for="item in menu" :key="item.id" :data-test="`menu-${item.id}`">
               <td class="l">{{ item.name }}</td>
               <td class="use">
-                <button class="btn" :disabled="busy" @click="use(item)">{{ useLabel }}</button>
+                <!-- パワーが足りない品はサーバーが弾くので、押してからエラーにせずボタンを出さない。 -->
+                <button
+                  v-if="!powerShort(item.params, player.status)"
+                  class="btn"
+                  :disabled="busy || cooldown !== null"
+                  @click="use(item)"
+                >
+                  {{ useLabel }}
+                </button>
+                <span v-else class="no-power">パワー不足</span>
               </td>
               <td class="price">{{ yen(item.price) }}円</td>
               <td
@@ -213,5 +235,14 @@ async function use(item: ShopItem) {
 }
 .menu-table td.use {
   width: 56px;
+}
+.cooldown {
+  color: #cc3300;
+  font-weight: bold;
+}
+.no-power {
+  font-size: 11px;
+  color: #999;
+  white-space: nowrap;
 }
 </style>

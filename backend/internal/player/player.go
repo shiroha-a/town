@@ -125,8 +125,10 @@ type Status struct {
 	DiseaseName     string     // 病名(病気指数からの派生、健康なら空)
 	Condition       string     // コンディション表示ラベル(病名があれば病名、なければ体調ラベル)
 	WorkAvailableAt *time.Time // 就労クールタイム中の再就労可能時刻(可能ならnil)
-	EnergyFullAt    *time.Time // 身体パワーが満タンになる時刻(満タン時はnil)
-	NouEnergyFullAt *time.Time // 頭脳パワーが満タンになる時刻(満タン時はnil)
+	// 施設ごとの利用待ち(ジム・教室・学校など)。クールタイム中の施設だけが入る。
+	FacilityAvailableAt map[string]time.Time
+	EnergyFullAt        *time.Time // 身体パワーが満タンになる時刻(満タン時はnil)
+	NouEnergyFullAt     *time.Time // 頭脳パワーが満タンになる時刻(満タン時はnil)
 	// 1ポイント回復に要する時間(ミリ秒。入浴倍率を反映済み)。画面が状態を
 	// 取り直す間隔と、次の1ポイントを見せる刻みに使う。
 	// 秒で返すと入浴中(倍率10なら0.5秒)が0に丸まってしまうためミリ秒。
@@ -829,17 +831,35 @@ func (s *Service) Get(ctx context.Context, id int64) (*Player, error) {
 	p.Status.DiseaseName = cond.DiseaseName
 	p.Status.Condition = cond.Display
 
-	// 就労クールタイム中なら再就労可能時刻を返す(経過済み/未就労はnil)。デバッグ時は常にnil。
+	// クールタイム中の施設と再利用可能時刻を返す(経過済みは含めない)。デバッグ時は空。
+	// 画面は押してからエラーにせず、待ち時間を見せてボタンを押せなくする。
 	debugNoCd := s.settings.Get().DebugNoCooldown
+	p.Status.FacilityAvailableAt = map[string]time.Time{}
 	if !debugNoCd {
-		var workAt *time.Time
-		if err := s.pool.QueryRow(ctx,
-			`SELECT next_available_at FROM player_facility_cooldowns
-			 WHERE player_id = $1 AND facility = 'work' AND next_available_at > now()`,
-			id).Scan(&workAt); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return nil, fmt.Errorf("get work cooldown: %w", err)
+		cds, err := s.pool.Query(ctx,
+			`SELECT facility, next_available_at FROM player_facility_cooldowns
+			 WHERE player_id = $1 AND next_available_at > now()`, id)
+		if err != nil {
+			return nil, fmt.Errorf("get cooldowns: %w", err)
 		}
-		p.Status.WorkAvailableAt = workAt
+		for cds.Next() {
+			var (
+				facility string
+				at       time.Time
+			)
+			if err := cds.Scan(&facility, &at); err != nil {
+				cds.Close()
+				return nil, fmt.Errorf("scan cooldown: %w", err)
+			}
+			p.Status.FacilityAvailableAt[facility] = at
+		}
+		cds.Close()
+		if err := cds.Err(); err != nil {
+			return nil, fmt.Errorf("cooldown rows: %w", err)
+		}
+		if at, ok := p.Status.FacilityAvailableAt["work"]; ok {
+			p.Status.WorkAvailableAt = &at
+		}
 	}
 
 	rows, err := s.pool.Query(ctx,

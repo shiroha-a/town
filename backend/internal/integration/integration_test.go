@@ -79,6 +79,8 @@ type playerResp struct {
 		DiseaseIndex int      `json:"disease_index"`
 		DiseaseName  string   `json:"disease_name"`
 		Condition    string   `json:"condition"`
+		// 施設名 -> 再利用可能時刻(クールタイム中の施設だけ)
+		FacilityAvailableAt map[string]time.Time `json:"facility_available_at"`
 	} `json:"status"`
 	Items []struct {
 		ItemID          int64      `json:"item_id"`
@@ -813,6 +815,8 @@ func TestGym(t *testing.T) {
 	if tairyoku != 6 { // 初期5 + 1
 		t.Errorf("tairyoku = %d, want 6", tairyoku)
 	}
+	// 画面がボタンを押せなくできるよう、応答にジムの再利用可能時刻が入る。
+	assertFacilityAvailableAt(t, pool, p, alice.ID, "gym")
 
 	// クールタイム内の再トレーニングは 422。
 	body, _ = json.Marshal(map[string]any{"menu_id": stretchID, "idempotency_key": "gym-2"})
@@ -821,6 +825,39 @@ func TestGym(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Errorf("second train status = %d, want 422", resp.StatusCode)
+	}
+
+	// クールタイムが明けたら返さない。
+	if _, err := pool.Exec(ctx,
+		`UPDATE player_facility_cooldowns SET next_available_at = now() - interval '1 second'
+		 WHERE player_id = $1 AND facility = 'gym'`, alice.ID); err != nil {
+		t.Fatal(err)
+	}
+	resp, err = http.Get(srv.URL + "/api/v1/players/" + strconv.FormatInt(alice.ID, 10))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var after playerResp
+	json.NewDecoder(resp.Body).Decode(&after)
+	resp.Body.Close()
+	if at, ok := after.Status.FacilityAvailableAt["gym"]; ok {
+		t.Errorf("明けたクールタイム facility_available_at[gym] = %v, want なし", at)
+	}
+}
+
+// assertFacilityAvailableAt checks that the player response carries the
+// facility's cooldown end, matching the stored value.
+func assertFacilityAvailableAt(t *testing.T, pool *pgxpool.Pool, p playerResp, playerID int64, facility string) {
+	t.Helper()
+	var want time.Time
+	if err := pool.QueryRow(context.Background(),
+		`SELECT next_available_at FROM player_facility_cooldowns WHERE player_id = $1 AND facility = $2`,
+		playerID, facility).Scan(&want); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := p.Status.FacilityAvailableAt[facility]
+	if !ok || !got.Equal(want) {
+		t.Errorf("facility_available_at[%s] = %v (ok=%v), want %v", facility, got, ok, want)
 	}
 }
 
@@ -2970,6 +3007,7 @@ func TestSchool(t *testing.T) {
 	if nou != 43 {
 		t.Errorf("nou_energy = %d, want 43", nou)
 	}
+	assertFacilityAvailableAt(t, pool, p, alice.ID, "school")
 
 	// 同日2回目は 422(1日1回)。
 	body, _ = json.Marshal(map[string]any{"course_id": courseID, "idempotency_key": "sch-2"})

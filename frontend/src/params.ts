@@ -114,6 +114,18 @@ export function requirementSummary(reqs: Record<string, number>): string {
   return parts.length ? parts.join(' ') : 'なし';
 }
 
+// 施設メニューの消費パワー(paramsのenergy/nou_energyの負値)が今のパワーで足りないか。
+// サーバーは足りないと弾く(effects.InsufficientParam)ので、画面では押す前にボタンを出さない。
+export function powerShort(
+  params: Record<string, number>,
+  status: { energy: number; nou_energy: number },
+): boolean {
+  return (
+    status.energy + Math.min(0, params['energy'] ?? 0) < 0 ||
+    status.nou_energy + Math.min(0, params['nou_energy'] ?? 0) < 0
+  );
+}
+
 // 空腹値(満腹度 0-100)をレガシー風のラベルに変換。
 export function satietyLabel(s: number): string {
   if (s >= 80) return '満腹';
