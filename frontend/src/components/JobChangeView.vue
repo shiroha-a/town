@@ -33,7 +33,7 @@ function masterOk(job: JobOption): boolean {
 // 前提職をまだマスターしておらず就けない職業は、一覧から除外する。
 const visibleJobs = computed(() => jobs.value.filter(masterOk));
 
-// 体格の条件。パラメータのように列を作ると横に伸びるので、職業名の下に文で出す。
+// 体格の条件。パラメータのように列を作ると横に伸びるので、職業名の下に1条件1行で出す。
 // 満たしていないものは色を変えて、なぜ就けないのかが分かるようにする。
 interface Limit {
   text: string;
@@ -112,7 +112,8 @@ async function take(job: JobOption) {
 
     <div class="panel-white">
       <div class="cap">
-        必要パラメータ(不足は赤・達成は緑で表示)／ 職業名の横は体格の条件(満たしていないものは赤)／
+        必要パラメータ(不足は赤・達成は緑で表示)／
+        職業名の下は前提職と体格の条件(満たしていないものは赤)／
         身P・頭P消費(1回働くと消費するパワー)／ ボーナス(レベルアップ時に給料の何倍が出るか)／
         給料の下は昇給(レベル1ごとに基本給が何%増えるか)<br />
         条件を満たしていない職業には「就く」ボタンが出ません
@@ -122,12 +123,12 @@ async function take(job: JobOption) {
           <thead>
             <tr>
               <th class="l">職業</th>
+              <th></th>
               <th v-for="c in REQ_COLUMNS" :key="c.key" class="p">{{ c.label }}</th>
               <th class="cost">身P<br />消費</th>
               <th class="cost">頭P<br />消費</th>
               <th>給料</th>
               <th class="bonus">ボー<br />ナス</th>
-              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -135,7 +136,7 @@ async function take(job: JobOption) {
               <td class="l">
                 {{ job.name }}
                 <span v-if="job.require_master" class="req-master" :class="{ met: masterOk(job) }">
-                  （要「{{ job.require_master }}」マスター）
+                  要「{{ job.require_master }}」マスター
                 </span>
                 <span
                   v-for="(lim, i) in limits(job)"
@@ -145,6 +146,14 @@ async function take(job: JobOption) {
                 >
                   {{ lim.text }}
                 </span>
+              </td>
+              <!-- 横に振らずに押せるよう、職業名のすぐ隣に置く。 -->
+              <td class="take">
+                <button v-if="player.status.job === job.name" class="btn" disabled>就業中</button>
+                <button v-else-if="canTake(job)" class="btn" :disabled="busy" @click="take(job)">
+                  就く
+                </button>
+                <span v-else class="no-take">条件不足</span>
               </td>
               <td
                 v-for="c in REQ_COLUMNS"
@@ -165,13 +174,6 @@ async function take(job: JobOption) {
               </td>
               <td class="bonus">
                 <span v-if="job.bonus_rate > 0">×{{ job.bonus_rate }}</span>
-              </td>
-              <td class="right">
-                <button v-if="player.status.job === job.name" class="btn" disabled>就業中</button>
-                <button v-else-if="canTake(job)" class="btn" :disabled="busy" @click="take(job)">
-                  就く
-                </button>
-                <span v-else class="no-take">条件不足</span>
               </td>
             </tr>
           </tbody>
@@ -314,10 +316,16 @@ async function take(job: JobOption) {
   font-weight: normal;
   white-space: nowrap;
 }
+/* 前提職と体格の条件は1条件1行で職業名の下に積む。横に並べると職業名の列が
+   画面幅を占めて、狭い画面ではパラメータ列を見る余地がなくなっていた。 */
+.req-master,
+.limit {
+  display: block;
+  width: fit-content;
+  margin-top: 1px;
+}
 /* 体格の条件。満たしていれば控えめに、足りなければ赤で目立たせる。 */
 .limit {
-  display: inline-block;
-  margin-left: 6px;
   padding: 0 5px;
   border-radius: 8px;
   background: #eef1e8;
@@ -329,6 +337,10 @@ async function take(job: JobOption) {
   background: #ffe8e8;
   color: #c33;
   font-weight: bold;
+}
+/* 職業名の列の直後に置く。上詰めにして、条件で縦に伸びた行でも職業名と並べる。 */
+.job-table td.take {
+  vertical-align: top;
 }
 /* 就けない職はボタンを出さない。空のセルは壊れて見えるので理由だけ残す。 */
 .no-take {
