@@ -85,6 +85,8 @@ export interface Player {
     disease_name: string;
     condition: string;
     work_available_at: string | null;
+    /** 施設名(gym/kyushitu/school など) -> 再利用可能時刻。クールタイム中の施設だけ。 */
+    facility_available_at: Record<string, string>;
     /** 1ポイント回復に要する時間(ミリ秒。入浴倍率を反映済み)。 */
     energy_recovery_ms: number;
     nou_recovery_ms: number;

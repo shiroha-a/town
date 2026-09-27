@@ -2,6 +2,8 @@
 import { ref, onMounted } from 'vue';
 import { api, type Player, type ShopItem } from '../api';
 import { showToast, buildEffectLines, notifyError, errorText } from '../toast';
+import { powerShort } from '../params';
+import { useFacilityCooldown } from '../cooldown';
 
 // 学校: 頭脳科目を1日1回だけ大きく伸ばす施設。頭脳パワー(nou_energy)と現金を消費する。
 const props = defineProps<{ player: Player }>();
@@ -21,6 +23,12 @@ const SUBJECTS: { key: string; label: string }[] = [
 ];
 
 const menu = ref<ShopItem[]>([]);
+
+// 受講は1日1回。受講済みなら次のゲーム日までボタンを押せなくする。
+const cooldown = useFacilityCooldown(
+  () => props.player,
+  () => 'school',
+);
 const busy = ref(false);
 
 // 頭脳消費は effect の nou_energy 負値。ジムの身体消費と同じくマイナス表記で見せる。
@@ -66,6 +74,9 @@ async function attend(item: ShopItem) {
     <div class="fac-header">
       <div class="lead">
         今日も頑張って勉強しましょう。受講できるのは1日1回です。<br />
+        <span v-if="cooldown" class="cooldown" data-test="facility-cooldown">
+          今日の受講は終了しました。次に受講できるまで{{ cooldown }}<br />
+        </span>
         ●{{ player.display_name }}さんの所持金：<span class="money">{{ yen(player.money) }}円</span>
         ／ 頭脳パワー：{{ player.status.nou_energy }} / {{ player.status.nou_energy_max }}
       </div>
@@ -88,7 +99,16 @@ async function attend(item: ShopItem) {
             <tr v-for="item in menu" :key="item.id" :data-test="`course-${item.id}`">
               <td class="l">{{ item.name }}</td>
               <td class="use">
-                <button class="btn" :disabled="busy" @click="attend(item)">受講する</button>
+                <!-- 頭脳パワーが足りない講座はサーバーが弾くので、押してからエラーにせずボタンを出さない。 -->
+                <button
+                  v-if="!powerShort(item.params, player.status)"
+                  class="btn"
+                  :disabled="busy || cooldown !== null"
+                  @click="attend(item)"
+                >
+                  受講する
+                </button>
+                <span v-else class="no-power">パワー不足</span>
               </td>
               <td
                 v-for="s in SUBJECTS"
@@ -204,5 +224,14 @@ async function attend(item: ShopItem) {
 }
 .menu-table td.use {
   width: 56px;
+}
+.cooldown {
+  color: #cc3300;
+  font-weight: bold;
+}
+.no-power {
+  font-size: 11px;
+  color: #999;
+  white-space: nowrap;
 }
 </style>
