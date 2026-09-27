@@ -332,6 +332,14 @@ func (s *Service) URLOf(ctx context.Context, host, name string) (string, bool) {
 	return d.URL, true
 }
 
+// Approved reports whether a custom emoji has already been cleared for use
+// (it is in the approval cache). It never contacts the emoji's instance: a
+// reaction only accepts emoji the picker has resolved beforehand.
+func (s *Service) Approved(ctx context.Context, host, name string) (bool, error) {
+	_, ok, err := s.cached(ctx, strings.ToLower(host), name)
+	return ok, err
+}
+
 // Used returns every emoji approved so far, for the client to render posts with.
 // Only ever-used emoji land in this table, so it stays small; rendering never
 // triggers an external fetch — an unknown shortcode stays as text.

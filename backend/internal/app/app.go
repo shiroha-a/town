@@ -106,7 +106,6 @@ func Run(ctx context.Context, mode string, cfg *config.Config) error {
 	attendanceSvc := attendance.New(pool, loc, game.DayBoundaryHour)
 	cleagueSvc := cleague.New(pool)
 	monsterSvc := streetfight.New(pool)
-	feedbackSvc := feedback.New(pool)
 	newsSvc := news.New(pool)
 	rankingSvc := ranking.New(pool)
 	serialSvc := serial.New(pool, rng.New(0))
@@ -130,6 +129,8 @@ func Run(ctx context.Context, mode string, cfg *config.Config) error {
 	}
 
 	emojis := emoji.New(pool, miauthClient)
+	// リアクションのカスタム絵文字は、使用許可済みかを絵文字のキャッシュで確かめる。
+	feedbackSvc := feedback.New(pool, emojis)
 	profiles := profile.New(pool, miauthClient, players, emojis)
 	// 通知(Web Push)。VAPID鍵はDBに置き、無ければここで作る(設定不要)。
 	pushSvc, err := push.New(ctx, pool, cfg.Server.BaseURL, logger, tokenCipher)

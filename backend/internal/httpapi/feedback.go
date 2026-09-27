@@ -24,6 +24,8 @@ func writeFeedbackErr(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusForbidden, fErr.Message)
 	case errors.Is(err, feedback.ErrNotFound):
 		writeError(w, http.StatusNotFound, "その投稿はありません。")
+	case errors.Is(err, feedback.ErrCommentNotFound):
+		writeError(w, http.StatusNotFound, "そのコメントはありません。")
 	default:
 		writeInternal(w, r, err)
 	}
@@ -96,14 +98,15 @@ func (s *Server) feedbackCreate(w http.ResponseWriter, r *http.Request) {
 	// 新しい投稿は運営に知らせる。返信を投稿者に知らせているのと同じ仕組みで、
 	// 向きが逆になるだけ。書いた本人が管理者なら、その人には送らない。
 	s.notifyAdmins(r.Context(), id, fmt.Sprintf(
-		"目安箱に新しい投稿がありました。\n\n【%s】%s\n\n%s",
-		feedback.KindLabels[req.Kind], req.Title, req.Body))
+		"目安箱に新しい投稿がありました。\n\n#%d【%s】%s\n\n%s",
+		postID, feedback.KindLabels[req.Kind], req.Title, req.Body))
 	s.webhooks.PostQuiet(r.Context(), webhook.Notice{
 		Event:    webhook.EventFeedbackCreated,
 		Severity: webhook.SeverityInfo,
 		Title:    "目安箱に新しい投稿",
 		Body:     req.Body,
 		Fields: []webhook.Field{
+			{Name: "番号", Value: fmt.Sprintf("#%d", postID)},
 			{Name: "件名", Value: req.Title},
 			{Name: "種別", Value: feedback.KindLabels[req.Kind]},
 			{Name: "書いた人", Value: s.playerLabel(r.Context(), id)},
@@ -151,14 +154,14 @@ func (s *Server) feedbackComment(w http.ResponseWriter, r *http.Request) {
 	// うるさいので、管理者の返信では送らない。
 	if !isAdmin {
 		s.notifyAdmins(r.Context(), id, fmt.Sprintf(
-			"目安箱の「%s」に返信がつきました。\n\n%s", res.PostTitle, req.Body))
+			"目安箱の#%d「%s」に返信がつきました。\n\n%s", res.PostID, res.PostTitle, req.Body))
 		s.webhooks.PostQuiet(r.Context(), webhook.Notice{
 			Event:    webhook.EventFeedbackCommented,
 			Severity: webhook.SeverityInfo,
 			Title:    "目安箱に返信",
 			Body:     req.Body,
 			Fields: []webhook.Field{
-				{Name: "元の投稿", Value: res.PostTitle},
+				{Name: "元の投稿", Value: fmt.Sprintf("#%d %s", res.PostID, res.PostTitle)},
 				{Name: "書いた人", Value: s.playerLabel(r.Context(), id)},
 			},
 		})
@@ -166,7 +169,7 @@ func (s *Server) feedbackComment(w http.ResponseWriter, r *http.Request) {
 	// 返信は待たれているので、投稿者にはゲーム内メールで知らせる(メール通知が
 	// オンなら端末にも届く)。送れなくても返信自体は成立させる。
 	if res.NotifyOwner != nil {
-		body := fmt.Sprintf("目安箱の「%s」に返信がつきました。\n\n%s", res.PostTitle, req.Body)
+		body := fmt.Sprintf("目安箱の#%d「%s」に返信がつきました。\n\n%s", res.PostID, res.PostTitle, req.Body)
 		if err := s.mail.Send(r.Context(), id, *res.NotifyOwner, body, 0, nil); err != nil {
 			slog.Warn("feedback: 返信のメール送信に失敗", "post", res.PostID, "err", err)
 		}
@@ -194,6 +197,110 @@ func (s *Server) feedbackVote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d, err := s.feedback.Get(r.Context(), postID, id)
+	if err != nil {
+		writeFeedbackErr(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, d)
+}
+
+// feedbackEditPost rewrites the caller's own post.
+func (s *Server) feedbackEditPost(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	postID, ok := postIDFromPath(w, r, "pid")
+	if !ok {
+		return
+	}
+	var req feedbackPostReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if err := s.feedback.EditPost(r.Context(), postID, id, req.Kind, req.Title, req.Body); err != nil {
+		writeFeedbackErr(w, r, err)
+		return
+	}
+	s.writeFeedbackDetail(w, r, postID, id)
+}
+
+// feedbackEditComment rewrites the caller's own comment.
+func (s *Server) feedbackEditComment(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	commentID, ok := postIDFromPath(w, r, "cid")
+	if !ok {
+		return
+	}
+	var req feedbackCommentReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	postID, err := s.feedback.EditComment(r.Context(), commentID, id, req.Body)
+	if err != nil {
+		writeFeedbackErr(w, r, err)
+		return
+	}
+	s.writeFeedbackDetail(w, r, postID, id)
+}
+
+type feedbackReactReq struct {
+	Reaction string `json:"reaction"`
+}
+
+// feedbackReactPost adds a reaction to a post, or takes it back.
+func (s *Server) feedbackReactPost(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	postID, ok := postIDFromPath(w, r, "pid")
+	if !ok {
+		return
+	}
+	var req feedbackReactReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if err := s.feedback.ReactPost(r.Context(), postID, id, req.Reaction); err != nil {
+		writeFeedbackErr(w, r, err)
+		return
+	}
+	s.writeFeedbackDetail(w, r, postID, id)
+}
+
+// feedbackReactComment adds a reaction to a comment, or takes it back.
+func (s *Server) feedbackReactComment(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	commentID, ok := postIDFromPath(w, r, "cid")
+	if !ok {
+		return
+	}
+	var req feedbackReactReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	postID, err := s.feedback.ReactComment(r.Context(), commentID, id, req.Reaction)
+	if err != nil {
+		writeFeedbackErr(w, r, err)
+		return
+	}
+	s.writeFeedbackDetail(w, r, postID, id)
+}
+
+// writeFeedbackDetail answers with the post as the viewer now sees it.
+func (s *Server) writeFeedbackDetail(w http.ResponseWriter, r *http.Request, postID, viewer int64) {
+	d, err := s.feedback.Get(r.Context(), postID, viewer)
 	if err != nil {
 		writeFeedbackErr(w, r, err)
 		return
