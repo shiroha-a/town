@@ -63,6 +63,13 @@ body.has-update-bar {
   line-height: 13px;
   color: #339900;
 }
+/* 所有物欄: クールタイム中(赤)と、持っているだけで効く品(灰)。 */
+.honbun5.item-cooldown {
+  color: #cc0033;
+}
+.honbun5.item-hold {
+  color: #999;
+}
 /* ワープUI(持ち物欄の下): 行き先プルダウン + ボタン。 */
 .warp-box {
   margin-top: 4px;

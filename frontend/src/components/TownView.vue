@@ -599,6 +599,16 @@ function itemAmount(it: ItemStack): string {
   if (it.durability_unit === 'day') return `残り${it.remaining_uses}日`;
   return `${it.sets}個`;
 }
+
+// 所有物欄の色分け。持っているだけで効く品(乗り物・カード類)は灰色、
+// クールタイム中の品は赤。食べ物の満腹中もnext_available_atに入っているので赤になる。
+// 1秒ごとに進む時計で見るので、明けた時点で元の色に戻る。
+function itemStateClass(it: ItemStack): string | undefined {
+  if (!it.usable) return 'item-hold';
+  if (!it.next_available_at) return undefined;
+  const at = new Date(it.next_available_at).getTime();
+  return at > serverCorrectedNow.value ? 'item-cooldown' : undefined;
+}
 </script>
 
 <template>
@@ -803,7 +813,11 @@ function itemAmount(it: ItemStack): string {
             <div class="honbun2">
               <span class="honbun2">所有物</span>：購入商品 {{ player.items.length }} /
               {{ player.item_kind_limit || '∞' }}<br />
-              <span class="honbun5" v-for="it in player.items" :key="it.item_id"
+              <span
+                v-for="it in player.items"
+                :key="it.item_id"
+                class="honbun5"
+                :class="itemStateClass(it)"
                 >○{{ it.name }}({{ itemAmount(it) }})
               </span>
             </div>
