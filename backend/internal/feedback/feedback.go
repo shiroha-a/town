@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -45,7 +46,23 @@ const (
 	MaxComment = 500
 	// PostInterval throttles new posts per player (連投よけ)。
 	PostInterval = 3 * time.Minute
+	// MaxReactionKinds caps how many different reactions one post or comment
+	// may carry. 既に付いている種類に乗るのは上限に関係なくできる。
+	MaxReactionKinds = 20
 )
+
+// UnicodeReactions are the plain emoji offered as reactions (GitHubと同じ8種)。
+// 任意のUnicodeは受けない。カスタム絵文字は使用許可済みの :name@host: だけ受ける。
+var UnicodeReactions = []string{"👍", "👎", "😄", "🎉", "😕", "❤️", "🚀", "👀"}
+
+// customReaction matches a custom emoji shortcode (:name@host:), the same form
+// posts use for custom emoji.
+var customReaction = regexp.MustCompile(`^:([a-zA-Z0-9_+-]+)@([a-zA-Z0-9.-]+):$`)
+
+// EmojiApprover tells whether a custom emoji is cleared for use (emoji.Service).
+type EmojiApprover interface {
+	Approved(ctx context.Context, host, name string) (bool, error)
+}
 
 // ErrValidation is bad input from a player (mapped to 422).
 type ErrValidation struct{ Message string }
@@ -59,6 +76,18 @@ func (e *ErrForbidden) Error() string { return e.Message }
 
 // ErrNotFound means the post is gone.
 var ErrNotFound = errors.New("post not found")
+
+// ErrCommentNotFound means the comment is gone.
+var ErrCommentNotFound = errors.New("comment not found")
+
+// Reaction is one kind of reaction on a post or comment, with its tally.
+type Reaction struct {
+	// Reaction is a Unicode emoji from UnicodeReactions or a :name@host: shortcode.
+	Reaction string `json:"reaction"`
+	Count    int    `json:"count"`
+	// Reacted reports whether the viewer has added this one.
+	Reacted bool `json:"reacted"`
+}
 
 // Post is one entry of the list.
 type Post struct {
@@ -77,16 +106,22 @@ type Post struct {
 	Comments  int       `json:"comments"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	// EditedAt is when the author last rewrote it (nil when never edited).
+	EditedAt *time.Time `json:"edited_at"`
+	// Reactions is filled only by Get (the list leaves it empty).
+	Reactions []Reaction `json:"reactions"`
 }
 
 // Comment is one reply.
 type Comment struct {
-	ID         int64     `json:"id"`
-	AuthorID   *int64    `json:"author_id"`
-	AuthorName string    `json:"author_name"`
-	IsStaff    bool      `json:"is_staff"`
-	Body       string    `json:"body"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID         int64      `json:"id"`
+	AuthorID   *int64     `json:"author_id"`
+	AuthorName string     `json:"author_name"`
+	IsStaff    bool       `json:"is_staff"`
+	Body       string     `json:"body"`
+	CreatedAt  time.Time  `json:"created_at"`
+	EditedAt   *time.Time `json:"edited_at"`
+	Reactions  []Reaction `json:"reactions"`
 }
 
 // Detail is a post with its comments.
@@ -96,10 +131,16 @@ type Detail struct {
 }
 
 // Service reads and writes the 目安箱.
-type Service struct{ pool *pgxpool.Pool }
+type Service struct {
+	pool   *pgxpool.Pool
+	emojis EmojiApprover
+}
 
-// New builds the service.
-func New(pool *pgxpool.Pool) *Service { return &Service{pool: pool} }
+// New builds the service. emojis checks custom-emoji reactions; with nil only
+// the Unicode reactions are accepted.
+func New(pool *pgxpool.Pool, emojis EmojiApprover) *Service {
+	return &Service{pool: pool, emojis: emojis}
+}
 
 // ListOptions filters and orders the list.
 type ListOptions struct {
@@ -116,14 +157,15 @@ const postColumns = `p.id, p.author_id, p.author_name, p.kind, p.status, p.title
 	(SELECT COUNT(*) FROM feedback_votes v WHERE v.post_id = p.id)::int,
 	(SELECT COUNT(*) FROM feedback_comments c WHERE c.post_id = p.id)::int,
 	EXISTS (SELECT 1 FROM feedback_votes v WHERE v.post_id = p.id AND v.player_id = $1),
-	p.created_at, p.updated_at`
+	p.created_at, p.updated_at, p.edited_at`
 
 func scanPost(row pgx.Row) (Post, error) {
 	var p Post
 	if err := row.Scan(&p.ID, &p.AuthorID, &p.AuthorName, &p.Kind, &p.Status, &p.Title, &p.Body,
-		&p.Votes, &p.Comments, &p.Voted, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		&p.Votes, &p.Comments, &p.Voted, &p.CreatedAt, &p.UpdatedAt, &p.EditedAt); err != nil {
 		return Post{}, err
 	}
+	p.Reactions = []Reaction{}
 	p.KindLabel = KindLabels[p.Kind]
 	p.StatusLabel = StatusLabels[p.Status]
 	return p, nil
@@ -174,7 +216,7 @@ func (s *Service) Get(ctx context.Context, id, viewer int64) (Detail, error) {
 		return Detail{}, fmt.Errorf("get post: %w", err)
 	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, author_id, author_name, is_staff, body, created_at
+		`SELECT id, author_id, author_name, is_staff, body, created_at, edited_at
 		 FROM feedback_comments WHERE post_id = $1 ORDER BY created_at, id`, id)
 	if err != nil {
 		return Detail{}, fmt.Errorf("list comments: %w", err)
@@ -182,13 +224,71 @@ func (s *Service) Get(ctx context.Context, id, viewer int64) (Detail, error) {
 	defer rows.Close()
 	d := Detail{Post: p, Comments: []Comment{}}
 	for rows.Next() {
-		var c Comment
-		if err := rows.Scan(&c.ID, &c.AuthorID, &c.AuthorName, &c.IsStaff, &c.Body, &c.CreatedAt); err != nil {
+		c := Comment{Reactions: []Reaction{}}
+		if err := rows.Scan(&c.ID, &c.AuthorID, &c.AuthorName, &c.IsStaff, &c.Body, &c.CreatedAt, &c.EditedAt); err != nil {
 			return Detail{}, fmt.Errorf("scan comment: %w", err)
 		}
 		d.Comments = append(d.Comments, c)
 	}
-	return d, rows.Err()
+	if err := rows.Err(); err != nil {
+		return Detail{}, err
+	}
+	if err := s.loadReactions(ctx, &d, viewer); err != nil {
+		return Detail{}, err
+	}
+	return d, nil
+}
+
+// loadReactions tallies the reactions of the post and all its comments. 並びは
+// 最初に付いた順(後から付いた種類が右に足されていく)。
+func (s *Service) loadReactions(ctx context.Context, d *Detail, viewer int64) error {
+	rows, err := s.pool.Query(ctx,
+		`SELECT reaction, COUNT(*)::int, bool_or(player_id = $2)
+		 FROM feedback_post_reactions WHERE post_id = $1
+		 GROUP BY reaction ORDER BY MIN(created_at), reaction`, d.Post.ID, viewer)
+	if err != nil {
+		return fmt.Errorf("post reactions: %w", err)
+	}
+	for rows.Next() {
+		var r Reaction
+		if err := rows.Scan(&r.Reaction, &r.Count, &r.Reacted); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan post reaction: %w", err)
+		}
+		d.Post.Reactions = append(d.Post.Reactions, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	byComment := map[int64]int{}
+	for i, c := range d.Comments {
+		byComment[c.ID] = i
+	}
+	rows, err = s.pool.Query(ctx,
+		`SELECT r.comment_id, r.reaction, COUNT(*)::int, bool_or(r.player_id = $2)
+		 FROM feedback_comment_reactions r
+		 JOIN feedback_comments c ON c.id = r.comment_id
+		 WHERE c.post_id = $1
+		 GROUP BY r.comment_id, r.reaction ORDER BY MIN(r.created_at), r.reaction`, d.Post.ID, viewer)
+	if err != nil {
+		return fmt.Errorf("comment reactions: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid int64
+			r   Reaction
+		)
+		if err := rows.Scan(&cid, &r.Reaction, &r.Count, &r.Reacted); err != nil {
+			return fmt.Errorf("scan comment reaction: %w", err)
+		}
+		if i, ok := byComment[cid]; ok {
+			d.Comments[i].Reactions = append(d.Comments[i].Reactions, r)
+		}
+	}
+	return rows.Err()
 }
 
 // trimTo cuts a field to its limit after trimming spaces, and rejects empties.
@@ -357,4 +457,175 @@ func (s *Service) DeleteComment(ctx context.Context, commentID, playerID int64, 
 		return fmt.Errorf("delete comment: %w", err)
 	}
 	return nil
+}
+
+// EditPost rewrites the author's own post. The status stays with the admins.
+// 中身が変わらなければ「編集済み」を付けない(開いて保存しただけで印が付かないように)。
+func (s *Service) EditPost(ctx context.Context, postID, playerID int64, kind, title, body string) error {
+	if !valid(Kinds, kind) {
+		return &ErrValidation{Message: "種別を選んでください。"}
+	}
+	title, err := trimTo(title, "タイトル", MaxTitle)
+	if err != nil {
+		return err
+	}
+	body, err = trimTo(body, "内容", MaxBody)
+	if err != nil {
+		return err
+	}
+	var (
+		ownerID                    *int64
+		curKind, curTitle, curBody string
+	)
+	err = s.pool.QueryRow(ctx,
+		`SELECT author_id, kind, title, body FROM feedback_posts WHERE id = $1`, postID).
+		Scan(&ownerID, &curKind, &curTitle, &curBody)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("post: %w", err)
+	}
+	// 管理者でも他人の投稿は書き換えない(書いた人の言葉のまま残す)。
+	if ownerID == nil || *ownerID != playerID {
+		return &ErrForbidden{Message: "自分の投稿だけ編集できます。"}
+	}
+	if kind == curKind && title == curTitle && body == curBody {
+		return nil
+	}
+	if _, err := s.pool.Exec(ctx,
+		`UPDATE feedback_posts SET kind = $2, title = $3, body = $4,
+		        edited_at = now(), updated_at = now()
+		 WHERE id = $1`, postID, kind, title, body); err != nil {
+		return fmt.Errorf("edit post: %w", err)
+	}
+	return nil
+}
+
+// EditComment rewrites the author's own comment and returns its post.
+func (s *Service) EditComment(ctx context.Context, commentID, playerID int64, body string) (int64, error) {
+	body, err := trimTo(body, "コメント", MaxComment)
+	if err != nil {
+		return 0, err
+	}
+	var (
+		postID  int64
+		ownerID *int64
+		curBody string
+	)
+	err = s.pool.QueryRow(ctx,
+		`SELECT post_id, author_id, body FROM feedback_comments WHERE id = $1`, commentID).
+		Scan(&postID, &ownerID, &curBody)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, ErrCommentNotFound
+	}
+	if err != nil {
+		return 0, fmt.Errorf("comment: %w", err)
+	}
+	if ownerID == nil || *ownerID != playerID {
+		return 0, &ErrForbidden{Message: "自分のコメントだけ編集できます。"}
+	}
+	if body == curBody {
+		return postID, nil
+	}
+	if _, err := s.pool.Exec(ctx,
+		`UPDATE feedback_comments SET body = $2, edited_at = now() WHERE id = $1`,
+		commentID, body); err != nil {
+		return 0, fmt.Errorf("edit comment: %w", err)
+	}
+	return postID, nil
+}
+
+// checkReaction accepts a Unicode reaction from the allow list or an approved
+// custom emoji, and returns it in its stored form (host lower-cased).
+func (s *Service) checkReaction(ctx context.Context, reaction string) (string, error) {
+	if valid(UnicodeReactions, reaction) {
+		return reaction, nil
+	}
+	m := customReaction.FindStringSubmatch(reaction)
+	if m == nil {
+		return "", &ErrValidation{Message: "その絵文字はリアクションに使えません。"}
+	}
+	name, host := m[1], strings.ToLower(m[2])
+	// 使用許可(ライセンスあり等)を通ったものだけ。ピッカーは選んだ時点で
+	// 許可を取りに行くので、ここで外部へ問い合わせることはない。
+	ok := false
+	if s.emojis != nil {
+		var err error
+		if ok, err = s.emojis.Approved(ctx, host, name); err != nil {
+			return "", fmt.Errorf("check emoji: %w", err)
+		}
+	}
+	if !ok {
+		return "", &ErrValidation{Message: "その絵文字はリアクションに使えません。"}
+	}
+	return ":" + name + "@" + host + ":", nil
+}
+
+// toggleReaction adds the reaction, or takes it back when the player already
+// added it. table/col are fixed identifiers from this package, never input.
+func (s *Service) toggleReaction(ctx context.Context, table, col string, targetID, playerID int64, reaction string) error {
+	tag, err := s.pool.Exec(ctx,
+		fmt.Sprintf(`DELETE FROM %s WHERE %s = $1 AND player_id = $2 AND reaction = $3`, table, col),
+		targetID, playerID, reaction)
+	if err != nil {
+		return fmt.Errorf("remove reaction: %w", err)
+	}
+	if tag.RowsAffected() > 0 {
+		return nil
+	}
+	// 新しい種類を増やすときだけ上限を見る。既にある種類に乗るのは自由。
+	var kinds int
+	var exists bool
+	if err := s.pool.QueryRow(ctx,
+		fmt.Sprintf(`SELECT COUNT(DISTINCT reaction)::int, COALESCE(bool_or(reaction = $2), false)
+		             FROM %s WHERE %s = $1`, table, col),
+		targetID, reaction).Scan(&kinds, &exists); err != nil {
+		return fmt.Errorf("count reactions: %w", err)
+	}
+	if !exists && kinds >= MaxReactionKinds {
+		return &ErrValidation{Message: fmt.Sprintf("リアクションの種類は%d個までです。", MaxReactionKinds)}
+	}
+	if _, err := s.pool.Exec(ctx,
+		fmt.Sprintf(`INSERT INTO %s (%s, player_id, reaction) VALUES ($1, $2, $3)
+		             ON CONFLICT DO NOTHING`, table, col),
+		targetID, playerID, reaction); err != nil {
+		return fmt.Errorf("add reaction: %w", err)
+	}
+	return nil
+}
+
+// ReactPost toggles a reaction on a post.
+func (s *Service) ReactPost(ctx context.Context, postID, playerID int64, reaction string) error {
+	reaction, err := s.checkReaction(ctx, reaction)
+	if err != nil {
+		return err
+	}
+	var exists bool
+	if err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM feedback_posts WHERE id = $1)`, postID).Scan(&exists); err != nil {
+		return fmt.Errorf("post: %w", err)
+	}
+	if !exists {
+		return ErrNotFound
+	}
+	return s.toggleReaction(ctx, "feedback_post_reactions", "post_id", postID, playerID, reaction)
+}
+
+// ReactComment toggles a reaction on a comment and returns its post.
+func (s *Service) ReactComment(ctx context.Context, commentID, playerID int64, reaction string) (int64, error) {
+	reaction, err := s.checkReaction(ctx, reaction)
+	if err != nil {
+		return 0, err
+	}
+	var postID int64
+	err = s.pool.QueryRow(ctx,
+		`SELECT post_id FROM feedback_comments WHERE id = $1`, commentID).Scan(&postID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, ErrCommentNotFound
+	}
+	if err != nil {
+		return 0, fmt.Errorf("comment: %w", err)
+	}
+	return postID, s.toggleReaction(ctx, "feedback_comment_reactions", "comment_id", commentID, playerID, reaction)
 }

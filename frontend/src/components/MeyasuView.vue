@@ -7,8 +7,10 @@ import {
   type Player,
   type FeedbackPost,
   type FeedbackDetail,
+  type FeedbackComment,
 } from '../api';
 import { showToast, notifyOk, notifyError, errorText } from '../toast';
+import ReactionBar from './ReactionBar.vue';
 
 // 目安箱: 不具合・要望・質問の投稿所。GitHub issueのうち、この規模で効く要素
 // (種別・状態・コメント・賛同)だけを持つ。状態を動かせるのは運営だけ。
@@ -29,6 +31,17 @@ const sort = ref<'new' | 'votes'>('new');
 const formOpen = ref(false);
 const draft = ref({ kind: 'bug', title: '', body: '' });
 const commentDraft = ref('');
+
+// 編集中の投稿・コメント。編集できるのは本人だけ(管理者でも他人の文は直さない)。
+const editingPost = ref<{ kind: string; title: string; body: string } | null>(null);
+const editingCommentId = ref<number | null>(null);
+const editCommentDraft = ref('');
+const isMine = (authorID: number | null) => authorID === props.player.id;
+function resetEditing() {
+  editingPost.value = null;
+  editingCommentId.value = null;
+  editCommentDraft.value = '';
+}
 
 const fmtDate = (iso: string) => {
   const d = new Date(iso);
@@ -51,6 +64,7 @@ async function open(pid: number) {
   try {
     detail.value = await api.feedbackGet(pid);
     commentDraft.value = '';
+    resetEditing();
   } catch (e) {
     notifyError('投稿を開けませんでした', e);
   } finally {
@@ -59,6 +73,7 @@ async function open(pid: number) {
 }
 function closeDetail() {
   detail.value = null;
+  resetEditing();
   void loadList();
 }
 
@@ -134,6 +149,48 @@ async function removeComment(cid: number) {
   });
 }
 
+function startEditPost() {
+  const p = detail.value?.post;
+  if (!p) return;
+  editingPost.value = { kind: p.kind, title: p.title, body: p.body };
+}
+
+async function saveEditPost() {
+  const d = detail.value;
+  const e = editingPost.value;
+  if (!d || !e) return;
+  await run(async () => {
+    detail.value = await api.feedbackEdit(props.player.id, d.post.id, e.kind, e.title, e.body);
+    editingPost.value = null;
+  });
+}
+
+function startEditComment(c: FeedbackComment) {
+  editingCommentId.value = c.id;
+  editCommentDraft.value = c.body;
+}
+
+async function saveEditComment(cid: number) {
+  await run(async () => {
+    detail.value = await api.feedbackEditComment(props.player.id, cid, editCommentDraft.value);
+    editingCommentId.value = null;
+  });
+}
+
+async function reactPost(reaction: string) {
+  const d = detail.value;
+  if (!d) return;
+  await run(async () => {
+    detail.value = await api.feedbackReact(props.player.id, d.post.id, reaction);
+  });
+}
+
+async function reactComment(cid: number, reaction: string) {
+  await run(async () => {
+    detail.value = await api.feedbackReactComment(props.player.id, cid, reaction);
+  });
+}
+
 const canDelete = (authorID: number | null) => isAdmin.value || authorID === props.player.id;
 </script>
 
@@ -154,17 +211,62 @@ const canDelete = (authorID: number | null) => isAdmin.value || authorID === pro
     <template v-if="detail">
       <div class="panel-white">
         <button class="btn mini" @click="closeDetail">← 一覧にもどる</button>
-        <div class="post-head">
-          <span class="badge" :class="'k-' + detail.post.kind">{{ detail.post.kind_label }}</span>
-          <span class="badge" :class="'s-' + detail.post.status">{{
-            detail.post.status_label
-          }}</span>
-          <h3 class="post-title">{{ detail.post.title }}</h3>
+        <!-- 本人の編集フォーム。状態は運営が動かすので、ここでは直せない。 -->
+        <div v-if="editingPost" class="post-form edit-form">
+          <div class="form-row">
+            <label
+              >種別
+              <select v-model="editingPost.kind">
+                <option v-for="k in FEEDBACK_KINDS" :key="k.value" :value="k.value">
+                  {{ k.label }}
+                </option>
+              </select>
+            </label>
+            <label class="grow"
+              >タイトル
+              <input v-model="editingPost.title" maxlength="40" data-test="edit-title" />
+            </label>
+          </div>
+          <textarea
+            v-model="editingPost.body"
+            rows="5"
+            maxlength="1000"
+            data-test="edit-body"
+          ></textarea>
+          <div class="actions">
+            <button
+              class="btn primary"
+              :disabled="busy || !editingPost.title.trim() || !editingPost.body.trim()"
+              data-test="edit-save"
+              @click="saveEditPost"
+            >
+              保存する
+            </button>
+            <button class="btn" :disabled="busy" @click="editingPost = null">やめる</button>
+          </div>
         </div>
-        <div class="post-meta">
-          {{ detail.post.author_name }} ／ {{ fmtDate(detail.post.created_at) }}
-        </div>
-        <div class="post-body">{{ detail.post.body }}</div>
+        <template v-else>
+          <div class="post-head">
+            <span class="badge" :class="'k-' + detail.post.kind">{{ detail.post.kind_label }}</span>
+            <span class="badge" :class="'s-' + detail.post.status">{{
+              detail.post.status_label
+            }}</span>
+            <h3 class="post-title">
+              <span class="num">#{{ detail.post.id }}</span> {{ detail.post.title }}
+            </h3>
+          </div>
+          <div class="post-meta">
+            {{ detail.post.author_name }} ／ {{ fmtDate(detail.post.created_at) }}
+            <span
+              v-if="detail.post.edited_at"
+              class="edited"
+              :title="`${fmtDate(detail.post.edited_at)}に編集`"
+              >（編集済み）</span
+            >
+          </div>
+          <div class="post-body">{{ detail.post.body }}</div>
+          <ReactionBar :reactions="detail.post.reactions" :disabled="busy" @toggle="reactPost" />
+        </template>
         <div class="post-actions">
           <button
             class="btn vote"
@@ -174,6 +276,15 @@ const canDelete = (authorID: number | null) => isAdmin.value || authorID === pro
             @click="vote(detail.post.id)"
           >
             {{ detail.post.voted ? '賛同済み' : '賛同する' }} {{ detail.post.votes }}
+          </button>
+          <button
+            v-if="isMine(detail.post.author_id) && !editingPost"
+            class="btn mini"
+            :disabled="busy"
+            data-test="edit-post"
+            @click="startEditPost"
+          >
+            編集
           </button>
           <button
             v-if="canDelete(detail.post.author_id)"
@@ -208,6 +319,18 @@ const canDelete = (authorID: number | null) => isAdmin.value || authorID === pro
             <span class="cmt-name">{{ c.author_name }}</span>
             <span v-if="c.is_staff" class="staff-tag">運営</span>
             <span class="cmt-date">{{ fmtDate(c.created_at) }}</span>
+            <span v-if="c.edited_at" class="edited" :title="`${fmtDate(c.edited_at)}に編集`"
+              >（編集済み）</span
+            >
+            <button
+              v-if="isMine(c.author_id) && editingCommentId !== c.id"
+              class="btn mini"
+              :disabled="busy"
+              data-test="edit-comment"
+              @click="startEditComment(c)"
+            >
+              編集
+            </button>
             <button
               v-if="canDelete(c.author_id)"
               class="btn mini danger"
@@ -217,7 +340,33 @@ const canDelete = (authorID: number | null) => isAdmin.value || authorID === pro
               ×
             </button>
           </div>
-          <div class="cmt-body">{{ c.body }}</div>
+          <div v-if="editingCommentId === c.id" class="cmt-form">
+            <textarea
+              v-model="editCommentDraft"
+              rows="3"
+              maxlength="500"
+              data-test="edit-comment-input"
+            ></textarea>
+            <div class="actions">
+              <button
+                class="btn primary"
+                :disabled="busy || !editCommentDraft.trim()"
+                data-test="edit-comment-save"
+                @click="saveEditComment(c.id)"
+              >
+                保存する
+              </button>
+              <button class="btn" :disabled="busy" @click="editingCommentId = null">やめる</button>
+            </div>
+          </div>
+          <template v-else>
+            <div class="cmt-body">{{ c.body }}</div>
+            <ReactionBar
+              :reactions="c.reactions"
+              :disabled="busy"
+              @toggle="(r) => reactComment(c.id, r)"
+            />
+          </template>
         </div>
         <div class="cmt-form">
           <textarea
@@ -335,7 +484,9 @@ const canDelete = (authorID: number | null) => isAdmin.value || authorID === pro
               <td>
                 <span class="badge" :class="'s-' + p.status">{{ p.status_label }}</span>
               </td>
-              <td class="l title">{{ p.title }}</td>
+              <td class="l title">
+                <span class="num">#{{ p.id }}</span> {{ p.title }}
+              </td>
               <td :class="{ voted: p.voted }">{{ p.votes }}</td>
               <td>{{ p.comments }}</td>
               <td>{{ p.author_name }}</td>
@@ -605,5 +756,27 @@ const canDelete = (authorID: number | null) => isAdmin.value || authorID === pro
 }
 .btn.danger {
   color: #c0392b;
+}
+/* issueのような通し番号。タイトルより控えめに出す。 */
+.num {
+  color: #888;
+  font-weight: normal;
+}
+.edited {
+  color: #999;
+  font-size: 11px;
+}
+.edit-form {
+  margin-top: 8px;
+}
+.edit-form textarea,
+.cmt-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+.cmt-form .actions,
+.edit-form .actions {
+  display: flex;
+  gap: 6px;
 }
 </style>

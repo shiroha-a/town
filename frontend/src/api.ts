@@ -1215,6 +1215,10 @@ export interface FeedbackPost {
   comments: number;
   created_at: string;
   updated_at: string;
+  /** 本人が書き直した時刻。未編集ならnull。 */
+  edited_at: string | null;
+  /** 詳細でだけ埋まる(一覧では空)。 */
+  reactions: FeedbackReaction[];
 }
 export interface FeedbackComment {
   id: number;
@@ -1224,6 +1228,16 @@ export interface FeedbackComment {
   is_staff: boolean;
   body: string;
   created_at: string;
+  edited_at: string | null;
+  reactions: FeedbackReaction[];
+}
+/** リアクション1種類ぶんの集計。最初に付いた順に並ぶ。 */
+export interface FeedbackReaction {
+  /** 定番のUnicode絵文字か、カスタム絵文字の :name@host: */
+  reaction: string;
+  count: number;
+  /** 自分が付けているか。 */
+  reacted: boolean;
 }
 export interface FeedbackDetail {
   post: FeedbackPost;
@@ -1234,6 +1248,8 @@ export const FEEDBACK_KINDS = [
   { value: 'request', label: '要望' },
   { value: 'question', label: '質問' },
 ];
+/** リアクションの定番(サーバーの許可リストと同じ)。これ以外はカスタム絵文字だけ。 */
+export const FEEDBACK_REACTIONS = ['👍', '👎', '😄', '🎉', '😕', '❤️', '🚀', '👀'];
 export const FEEDBACK_STATUSES = [
   { value: 'open', label: '受付' },
   { value: 'triage', label: '検討中' },
@@ -1726,6 +1742,16 @@ export const api = {
     request<{ deleted: boolean }>('DELETE', `/players/${id}/feedback/${pid}`),
   feedbackDeleteComment: (id: number, cid: number) =>
     request<{ deleted: boolean }>('DELETE', `/players/${id}/feedback/comments/${cid}`),
+  feedbackEdit: (id: number, pid: number, kind: string, title: string, body: string) =>
+    request<FeedbackDetail>('PUT', `/players/${id}/feedback/${pid}`, { kind, title, body }),
+  feedbackEditComment: (id: number, cid: number, body: string) =>
+    request<FeedbackDetail>('PUT', `/players/${id}/feedback/comments/${cid}`, { body }),
+  feedbackReact: (id: number, pid: number, reaction: string) =>
+    request<FeedbackDetail>('POST', `/players/${id}/feedback/${pid}/reactions`, { reaction }),
+  feedbackReactComment: (id: number, cid: number, reaction: string) =>
+    request<FeedbackDetail>('POST', `/players/${id}/feedback/comments/${cid}/reactions`, {
+      reaction,
+    }),
   adminFeedbackStatus: (pid: number, status: string) =>
     request<FeedbackDetail>('PUT', `/admin/feedback/${pid}/status`, { status }),
   adminMonsters: () => request<Monster[]>('GET', '/admin/monsters'),

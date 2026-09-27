@@ -173,7 +173,7 @@ func setup(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 	http.DefaultClient.Transport = sessionTransport{base: http.DefaultTransport}
 	t.Cleanup(func() { http.DefaultClient.Transport = prevTransport })
 
-	srv := httptest.NewServer(httpapi.NewServer(svc, actions, contentSvc, st, tmap, stock.New(pool), keiba.New(pool, rng.New(7)), mail.New(pool, time.UTC, 5), greeting.New(pool), attendance.New(pool, time.UTC, 5), cleague.New(pool), streetfight.New(pool), feedback.New(pool), news.New(pool), ranking.New(pool), serial.New(pool, rng.New(3)),
+	srv := httptest.NewServer(httpapi.NewServer(svc, actions, contentSvc, st, tmap, stock.New(pool), keiba.New(pool, rng.New(7)), mail.New(pool, time.UTC, 5), greeting.New(pool), attendance.New(pool, time.UTC, 5), cleague.New(pool), streetfight.New(pool), feedback.New(pool, emoji.New(pool, miauth.NewClient())), news.New(pool), ranking.New(pool), serial.New(pool, rng.New(3)),
 		httpapi.AuthDeps{
 			Pool:           pool,
 			Webhooks:       hooks,
@@ -7329,5 +7329,245 @@ func TestFeedback(t *testing.T) {
 	}
 	if left != 0 {
 		t.Errorf("残った投稿 = %d, want 0", left)
+	}
+}
+
+// feedbackDetailResp is the part of a 目安箱 post detail the edit/reaction tests read.
+type feedbackDetailResp struct {
+	Post struct {
+		ID        int64      `json:"id"`
+		Kind      string     `json:"kind"`
+		Title     string     `json:"title"`
+		Body      string     `json:"body"`
+		EditedAt  *time.Time `json:"edited_at"`
+		Reactions []struct {
+			Reaction string `json:"reaction"`
+			Count    int    `json:"count"`
+			Reacted  bool   `json:"reacted"`
+		} `json:"reactions"`
+	} `json:"post"`
+	Comments []struct {
+		ID        int64      `json:"id"`
+		Body      string     `json:"body"`
+		EditedAt  *time.Time `json:"edited_at"`
+		Reactions []struct {
+			Reaction string `json:"reaction"`
+			Count    int    `json:"count"`
+			Reacted  bool   `json:"reacted"`
+		} `json:"reactions"`
+	} `json:"comments"`
+}
+
+// 目安箱の編集: 本人だけが投稿・コメントを書き直せ、「編集済み」の印が付く。
+func TestFeedbackEdit(t *testing.T) {
+	srv, _ := setup(t)
+	admin := register(t, srv.URL, "misskey.example", "admin0") // 1人目=admin
+	alice := register(t, srv.URL, "misskey.example", "alice")
+	bob := register(t, srv.URL, "misskey.example", "bob")
+	base := func(actor int64) string { return "/api/v1/players/" + strconv.FormatInt(actor, 10) + "/feedback" }
+	decode := func(b []byte) feedbackDetailResp {
+		t.Helper()
+		var d feedbackDetailResp
+		if err := json.Unmarshal(b, &d); err != nil {
+			t.Fatalf("decode: %v (%s)", err, b)
+		}
+		return d
+	}
+
+	code, body := adminPost(t, srv.URL, base(alice.ID), alice.ID,
+		map[string]any{"kind": "bug", "title": "元のタイトル", "body": "元の本文"})
+	if code != http.StatusOK {
+		t.Fatalf("create: %d %s", code, body)
+	}
+	created := decode(body)
+	pid := created.Post.ID
+	if created.Post.EditedAt != nil {
+		t.Errorf("新規投稿の edited_at = %v, want nil", created.Post.EditedAt)
+	}
+	postPath := func(actor int64) string { return base(actor) + "/" + strconv.FormatInt(pid, 10) }
+	edit := map[string]any{"kind": "request", "title": "直したタイトル", "body": "直した本文"}
+
+	// 他人は、管理者でも書き換えられない。
+	if code, _ := adminPut(t, srv.URL, postPath(bob.ID), bob.ID, edit); code != http.StatusForbidden {
+		t.Errorf("他人の投稿の編集 = %d, want 403", code)
+	}
+	if code, _ := adminPut(t, srv.URL, postPath(admin.ID), admin.ID, edit); code != http.StatusForbidden {
+		t.Errorf("管理者による他人の投稿の編集 = %d, want 403", code)
+	}
+	// 入力の検証は新規投稿と同じ。
+	if code, _ := adminPut(t, srv.URL, postPath(alice.ID), alice.ID,
+		map[string]any{"kind": "nope", "title": "t", "body": "b"}); code != http.StatusUnprocessableEntity {
+		t.Errorf("不正な種別の編集 = %d, want 422", code)
+	}
+	if code, _ := adminPut(t, srv.URL, postPath(alice.ID), alice.ID,
+		map[string]any{"kind": "bug", "title": "  ", "body": "b"}); code != http.StatusUnprocessableEntity {
+		t.Errorf("空タイトルの編集 = %d, want 422", code)
+	}
+
+	code, body = adminPut(t, srv.URL, postPath(alice.ID), alice.ID, edit)
+	if code != http.StatusOK {
+		t.Fatalf("本人の編集 = %d %s", code, body)
+	}
+	edited := decode(body)
+	if edited.Post.Kind != "request" || edited.Post.Title != "直したタイトル" || edited.Post.Body != "直した本文" {
+		t.Errorf("編集後 = %+v", edited.Post)
+	}
+	if edited.Post.EditedAt == nil {
+		t.Fatal("編集後の edited_at = nil")
+	}
+	// 中身が同じなら印は動かない。
+	_, body = adminPut(t, srv.URL, postPath(alice.ID), alice.ID, edit)
+	if again := decode(body); again.Post.EditedAt == nil || !again.Post.EditedAt.Equal(*edited.Post.EditedAt) {
+		t.Errorf("同じ内容での再保存 edited_at = %v, want %v", again.Post.EditedAt, edited.Post.EditedAt)
+	}
+
+	// コメントも本人だけ。
+	code, body = adminPost(t, srv.URL, postPath(bob.ID)+"/comments", bob.ID, map[string]any{"body": "元のコメント"})
+	if code != http.StatusOK {
+		t.Fatalf("comment: %d %s", code, body)
+	}
+	cid := decode(body).Comments[0].ID
+	cPath := func(actor int64) string { return base(actor) + "/comments/" + strconv.FormatInt(cid, 10) }
+	if code, _ := adminPut(t, srv.URL, cPath(alice.ID), alice.ID, map[string]any{"body": "乗っ取り"}); code != http.StatusForbidden {
+		t.Errorf("他人のコメントの編集 = %d, want 403", code)
+	}
+	code, body = adminPut(t, srv.URL, cPath(bob.ID), bob.ID, map[string]any{"body": "直したコメント"})
+	if code != http.StatusOK {
+		t.Fatalf("本人のコメント編集 = %d %s", code, body)
+	}
+	if c := decode(body).Comments[0]; c.Body != "直したコメント" || c.EditedAt == nil {
+		t.Errorf("編集後のコメント = %+v", c)
+	}
+	if code, _ := adminPut(t, srv.URL, base(bob.ID)+"/comments/999999", bob.ID, map[string]any{"body": "x"}); code != http.StatusNotFound {
+		t.Errorf("無いコメントの編集 = %d, want 404", code)
+	}
+}
+
+// 目安箱のリアクション: 定番のUnicodeと使用許可済みのカスタム絵文字だけを受け、
+// 押し直すと取り消し。種類の上限を超える新しい種類は弾く。
+func TestFeedbackReactions(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	register(t, srv.URL, "misskey.example", "admin0")
+	alice := register(t, srv.URL, "misskey.example", "alice")
+	bob := register(t, srv.URL, "misskey.example", "bob")
+	base := func(actor int64) string { return "/api/v1/players/" + strconv.FormatInt(actor, 10) + "/feedback" }
+
+	code, body := adminPost(t, srv.URL, base(alice.ID), alice.ID,
+		map[string]any{"kind": "request", "title": "リアクション", "body": "ほしい"})
+	if code != http.StatusOK {
+		t.Fatalf("create: %d %s", code, body)
+	}
+	var d feedbackDetailResp
+	_ = json.Unmarshal(body, &d)
+	pid := d.Post.ID
+	// 絵文字の許可キャッシュはテストごとのリセット対象外なので、自分で入れたものを
+	// 前後で消す(前回の実行の残りで「未許可なら弾く」の確認が崩れないように)。
+	clearKusa := func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM misskey_emojis WHERE host = 'misskey.example' AND name = 'kusa'`)
+	}
+	clearKusa()
+	t.Cleanup(clearKusa)
+	react := func(actor int64, reaction string) (int, feedbackDetailResp) {
+		t.Helper()
+		code, body := adminPost(t, srv.URL, base(actor)+"/"+strconv.FormatInt(pid, 10)+"/reactions", actor,
+			map[string]any{"reaction": reaction})
+		var d feedbackDetailResp
+		if code == http.StatusOK {
+			_ = json.Unmarshal(body, &d)
+		}
+		return code, d
+	}
+	find := func(d feedbackDetailResp, reaction string) (count int, reacted bool) {
+		for _, r := range d.Post.Reactions {
+			if r.Reaction == reaction {
+				return r.Count, r.Reacted
+			}
+		}
+		return 0, false
+	}
+
+	// 2人が👍 → 2。bobがもう一度押すと取り消しで1、bobから見て未リアクション。
+	react(bob.ID, "👍")
+	_, d = react(alice.ID, "👍")
+	if n, me := find(d, "👍"); n != 2 || !me {
+		t.Errorf("👍 = %d reacted=%v, want 2 true", n, me)
+	}
+	_, d = react(bob.ID, "👍")
+	if n, me := find(d, "👍"); n != 1 || me {
+		t.Errorf("取り消し後の👍 = %d reacted=%v, want 1 false", n, me)
+	}
+
+	// 許可リストに無いUnicode、許可されていないカスタム絵文字は弾く。
+	for _, bad := range []string{"🍣", "", ":kusa@misskey.example:", "<img>"} {
+		if code, _ := react(bob.ID, bad); code != http.StatusUnprocessableEntity {
+			t.Errorf("reaction %q = %d, want 422", bad, code)
+		}
+	}
+	// 使用許可済みになれば使える。ホストは小文字にそろえて保存する。
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO misskey_emojis (host, name, url, license) VALUES ('misskey.example', 'kusa', 'https://misskey.example/kusa.png', 'CC0')`); err != nil {
+		t.Fatal(err)
+	}
+	code, d = react(bob.ID, ":kusa@MISSKEY.example:")
+	if code != http.StatusOK {
+		t.Fatalf("許可済みカスタム絵文字 = %d", code)
+	}
+	if n, me := find(d, ":kusa@misskey.example:"); n != 1 || !me {
+		t.Errorf(":kusa: = %d reacted=%v, want 1 true (reactions=%+v)", n, me, d.Post.Reactions)
+	}
+	// 並びは最初に付いた順。
+	if len(d.Post.Reactions) != 2 || d.Post.Reactions[0].Reaction != "👍" {
+		t.Errorf("並び = %+v, want 👍 が先", d.Post.Reactions)
+	}
+
+	// 種類は20まで。新しい種類は弾くが、既にある種類に乗るのはできる。
+	for i := 0; i < feedback.MaxReactionKinds-2; i++ {
+		if _, err := pool.Exec(ctx,
+			`INSERT INTO feedback_post_reactions (post_id, player_id, reaction) VALUES ($1, $2, $3)`,
+			pid, bob.ID, fmt.Sprintf("x%d", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if code, _ := react(alice.ID, "🚀"); code != http.StatusUnprocessableEntity {
+		t.Errorf("上限を超える新しい種類 = %d, want 422", code)
+	}
+	if code, _ := react(alice.ID, ":kusa@misskey.example:"); code != http.StatusOK {
+		t.Errorf("既にある種類に乗る = %d, want 200", code)
+	}
+
+	// コメントにも付く。
+	code, body = adminPost(t, srv.URL, base(bob.ID)+"/"+strconv.FormatInt(pid, 10)+"/comments", bob.ID,
+		map[string]any{"body": "賛成"})
+	if code != http.StatusOK {
+		t.Fatalf("comment: %d", code)
+	}
+	_ = json.Unmarshal(body, &d)
+	cid := d.Comments[0].ID
+	code, body = adminPost(t, srv.URL, base(alice.ID)+"/comments/"+strconv.FormatInt(cid, 10)+"/reactions", alice.ID,
+		map[string]any{"reaction": "❤️"})
+	if code != http.StatusOK {
+		t.Fatalf("コメントへのリアクション = %d %s", code, body)
+	}
+	_ = json.Unmarshal(body, &d)
+	if r := d.Comments[0].Reactions; len(r) != 1 || r[0].Reaction != "❤️" || r[0].Count != 1 || !r[0].Reacted {
+		t.Errorf("コメントのリアクション = %+v", r)
+	}
+	if code, _ := adminPost(t, srv.URL, base(alice.ID)+"/comments/999999/reactions", alice.ID,
+		map[string]any{"reaction": "❤️"}); code != http.StatusNotFound {
+		t.Errorf("無いコメントへのリアクション = %d, want 404", code)
+	}
+
+	// 投稿を消せばリアクションも残らない。
+	if code, _ := adminDelete(t, srv.URL, base(alice.ID)+"/"+strconv.FormatInt(pid, 10), alice.ID); code != http.StatusOK {
+		t.Fatalf("delete: %d", code)
+	}
+	var left int
+	if err := pool.QueryRow(ctx,
+		`SELECT (SELECT COUNT(*) FROM feedback_post_reactions) + (SELECT COUNT(*) FROM feedback_comment_reactions)`).Scan(&left); err != nil {
+		t.Fatal(err)
+	}
+	if left != 0 {
+		t.Errorf("削除後に残ったリアクション = %d, want 0", left)
 	}
 }
