@@ -81,11 +81,12 @@ type playerResp struct {
 		Condition    string   `json:"condition"`
 	} `json:"status"`
 	Items []struct {
-		ItemID        int64  `json:"item_id"`
-		Name          string `json:"name"`
-		Quantity      int    `json:"quantity"`
-		RemainingUses int    `json:"remaining_uses"`
-		Sets          int    `json:"sets"`
+		ItemID          int64      `json:"item_id"`
+		Name            string     `json:"name"`
+		Quantity        int        `json:"quantity"`
+		RemainingUses   int        `json:"remaining_uses"`
+		Sets            int        `json:"sets"`
+		NextAvailableAt *time.Time `json:"next_available_at"`
 	} `json:"items"`
 }
 
@@ -5925,6 +5926,97 @@ func TestSetShopPrice(t *testing.T) {
 // パワーを消費するアイテムは、消費ぶんを持っていないと使えない。
 // (効果の適用は[0,max]にクランプするため、判定が無いと足りないまま使えてしまう。
 // レガシー basic0.cgi:497 の「身体パワーが足りません。」に相当)
+// 満腹中は食べ物の再使用可能時刻に「満腹が解ける時刻」が入り、画面が「使う」を
+// 押せなくできること。食べ物以外と、満腹でないときは入らない。
+func TestItemNextAvailableWhileFull(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	alice := register(t, srv.URL, "misskey.example", "alice") // satiety=100(満腹)
+
+	newItem := func(name, category string) int64 {
+		var id int64
+		if err := pool.QueryRow(ctx,
+			`INSERT INTO content_items (name, category, price, stock_master, durability, effect, enabled)
+			 VALUES ($1, $2, 100, NULL, 3, '[{"op":"add_param","param":"tairyoku","amount":1}]'::jsonb, true)
+			 RETURNING id`, name, category).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		itemAction(t, srv.URL, "/buy", alice.ID, id, "buy-"+name)
+		return id
+	}
+	foodID := newItem("検証用おにぎり", "食料品")
+	toyID := newItem("検証用けん玉", "娯楽")
+
+	fetch := func() playerResp {
+		t.Helper()
+		resp, err := http.Get(srv.URL + "/api/v1/players/" + strconv.FormatInt(alice.ID, 10))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var p playerResp
+		json.NewDecoder(resp.Body).Decode(&p)
+		return p
+	}
+	nextAt := func(p playerResp, id int64) *time.Time {
+		for _, it := range p.Items {
+			if it.ItemID == id {
+				return it.NextAvailableAt
+			}
+		}
+		t.Fatalf("item %d not held", id)
+		return nil
+	}
+
+	// 満腹度が1下がる時刻(減少間隔は既定の300秒)まで食べられない。
+	var updated time.Time
+	if err := pool.QueryRow(ctx,
+		`UPDATE player_status SET satiety = 100, satiety_updated_at = now()
+		 WHERE player_id = $1 RETURNING satiety_updated_at`, alice.ID).Scan(&updated); err != nil {
+		t.Fatal(err)
+	}
+	p := fetch()
+	if at := nextAt(p, foodID); at == nil || !at.Equal(updated.Add(300*time.Second)) {
+		t.Errorf("満腹中の食べ物 next_available_at = %v, want %v", at, updated.Add(300*time.Second))
+	}
+	if at := nextAt(p, toyID); at != nil {
+		t.Errorf("食べ物以外 next_available_at = %v, want nil", at)
+	}
+	// 画面が待たせている間は、サーバーも実際に弾く。
+	if _, code := itemAction(t, srv.URL, "/use", alice.ID, foodID, "use-full"); code != http.StatusUnprocessableEntity {
+		t.Errorf("満腹中に食べられた: status=%d", code)
+	}
+
+	// 使用間隔のほうが遅く明けるなら、そちらが出る。
+	if _, err := pool.Exec(ctx, `UPDATE content_items SET use_interval_min = 15 WHERE id = $1`, foodID); err != nil {
+		t.Fatal(err)
+	}
+	var usedAt time.Time
+	if err := pool.QueryRow(ctx,
+		`UPDATE player_items SET last_used_at = now() WHERE player_id = $1 AND item_id = $2
+		 RETURNING last_used_at`, alice.ID, foodID).Scan(&usedAt); err != nil {
+		t.Fatal(err)
+	}
+	if at := nextAt(fetch(), foodID); at == nil || !at.Equal(usedAt.Add(15*time.Minute)) {
+		t.Errorf("使用間隔が遅い食べ物 next_available_at = %v, want %v", at, usedAt.Add(15*time.Minute))
+	}
+	if _, err := pool.Exec(ctx,
+		`UPDATE content_items SET use_interval_min = 0 WHERE id = $1`, foodID); err != nil {
+		t.Fatal(err)
+	}
+
+	// 満腹が解けていれば(99以下)待ち時間は無い。
+	if _, err := pool.Exec(ctx, `UPDATE player_status SET satiety = 99 WHERE player_id = $1`, alice.ID); err != nil {
+		t.Fatal(err)
+	}
+	if at := nextAt(fetch(), foodID); at != nil {
+		t.Errorf("満腹でない食べ物 next_available_at = %v, want nil", at)
+	}
+	if _, code := itemAction(t, srv.URL, "/use", alice.ID, foodID, "use-ok"); code != http.StatusOK {
+		t.Errorf("満腹でないのに食べられない: status=%d", code)
+	}
+}
+
 func TestUseItemRequiresEnoughPower(t *testing.T) {
 	srv, pool := setup(t)
 	ctx := context.Background()

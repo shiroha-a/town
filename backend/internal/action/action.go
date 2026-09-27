@@ -57,7 +57,8 @@ var statusColumns = func() map[string]string {
 const detailedParamMax = 1_000_000_000_000_000 // 1e15
 
 // satietyMax is the full 満腹度. Eating fills to this; food is blocked at full.
-const satietyMax = 100
+// 所持品一覧の再使用可能時刻も同じ値で満腹を判定するため、player側の定数に揃える。
+const satietyMax = player.SatietyMax
 
 // fillSatiety sets 満腹度 to full and restarts its decay clock.
 func fillSatiety(ctx context.Context, tx pgx.Tx, playerID int64) error {

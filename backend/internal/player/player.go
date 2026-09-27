@@ -90,7 +90,19 @@ type ItemStack struct {
 	EnablesCredit   bool           // 所持しているとクレジット払いができる(カード類)
 	Usable          bool           // 「使う」ができるか(建築許可証・乗り物などはfalse)
 	FillsSatiety    bool           // 使うと満腹度が回復する(一括使用の対象外)
-	NextAvailableAt *time.Time     // クールタイム中の再使用可能時刻(未使用/経過済みはnil)
+	NextAvailableAt *time.Time     // クールタイム中の再使用可能時刻(未使用/経過済みはnil)。食べ物は満腹が解ける時刻も含む
+}
+
+// SatietyMax is the full 満腹度. Eating fills to this; food is blocked at full.
+const SatietyMax = 100
+
+// satietyDecaySec returns the seconds per 1-point 満腹度 decay, applying the
+// same fallback as the worker's DecaySatiety.
+func satietyDecaySec(sec int) int {
+	if sec <= 0 {
+		return 300
+	}
+	return sec
 }
 
 // Status holds the current gameplay stats.
@@ -877,17 +889,29 @@ func (s *Service) Get(ctx context.Context, id int64) (*Player, error) {
 		`SELECT ci.id, ci.name, COALESCE(ci.category, ''), pi.quantity, pi.remaining_uses,
 		        CEIL(pi.remaining_uses::numeric / ci.durability)::int AS sets,
 		        ci.durability_unit, ci.effect, ci.use_interval_min, ci.calorie_g, ci.enables_credit, ci.usable,
-		        -- 一括使用の対象外を画面が数えるため。フラグの設定漏れはカテゴリで補う
-		        -- (使用時の満腹化と同じ式にしないと、対象の数と実際がずれる)。
-		        (ci.fills_satiety OR ci.category IN ('食料品', 'ファーストフード')) AS fills_satiety,
-		        CASE WHEN pi.last_used_at IS NOT NULL
-		                  AND pi.last_used_at + make_interval(mins => ci.use_interval_min) > now()
-		             THEN pi.last_used_at + make_interval(mins => ci.use_interval_min)
-		             ELSE NULL END AS next_available_at
+		        f.fills AS fills_satiety,
+		        CASE WHEN na.at > now() THEN na.at END AS next_available_at
 		 FROM player_items pi
 		 JOIN content_items ci ON ci.id = pi.item_id
+		 JOIN player_status ps ON ps.player_id = pi.player_id
+		 -- 一括使用の対象外を画面が数えるため。フラグの設定漏れはカテゴリで補う
+		 -- (使用時の満腹化と同じ式にしないと、対象の数と実際がずれる)。
+		 CROSS JOIN LATERAL (
+		   SELECT (ci.fills_satiety OR ci.category IN ('食料品', 'ファーストフード')) AS fills
+		 ) f
+		 -- 再使用できる時刻は、使用間隔が明ける時刻と、食べ物なら満腹が解ける時刻の遅いほう。
+		 -- 食料品の多くは使用間隔が0で、満腹中はサーバーが弾くのに画面では常に
+		 -- 「使う」が押せていた。満腹が解けるのはworkerが満腹度を1下げる時刻
+		 -- (satiety_updated_at + 減少間隔)。GREATESTはNULLを無視する。
+		 CROSS JOIN LATERAL (
+		   SELECT GREATEST(
+		     pi.last_used_at + make_interval(mins => ci.use_interval_min),
+		     CASE WHEN f.fills AND ps.satiety >= $2
+		          THEN ps.satiety_updated_at + make_interval(secs => $3) END
+		   ) AS at
+		 ) na
 		 WHERE pi.player_id = $1 AND pi.remaining_uses > 0
-		 ORDER BY ci.id`, id)
+		 ORDER BY ci.id`, id, SatietyMax, satietyDecaySec(cfg.SatietyDecaySec))
 	if err != nil {
 		return nil, fmt.Errorf("get items: %w", err)
 	}

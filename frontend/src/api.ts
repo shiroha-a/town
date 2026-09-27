@@ -18,6 +18,7 @@ export interface ItemStack {
   usable: boolean; // 「使う」ができるか(建築許可証・乗り物などは持つだけの品)
   fills_satiety: boolean; // 使うと満腹度が回復する(一括使用の対象外)
   // クールタイム中の再使用可能時刻(ISO8601)。使用可能ならnull。
+  // 食べ物は満腹中なら満腹が解ける時刻も含む(遅いほう)。
   next_available_at: string | null;
 }
 
