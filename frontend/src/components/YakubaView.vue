@@ -65,6 +65,11 @@ const weightKg = computed(() =>
 const joinedAt = computed(
   () => roster.value.find((m) => m.id === selectedId.value)?.created_at ?? '',
 );
+// 見出しの「○○さんが街に来てから」は見ている本人の話。名鑑で選んだ住民の
+// 入居日(joinedAt)を使うと、名前は自分のまま日数だけ他人のものになっていた。
+const myJoinedAt = computed(
+  () => roster.value.find((m) => m.id === props.player.id)?.created_at ?? '',
+);
 
 const zunou = [
   { label: '国語', key: 'kokugo' },
@@ -177,7 +182,7 @@ onMounted(async () => {
       <div class="lead">
         役場です。住民名鑑・街のニュース・各種ランキングを見ることができます。<br />
         ●{{ player.display_name }}さんが街に来てから{{
-          joinedAt ? daysSince(joinedAt) : 0
+          myJoinedAt ? daysSince(myJoinedAt) : 0
         }}日経ちました。
       </div>
       <div class="title">役　場</div>
