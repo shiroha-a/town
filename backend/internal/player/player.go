@@ -91,6 +91,26 @@ type ItemStack struct {
 	Usable          bool           // 「使う」ができるか(建築許可証・乗り物などはfalse)
 	FillsSatiety    bool           // 使うと満腹度が回復する(一括使用の対象外)
 	NextAvailableAt *time.Time     // クールタイム中の再使用可能時刻(未使用/経過済みはnil)。食べ物は満腹が解ける時刻も含む
+	BulkIncluded    bool           // 一括使用の対象にするか(画面のチェック。既定でtrue)
+}
+
+// ErrItemNotHeld means the player does not hold that item.
+var ErrItemNotHeld = errors.New("item not held")
+
+// SetItemBulk sets whether a held item is used by the bulk use (目安箱#14)。
+// 画面のチェックの保存先。使い切って行が消えると既定(チェックあり)に戻る。
+func (s *Service) SetItemBulk(ctx context.Context, playerID, itemID int64, included bool) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE player_items SET bulk_excluded = $3, updated_at = now()
+		 WHERE player_id = $1 AND item_id = $2 AND remaining_uses > 0`,
+		playerID, itemID, !included)
+	if err != nil {
+		return fmt.Errorf("set item bulk: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrItemNotHeld
+	}
+	return nil
 }
 
 // SatietyMax is the full 満腹度. Eating fills to this; food is blocked at full.
@@ -910,7 +930,8 @@ func (s *Service) Get(ctx context.Context, id int64) (*Player, error) {
 		        CEIL(pi.remaining_uses::numeric / ci.durability)::int AS sets,
 		        ci.durability_unit, ci.effect, ci.use_interval_min, ci.calorie_g, ci.enables_credit, ci.usable,
 		        f.fills AS fills_satiety,
-		        CASE WHEN na.at > now() THEN na.at END AS next_available_at
+		        CASE WHEN na.at > now() THEN na.at END AS next_available_at,
+		        NOT pi.bulk_excluded
 		 FROM player_items pi
 		 JOIN content_items ci ON ci.id = pi.item_id
 		 JOIN player_status ps ON ps.player_id = pi.player_id
@@ -941,7 +962,7 @@ func (s *Service) Get(ctx context.Context, id int64) (*Player, error) {
 			it      ItemStack
 			effJSON []byte
 		)
-		if err := items.Scan(&it.ItemID, &it.Name, &it.Category, &it.Quantity, &it.RemainingUses, &it.Sets, &it.DurabilityUnit, &effJSON, &it.IntervalMin, &it.CalorieG, &it.EnablesCredit, &it.Usable, &it.FillsSatiety, &it.NextAvailableAt); err != nil {
+		if err := items.Scan(&it.ItemID, &it.Name, &it.Category, &it.Quantity, &it.RemainingUses, &it.Sets, &it.DurabilityUnit, &effJSON, &it.IntervalMin, &it.CalorieG, &it.EnablesCredit, &it.Usable, &it.FillsSatiety, &it.NextAvailableAt, &it.BulkIncluded); err != nil {
 			return nil, fmt.Errorf("scan item: %w", err)
 		}
 		if debugNoCd {

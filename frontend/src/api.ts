@@ -16,7 +16,8 @@ export interface ItemStack {
   special: string; // 特殊効果の説明(体重/身長/病気。無ければ空)
   enables_credit: boolean; // 所持しているとクレジット払いができる(カード類)
   usable: boolean; // 「使う」ができるか(建築許可証・乗り物などは持つだけの品)
-  fills_satiety: boolean; // 使うと満腹度が回復する(一括使用の対象外)
+  fills_satiety: boolean; // 使うと満腹度が回復する(一括使用では一番上の1つだけ)
+  bulk_included: boolean; // 一括使用の対象にするか(チェック。外した状態はサーバーが覚える)
   // クールタイム中の再使用可能時刻(ISO8601)。使用可能ならnull。
   // 食べ物は満腹中なら満腹が解ける時刻も含む(遅いほう)。
   next_available_at: string | null;
@@ -1904,6 +1905,8 @@ export const api = {
       item_id: itemId,
       idempotency_key: newIdempotencyKey(),
     }),
+  setItemBulk: (id: number, itemId: number, included: boolean) =>
+    request<Player>('PUT', `/players/${id}/items/${itemId}/bulk`, { included }),
   useAll: (id: number) =>
     request<UseAllResp>('POST', `/players/${id}/use/all`, {
       idempotency_key: newIdempotencyKey(),

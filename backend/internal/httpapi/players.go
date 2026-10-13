@@ -61,6 +61,7 @@ type itemResp struct {
 	EnablesCredit   bool           `json:"enables_credit"`
 	Usable          bool           `json:"usable"`
 	FillsSatiety    bool           `json:"fills_satiety"`
+	BulkIncluded    bool           `json:"bulk_included"` // 一括使用の対象にするか(画面のチェック)
 	NextAvailableAt *time.Time     `json:"next_available_at"`
 }
 
@@ -136,6 +137,7 @@ func toResp(p *player.Player) playerResp {
 			Usable:          it.Usable,
 			FillsSatiety:    it.FillsSatiety,
 			NextAvailableAt: it.NextAvailableAt,
+			BulkIncluded:    it.BulkIncluded,
 		})
 	}
 	return playerResp{
