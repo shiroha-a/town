@@ -81,14 +81,39 @@ const cooldowns = computed<Record<number, Cooldown>>(() => {
   return map;
 });
 
-// 一括使用の対象。使える品(持つだけの品でない・クールタイムが明けている)のうち、
-// 満腹度が回復する品は外す。判定はサーバー側と同じ条件だが、こちらは点数を出すため
-// だけのもので、実際に何が使えたかは応答で分かる。
-const bulkTargets = computed(() =>
-  props.player.items.filter(
-    (it) => it.usable && !it.fills_satiety && !cooldowns.value[it.item_id]?.active,
-  ),
-);
+// 一括使用の対象(目安箱#14)。チェックが入っていて、使える品(持つだけの品でない・
+// クールタイムが明けている)。食べ物は画面で一番上の1つだけ(満腹中は待ち扱いで外れる)。
+// 判定はサーバー側と同じ条件だが、こちらは点数を出すためだけのもので、
+// 実際に何が使えたかは応答で分かる。並びを画面と揃えるため grouped から数える。
+const bulkTargets = computed(() => {
+  let food = false;
+  return grouped.value
+    .flatMap(([, list]) => list)
+    .filter((it) => {
+      if (!it.usable || !it.bulk_included || cooldowns.value[it.item_id]?.active) return false;
+      if (!it.fills_satiety) return true;
+      if (food) return false;
+      food = true;
+      return true;
+    });
+});
+
+// チェックの付け外し。サーバーに覚えさせ、次に開いたときも外れたままにする。
+async function setBulk(it: ItemStack, included: boolean) {
+  busy.value = true;
+  try {
+    emit('update', await api.setItemBulk(props.player.id, it.item_id, included));
+  } catch (e) {
+    showToast({
+      variant: 'error',
+      title: 'チェックを保存できませんでした',
+      lines: [errorText(e)],
+      icon: 'item',
+    });
+  } finally {
+    busy.value = false;
+  }
+}
 // まとめて耐久を減らす操作なので、誤爆しないよう確認を1段挟む。
 const confirmBulk = ref(false);
 
@@ -179,7 +204,7 @@ async function use(it: ItemStack) {
             まとめて使う（{{ bulkTargets.length }}点）
           </button>
           <span class="bulk-hint">
-            いま使える持ち物を1回ずつ使います。食べ物（満腹度が回復する品）は使いません。
+            チェックを入れた持ち物のうち、いま使えるものを1回ずつ使います。食べ物は一番上の1つだけ食べます。
           </span>
         </template>
         <template v-else>
@@ -216,7 +241,19 @@ async function use(it: ItemStack) {
                 <tr :data-test="`item-${it.item_id}`">
                   <!-- 効果行がある品は、品名/使用可/使うを2行にまたがせてどの品の効果か分かるようにする
                      (レガシー depart.cgi の rowspan=2 と同じ)。 -->
-                  <td class="l" :rowspan="it.special ? 2 : 1">○{{ it.name }}</td>
+                  <!-- 使える品は品名の前にまとめて使うかのチェック。持つだけの品は対象外なので○のまま。 -->
+                  <td class="l" :rowspan="it.special ? 2 : 1">
+                    <label v-if="it.usable" class="bulk-check" title="まとめて使う対象にする">
+                      <input
+                        type="checkbox"
+                        :checked="it.bulk_included"
+                        :disabled="busy"
+                        :data-test="`bulk-${it.item_id}`"
+                        @change="setBulk(it, ($event.target as HTMLInputElement).checked)"
+                      />{{ it.name }}
+                    </label>
+                    <template v-else>○{{ it.name }}</template>
+                  </td>
                   <td
                     class="cooldown"
                     :class="{
@@ -370,6 +407,15 @@ async function use(it: ItemStack) {
 .item-table th.l,
 .item-table td.l {
   text-align: left;
+}
+.bulk-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  cursor: pointer;
+}
+.bulk-check input {
+  margin: 0;
 }
 .item-table th.p,
 .item-table td.p {

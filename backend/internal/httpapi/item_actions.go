@@ -71,7 +71,42 @@ type useAllResp struct {
 	UseAllResult action.UseAllResult `json:"use_all_result"`
 }
 
-// useAll uses every held item once (満腹度が回復する品を除く).
+// itemBulk saves the bulk-use checkbox of one held item (目安箱#14).
+func (s *Server) itemBulk(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	itemID, err := strconv.ParseInt(r.PathValue("item"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid item")
+		return
+	}
+	var req struct {
+		Included bool `json:"included"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if err := s.players.SetItemBulk(r.Context(), id, itemID, req.Included); err != nil {
+		if errors.Is(err, player.ErrItemNotHeld) {
+			writeError(w, http.StatusNotFound, "そのアイテムを持っていません。")
+			return
+		}
+		writeInternal(w, r, err)
+		return
+	}
+	p, err := s.players.Get(r.Context(), id)
+	if err != nil {
+		writeInternal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toResp(p))
+}
+
+// useAll uses every checked item once (食べ物は一番上の1つだけ).
 func (s *Server) useAll(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {

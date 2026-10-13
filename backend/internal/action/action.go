@@ -2236,9 +2236,9 @@ type SkippedItem struct {
 	Reason string `json:"reason"`
 }
 
-// DoUseAll uses every held item once, skipping the ones that cannot be used
-// right now. Items that fill 満腹度 are left alone: they are worth eating
-// deliberately, and using them while full just fails.
+// DoUseAll uses every checked item once (the bulk-use checkbox, bulk_excluded),
+// skipping the ones that cannot be used right now. Of the foods only the top one
+// (in the item screen's order) is eaten, and none while full (目安箱#14)。
 //
 // 途中で失敗しても止めない。パワー不足の品が1つあるだけで何も使えないのは不便な
 // ので、使えたものは使い、飛ばした品は理由を添えて返す。
@@ -2250,30 +2250,53 @@ func (s *Service) DoUseAll(ctx context.Context, playerID int64, idempotencyKey s
 			name    string
 			effJSON []byte
 			durUnit string
+			food    bool
 		}
-		// 満腹判定の式は loadItemUse と同じ(フラグの設定漏れをカテゴリで補う)。
-		// クールタイム中の品はここで落とす。順序はitem_id昇順で固定する:
-		// パワーを消費する品が混ざると先に使ったぶんで後の品が使えなくなるため、
-		// 実行のたびに結果が変わらないようにする。
+		noCd := s.settings.Get().DebugNoCooldown
+		// 対象は画面でチェックが入っている(bulk_excluded でない)品。満腹判定の式は
+		// loadItemUse と同じ(フラグの設定漏れをカテゴリで補う)。クールタイム中の品と、
+		// 満腹中の食べ物はここで落とす(どちらも「まだ使えない」で、理由には出さない)。
+		//
+		// 並びは画面と同じ: カテゴリ(空は「その他」)ごとに、そのカテゴリで最小の
+		// item_id順、カテゴリ内はitem_id順。食べ物は「一番上」の1つだけを使うので、
+		// 画面とサーバーで一番上が食い違わないようにする。並びを固定するのは、
+		// パワーを消費する品が混ざると先に使ったぶんで後の品が使えなくなるためでもある。
 		rows, err := tx.Query(ctx, `
-			SELECT pi.item_id, ci.name, ci.effect, ci.durability_unit
-			FROM player_items pi JOIN content_items ci ON ci.id = pi.item_id
-			WHERE pi.player_id = $1
-			  AND pi.remaining_uses > 0
-			  AND ci.usable
-			  AND NOT (ci.fills_satiety OR ci.category IN ('食料品', 'ファーストフード'))
-			  AND ($2 OR ci.use_interval_min <= 0 OR pi.last_used_at IS NULL
-			       OR pi.last_used_at + make_interval(mins => ci.use_interval_min) <= now())
-			ORDER BY pi.item_id`, playerID, s.settings.Get().DebugNoCooldown)
+			WITH held AS (
+				SELECT pi.item_id, pi.bulk_excluded, pi.last_used_at,
+				       ci.name, ci.effect, ci.durability_unit, ci.usable, ci.use_interval_min,
+				       (ci.fills_satiety OR ci.category IN ('食料品', 'ファーストフード')) AS food,
+				       MIN(pi.item_id) OVER (
+				         PARTITION BY COALESCE(NULLIF(ci.category, ''), 'その他')) AS cat_order
+				FROM player_items pi JOIN content_items ci ON ci.id = pi.item_id
+				WHERE pi.player_id = $1 AND pi.remaining_uses > 0
+			)
+			SELECT h.item_id, h.name, h.effect, h.durability_unit, h.food
+			FROM held h, player_status ps
+			WHERE ps.player_id = $1
+			  AND h.usable
+			  AND NOT h.bulk_excluded
+			  AND ($2 OR h.use_interval_min <= 0 OR h.last_used_at IS NULL
+			       OR h.last_used_at + make_interval(mins => h.use_interval_min) <= now())
+			  AND ($2 OR NOT h.food OR ps.satiety < $3)
+			ORDER BY h.cat_order, h.item_id`, playerID, noCd, satietyMax)
 		if err != nil {
 			return fmt.Errorf("list usable items: %w", err)
 		}
 		var cands []candidate
+		ateFood := false
 		for rows.Next() {
 			var c candidate
-			if err := rows.Scan(&c.id, &c.name, &c.effJSON, &c.durUnit); err != nil {
+			if err := rows.Scan(&c.id, &c.name, &c.effJSON, &c.durUnit, &c.food); err != nil {
 				rows.Close()
 				return fmt.Errorf("scan usable item: %w", err)
+			}
+			// 食べ物は一番上の1つだけ。食べれば満腹になり、2つ目以降はどのみち食べられない。
+			if c.food {
+				if ateFood {
+					continue
+				}
+				ateFood = true
 			}
 			cands = append(cands, c)
 		}
@@ -2307,6 +2330,11 @@ func (s *Service) DoUseAll(ctx context.Context, playerID int64, idempotencyKey s
 			}
 			if err := s.applyItemUse(ctx, tx, playerID, c.id, eff, state); err != nil {
 				return err
+			}
+			if c.food {
+				if err := fillSatiety(ctx, tx, playerID); err != nil {
+					return err
+				}
 			}
 			result.Used = append(result.Used, c.name)
 		}

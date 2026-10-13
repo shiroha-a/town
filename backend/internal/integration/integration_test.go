@@ -89,6 +89,7 @@ type playerResp struct {
 		RemainingUses   int        `json:"remaining_uses"`
 		Sets            int        `json:"sets"`
 		NextAvailableAt *time.Time `json:"next_available_at"`
+		BulkIncluded    bool       `json:"bulk_included"`
 	} `json:"items"`
 }
 
@@ -7569,5 +7570,120 @@ func TestFeedbackReactions(t *testing.T) {
 	}
 	if left != 0 {
 		t.Errorf("削除後に残ったリアクション = %d, want 0", left)
+	}
+}
+
+// 一括使用はチェックの入った品だけを使い、食べ物は画面で一番上の1つだけ食べる
+// (目安箱#14)。チェックを外した状態はサーバーに残り、新しく買った品はチェックありで始まる。
+func TestUseAllChecked(t *testing.T) {
+	srv, pool := setup(t)
+	ctx := context.Background()
+	alice := register(t, srv.URL, "misskey.example", "alice")
+
+	newItem := func(name, category string, fills bool) int64 {
+		t.Helper()
+		var id int64
+		if err := pool.QueryRow(ctx,
+			`INSERT INTO content_items (name, category, price, stock_master, durability, effect, enabled, fills_satiety)
+			 VALUES ($1, $2, 100, NULL, 3, '[{"op":"add_param","param":"tairyoku","amount":1}]'::jsonb, true, $3)
+			 RETURNING id`, name, category, fills).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	// IDの順と画面の並びをわざとずらす。画面はカテゴリごとにまとまり、カテゴリの順は
+	// その中で最小のIDの順なので、並びは「検証X(x0, foodB) → 食料品(foodA) → 検証Y(y)」。
+	// 一番上の食べ物は foodB(IDは foodA より大きい)。
+	x0 := newItem("検証X0", "検証X", false)
+	foodA := newItem("検証おにぎりA", "食料品", false) // カテゴリから食べ物と判定
+	foodB := newItem("検証弁当B", "検証X", true)    // フラグで食べ物
+	y := newItem("検証Y", "検証Y", false)
+	for i, id := range []int64{x0, foodA, foodB, y} {
+		if _, c := itemAction(t, srv.URL, "/buy", alice.ID, id, "uc-buy-"+strconv.Itoa(i)); c != http.StatusOK {
+			t.Fatalf("buy %d: status %d", id, c)
+		}
+	}
+	included := func(p playerResp, id int64) bool {
+		t.Helper()
+		for _, it := range p.Items {
+			if it.ItemID == id {
+				return it.BulkIncluded
+			}
+		}
+		t.Fatalf("item %d not held", id)
+		return false
+	}
+	setBulk := func(id int64, on bool) (int, playerResp) {
+		t.Helper()
+		code, body := adminPut(t, srv.URL, "/api/v1/players/"+strconv.FormatInt(alice.ID, 10)+
+			"/items/"+strconv.FormatInt(id, 10)+"/bulk", alice.ID, map[string]any{"included": on})
+		var p playerResp
+		_ = json.Unmarshal(body, &p)
+		return code, p
+	}
+
+	// 買ったばかりの品はチェックあり。x0 を外すと、その印が返る。
+	code, p := setBulk(x0, false)
+	if code != http.StatusOK {
+		t.Fatalf("チェックを外す: status %d", code)
+	}
+	if included(p, x0) || !included(p, foodA) || !included(p, foodB) || !included(p, y) {
+		t.Errorf("チェック = x0:%v foodA:%v foodB:%v y:%v, want false true true true",
+			included(p, x0), included(p, foodA), included(p, foodB), included(p, y))
+	}
+	if code, _ := setBulk(999999, false); code != http.StatusNotFound {
+		t.Errorf("持っていない品のチェック = %d, want 404", code)
+	}
+
+	// 満腹では食べ物を使わない(待ち時間と同じ扱いで、理由にも出さない)。
+	if _, err := pool.Exec(ctx, `UPDATE player_status SET satiety = 100 WHERE player_id = $1`, alice.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, res, code := useAllItems(t, srv.URL, alice.ID, "uc-full")
+	if code != http.StatusOK {
+		t.Fatalf("満腹での一括使用 status = %d", code)
+	}
+	if got := strings.Join(res.Used, ","); got != "検証Y" {
+		t.Errorf("満腹での used = %q, want \"検証Y\"", got)
+	}
+	if len(res.Skipped) != 0 {
+		t.Errorf("満腹の食べ物が理由に出ている: %+v", res.Skipped)
+	}
+
+	// 空腹なら、一番上の食べ物(foodB)だけを食べて満腹になる。外した x0 は使わない。
+	if _, err := pool.Exec(ctx, `UPDATE player_status SET satiety = 50 WHERE player_id = $1`, alice.ID); err != nil {
+		t.Fatal(err)
+	}
+	p, res, code = useAllItems(t, srv.URL, alice.ID, "uc-hungry")
+	if code != http.StatusOK {
+		t.Fatalf("空腹での一括使用 status = %d", code)
+	}
+	if got := strings.Join(res.Used, ","); got != "検証弁当B,検証Y" {
+		t.Errorf("空腹での used = %q, want \"検証弁当B,検証Y\"", got)
+	}
+	if p.Status.Satiety != 100 {
+		t.Errorf("食べたあとの満腹度 = %d, want 100", p.Status.Satiety)
+	}
+	if p.itemRemaining(foodA) != 3 || p.itemRemaining(x0) != 3 {
+		t.Errorf("使われないはずの品が減った: foodA=%d x0=%d, want 3 3", p.itemRemaining(foodA), p.itemRemaining(x0))
+	}
+
+	// 外したチェックは記憶される(買い足しても外れたまま)。新しく買った品はチェックあり。
+	z := newItem("検証Z", "検証Y", false)
+	itemAction(t, srv.URL, "/buy", alice.ID, x0, "uc-rebuy-x0")
+	p, _ = itemAction(t, srv.URL, "/buy", alice.ID, z, "uc-buy-z")
+	if included(p, x0) {
+		t.Error("買い足した x0 のチェックが戻った, want 外れたまま")
+	}
+	if !included(p, z) {
+		t.Error("新しく買った品のチェック = false, want true")
+	}
+	// チェックを戻せば使う。
+	if code, _ := setBulk(x0, true); code != http.StatusOK {
+		t.Fatalf("チェックを戻す: status %d", code)
+	}
+	_, res, _ = useAllItems(t, srv.URL, alice.ID, "uc-again")
+	if !strings.Contains(strings.Join(res.Used, ","), "検証X0") {
+		t.Errorf("チェックを戻した x0 が使われない: %v", res.Used)
 	}
 }
