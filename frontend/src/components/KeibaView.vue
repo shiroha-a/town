@@ -31,6 +31,8 @@ let pendingPlayer: Player | null = null;
 const totalTickets = computed(() => tickets.reduce((a, b) => a + b, 0));
 const horsesBet = computed(() => tickets.filter((t) => t > 0).length);
 const totalCost = computed(() => totalTickets.value * 500);
+// 勝ち馬に賭けていたか。結果表示で「的中」を添えるのに使う
+const hit = computed(() => !!result.value && (tickets[result.value.winner_index] ?? 0) > 0);
 
 async function loadRace() {
   try {
@@ -147,7 +149,12 @@ function retry() {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(h, i) in lineup" :key="i" :data-test="`horse-${i}`">
+              <tr
+                v-for="(h, i) in lineup"
+                :key="i"
+                :class="{ bet: tickets[i] > 0 }"
+                :data-test="`horse-${i}`"
+              >
                 <td>{{ i + 1 }}</td>
                 <td class="l">
                   <img :src="`/img/svg/uma/${h.img}.svg`" class="uma-ico" :alt="h.name" />{{
@@ -174,7 +181,13 @@ function retry() {
         <div v-else class="panel-white">
           <h3>レース</h3>
           <div class="track">
-            <div v-for="(h, i) in result?.lineup ?? []" :key="i" class="lane">
+            <div
+              v-for="(h, i) in result?.lineup ?? []"
+              :key="i"
+              class="lane"
+              :class="{ bet: tickets[i] > 0 }"
+              :data-test="`lane-${i}`"
+            >
               <span class="lane-no">{{ i + 1 }}</span>
               <div class="lane-track">
                 <img
@@ -185,11 +198,16 @@ function retry() {
                 />
               </div>
               <span class="goal">🏁</span>
+              <span class="lane-bet">{{ tickets[i] > 0 ? tickets[i] + '枚' : '' }}</span>
             </div>
           </div>
           <div v-if="mode === 'result' && result" class="race-result">
             <div class="winner">
-              {{ result.winner_index + 1 }}枠 {{ result.winner_name }} ゴール！
+              {{ result.winner_index + 1 }}枠 {{ result.winner_name }} ゴール！<span
+                v-if="hit"
+                class="hit"
+                >的中</span
+              >
             </div>
             <div>購入金額: {{ yen(result.invested) }}円</div>
             <div :class="{ up: result.payout > 0 }">
@@ -329,6 +347,9 @@ function retry() {
   vertical-align: middle;
   margin-right: 4px;
 }
+.uma-table tr.bet td {
+  background: #fff3c4;
+}
 .uma-table td.odds {
   color: #cc3300;
   font-weight: bold;
@@ -373,6 +394,33 @@ function retry() {
 }
 .goal {
   font-size: 14px;
+}
+/* 賭けた馬のレーンは色を変え、右端に枚数を出す。賭けていないレーンも
+   幅をそろえるため、枚数の欄は常に置いておく */
+.lane.bet {
+  background: #fff3c4;
+}
+.lane.bet .lane-track {
+  border-color: #e0b000;
+}
+.lane.bet .lane-no {
+  color: #996600;
+  font-weight: bold;
+}
+.lane-bet {
+  width: 40px;
+  font-size: 11px;
+  color: #996600;
+  font-weight: bold;
+  text-align: right;
+}
+.hit {
+  margin-left: 8px;
+  padding: 1px 6px;
+  background: #cc3300;
+  color: #fff;
+  font-size: 12px;
+  border-radius: 3px;
 }
 .race-result {
   margin-top: 8px;
